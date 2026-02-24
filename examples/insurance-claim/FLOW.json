@@ -1,0 +1,104 @@
+{
+  "id": "claim_analysis",
+  "name": "Insurance Claim Analysis",
+  "version": "1.0",
+  "description": "Analyzes an insurance claim against policy terms and generates a coverage recommendation",
+  "skills": ["property-insurance-basics", "claims-precedents"],
+  "budget": {
+    "maxTurns": 350,
+    "maxBudgetUsd": 35.00,
+    "timeoutMs": 900000
+  },
+  "nodes": [
+    {
+      "id": "parse_claim",
+      "type": "agent",
+      "name": "Parse Claim Documents",
+      "instructions": "Read the claim file (incident report, photos, and policy document). Extract: date of loss, type of loss (fire, water, wind, theft, liability), description of damage, claimant info, property details, reported dollar amount. For photos: describe visible damage, assess severity. Write structured claim summary.",
+      "config": {
+        "inputs": ["incident_report.pdf", "photos.zip", "policy.pdf"],
+        "outputs": ["claim_parsed.json", "damage_assessment.json"],
+        "skills": [],
+        "budget": { "maxTurns": 30, "maxBudgetUsd": 4.00 },
+        "estimatedDuration": "1min"
+      },
+      "children": []
+    },
+    {
+      "id": "coverage_check",
+      "type": "agent",
+      "name": "Coverage & Precedent Research",
+      "instructions": "Coordinate 2 parallel research tracks: policy coverage analysis and comparable claims research.",
+      "config": {
+        "inputs": ["claim_parsed.json", "damage_assessment.json", "policy.pdf"],
+        "outputs": ["coverage_analysis.json", "comparable_claims.json"],
+        "skills": ["property-insurance-basics", "claims-precedents"],
+        "budget": { "maxTurns": 80, "maxBudgetUsd": 10.00 },
+        "estimatedDuration": "90s"
+      },
+      "children": [
+        {
+          "id": "analyze_coverage",
+          "type": "agent",
+          "name": "Policy Coverage Analyst",
+          "instructions": "Read the policy document. For each claimed damage item: (1) Identify the applicable coverage section, (2) Check for exclusions, (3) Identify deductible amount, (4) Check sublimits, (5) Determine if the loss type triggers any endorsements. Flag any coverage gaps or potential denial grounds.",
+          "config": {
+            "inputs": ["claim_parsed.json", "policy.pdf"],
+            "outputs": ["coverage_analysis.json"],
+            "skills": ["property-insurance-basics"],
+            "budget": { "maxTurns": 35, "maxBudgetUsd": 4.00 }
+          },
+          "children": []
+        },
+        {
+          "id": "research_comparable",
+          "type": "agent",
+          "name": "Comparable Claims Researcher",
+          "instructions": "Using the claims-precedents skill references, find 3-5 comparable claims by loss type, dollar range, and property type. For each: outcome (paid, denied, partial), amount paid, key factors in decision. Focus on claims in the same state/jurisdiction if possible.",
+          "config": {
+            "inputs": ["claim_parsed.json"],
+            "outputs": ["comparable_claims.json"],
+            "skills": ["claims-precedents"],
+            "budget": { "maxTurns": 30, "maxBudgetUsd": 3.00 }
+          },
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "adjuster_review",
+      "type": "checkpoint",
+      "name": "Adjuster Review",
+      "instructions": "Present coverage analysis and comparable claims to the adjuster. For items with coverage questions, ask: (1) Has the insured provided additional documentation? (2) Should we request an independent inspection? (3) Any mitigating circumstances not in the file?",
+      "config": {
+        "inputs": ["coverage_analysis.json", "comparable_claims.json"],
+        "outputs": ["adjuster_input.json"],
+        "skills": [],
+        "presentation": {
+          "title": "Claim Analysis Complete",
+          "sections": ["coverage_summary", "coverage_questions", "comparable_claims"]
+        }
+      },
+      "children": []
+    },
+    {
+      "id": "generate_recommendation",
+      "type": "agent",
+      "name": "Generate Recommendation",
+      "instructions": "Using all analysis artifacts and adjuster input, generate: (1) Coverage determination letter (approve, deny, partial with explanation), (2) Reserve recommendation with line-item breakdown, (3) If partial/deny: specific policy language citations supporting the decision.",
+      "config": {
+        "inputs": ["claim_parsed.json", "coverage_analysis.json", "comparable_claims.json", "adjuster_input.json"],
+        "outputs": ["determination_letter.md", "reserve_recommendation.json", "decision_rationale.md"],
+        "skills": ["property-insurance-basics"],
+        "budget": { "maxTurns": 80, "maxBudgetUsd": 10.00 },
+        "estimatedDuration": "2min"
+      },
+      "children": []
+    }
+  ],
+  "edges": [
+    { "from": "parse_claim", "to": "coverage_check" },
+    { "from": "coverage_check", "to": "adjuster_review" },
+    { "from": "adjuster_review", "to": "generate_recommendation" }
+  ]
+}

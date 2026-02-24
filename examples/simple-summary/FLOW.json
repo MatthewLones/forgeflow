@@ -1,0 +1,45 @@
+{
+  "id": "simple_summary",
+  "name": "Simple Document Summary",
+  "version": "1.0",
+  "description": "Reads a document and produces a structured summary — the simplest possible FlowForge flow",
+  "skills": [],
+  "budget": {
+    "maxTurns": 60,
+    "maxBudgetUsd": 8.00,
+    "timeoutMs": 300000
+  },
+  "nodes": [
+    {
+      "id": "extract_content",
+      "type": "agent",
+      "name": "Extract Document Content",
+      "instructions": "Read the input document. Extract the title, author (if present), date, and all section headings with their content. Write a structured JSON file with the extracted content.",
+      "config": {
+        "inputs": ["document.pdf"],
+        "outputs": ["content_extracted.json"],
+        "skills": [],
+        "budget": { "maxTurns": 25, "maxBudgetUsd": 3.00 },
+        "estimatedDuration": "30s"
+      },
+      "children": []
+    },
+    {
+      "id": "generate_summary",
+      "type": "agent",
+      "name": "Generate Summary",
+      "instructions": "Using the extracted content, produce a 1-page summary in markdown. Include: a one-paragraph overview, a bullet list of key points (max 5), and a 'Notable Details' section for anything surprising or important.",
+      "config": {
+        "inputs": ["content_extracted.json"],
+        "outputs": ["summary.md"],
+        "skills": [],
+        "budget": { "maxTurns": 20, "maxBudgetUsd": 2.00 },
+        "estimatedDuration": "20s"
+      },
+      "children": []
+    }
+  ],
+  "edges": [
+    { "from": "extract_content", "to": "generate_summary" }
+  ]
+}

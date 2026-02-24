@@ -1,0 +1,22 @@
+{
+  "name": "@flowforge/parser",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "dev": "tsup src/index.ts --format esm --dts --watch"
+  },
+  "files": ["dist"],
+  "dependencies": {
+    "@flowforge/types": "workspace:*",
+    "zod": "^3.24.0"
+  }
+}
