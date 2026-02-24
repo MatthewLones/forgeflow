@@ -33,20 +33,47 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@25.3.0)
 
+  packages/compiler:
+    dependencies:
+      '@forgeflow/types':
+        specifier: workspace:*
+        version: link:../types
+
+  packages/engine:
+    dependencies:
+      '@forgeflow/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      '@forgeflow/state-store':
+        specifier: workspace:*
+        version: link:../state-store
+      '@forgeflow/types':
+        specifier: workspace:*
+        version: link:../types
+      '@forgeflow/validator':
+        specifier: workspace:*
+        version: link:../validator
+
   packages/parser:
     dependencies:
-      '@flowforge/types':
+      '@forgeflow/types':
         specifier: workspace:*
         version: link:../types
       zod:
         specifier: ^3.24.0
         version: 3.25.76
 
+  packages/state-store:
+    dependencies:
+      '@forgeflow/types':
+        specifier: workspace:*
+        version: link:../types
+
   packages/types: {}
 
   packages/validator:
     dependencies:
-      '@flowforge/types':
+      '@forgeflow/types':
         specifier: workspace:*
         version: link:../types
 

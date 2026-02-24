@@ -1,4 +1,4 @@
-import type { FlowEdge } from '@flowforge/types';
+import type { FlowEdge } from '@forgeflow/types';
 
 export interface TopologicalSortResult {
   sorted: string[];

@@ -1,5 +1,5 @@
 {
-  "name": "@flowforge/parser",
+  "name": "@forgeflow/parser",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -16,7 +16,7 @@
   },
   "files": ["dist"],
   "dependencies": {
-    "@flowforge/types": "workspace:*",
+    "@forgeflow/types": "workspace:*",
     "zod": "^3.24.0"
   }
 }

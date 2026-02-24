@@ -1,4 +1,4 @@
-import type { FlowDefinition, ValidationResult, ExecutionPlan, FlowDiagnostic } from '@flowforge/types';
+import type { FlowDefinition, ValidationResult, ExecutionPlan, FlowDiagnostic } from '@forgeflow/types';
 import { checkStructural } from './passes/structural.js';
 import { checkOutputUniqueness } from './passes/output.js';
 import { checkDependencies } from './passes/dependency.js';
@@ -68,7 +68,7 @@ function inferUserUploads(flow: FlowDefinition): string[] {
 
   // Collect all outputs across all nodes
   const allOutputs = new Set<string>();
-  function collectOutputs(nodes: import('@flowforge/types').FlowNode[]) {
+  function collectOutputs(nodes: import('@forgeflow/types').FlowNode[]) {
     for (const node of nodes) {
       for (const file of node.config.outputs) {
         allOutputs.add(file);

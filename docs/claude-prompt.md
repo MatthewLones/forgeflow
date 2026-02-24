@@ -1,6 +1,6 @@
-# FlowForge — Agent Build Prompt
+# ForgeFlow — Agent Build Prompt
 
-You are building FlowForge, an open-source platform for designing and executing long-running AI agent workflows.
+You are building ForgeFlow, an open-source platform for designing and executing long-running AI agent workflows.
 
 ## Key Files
 
@@ -16,7 +16,7 @@ Read these files for full context:
 
 ## Project Overview
 
-FlowForge lets users build multi-phase agent workflows visually (or in JSON/markdown). It has three layers:
+ForgeFlow lets users build multi-phase agent workflows visually (or in JSON/markdown). It has three layers:
 
 1. **Flow Designer** — React web app with a DAG canvas, node inspector panel, and recursive node navigation
 2. **Execution Engine** — Node.js service that orchestrates flows **phase-by-phase**, running each node in its own sandbox via Claude Agent SDK
@@ -62,7 +62,7 @@ See `INTERRUPTS.md` for the full spec — TypeScript interfaces, nested interrup
 - **Backend**: Node.js with TypeScript
 - **Sandbox (local)**: Docker container per phase
 - **Sandbox (cloud)**: Vercel Sandbox / Firecracker VM
-- **State store (local)**: Files on disk at `~/.flowforge/runs/{id}/`
+- **State store (local)**: Files on disk at `~/.forgeflow/runs/{id}/`
 - **State store (cloud)**: Postgres + S3
 - **DAG library**: TBD (options: React Flow, D3, custom)
 - **Deployment**: Local-first, user provides their own Anthropic API key

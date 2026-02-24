@@ -1,4 +1,4 @@
-import type { FlowDefinition, FlowNode, ExecutionPlan, PhaseInfo } from '@flowforge/types';
+import type { FlowDefinition, FlowNode, ExecutionPlan, PhaseInfo } from '@forgeflow/types';
 import { topologicalSort, buildAdjacency } from './graph.js';
 
 /**

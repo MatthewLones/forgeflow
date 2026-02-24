@@ -1,4 +1,4 @@
-# FlowForge
+# ForgeFlow
 
 A platform for building, testing, and deploying long-running AI agent workflows. Define multi-phase, multi-agent flows visually. Claude executes them with file-based state, parallel subagents, and human-in-the-loop checkpoints.
 
@@ -14,7 +14,7 @@ Existing agent builders focus on simple pipelines (input → single model call �
 
 ## The Solution
 
-FlowForge provides three things:
+ForgeFlow provides three things:
 
 1. **A format** for defining agent workflows (`FLOW.json`) and domain knowledge (`SKILL.md`)
 2. **An execution engine** that runs flows phase-by-phase — each node gets its own sandboxed agent run via Claude Agent SDK, with state serialized between phases
@@ -106,7 +106,7 @@ See [INTERRUPTS.md](INTERRUPTS.md) for the full spec.
 
 ## Inspired By
 
-This project is inspired by [CrossBeam](https://github.com/...), which won first place at the Claude Code Hackathon (Feb 2026) by applying this pattern to ADU (Accessory Dwelling Unit) permit processing. CrossBeam proved that markdown-defined skills + file-based state + Claude Agent SDK is a powerful architecture for professional, information-dense workflows. FlowForge generalizes that pattern for any domain.
+This project is inspired by [CrossBeam](https://github.com/...), which won first place at the Claude Code Hackathon (Feb 2026) by applying this pattern to ADU (Accessory Dwelling Unit) permit processing. CrossBeam proved that markdown-defined skills + file-based state + Claude Agent SDK is a powerful architecture for professional, information-dense workflows. ForgeFlow generalizes that pattern for any domain.
 
 ## Documentation
 
@@ -118,4 +118,4 @@ This project is inspired by [CrossBeam](https://github.com/...), which won first
 | [FLOW-FORMAT.md](FLOW-FORMAT.md) | FLOW.json specification with TypeScript types |
 | [SKILL-FORMAT.md](SKILL-FORMAT.md) | Skill directory structure and conventions |
 | [EXAMPLES.md](EXAMPLES.md) | Example flows for different domains |
-| [claude-prompt.md](claude-prompt.md) | Long-running agent prompt for building FlowForge |
+| [claude-prompt.md](claude-prompt.md) | Long-running agent prompt for building ForgeFlow |

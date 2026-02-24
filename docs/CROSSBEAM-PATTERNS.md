@@ -224,9 +224,9 @@ ready
 - Artifacts serialized to Supabase `raw_artifacts` column between checkpoint phases
 - Frontend listens via `supabase.channel().on('postgres_changes', ...)`
 
-**FlowForge generalization:**
+**ForgeFlow generalization:**
 - State store abstraction with two adapters:
-  - Local: `~/.flowforge/runs/{id}/` on disk (files + state.json)
+  - Local: `~/.forgeflow/runs/{id}/` on disk (files + state.json)
   - Cloud: Postgres + S3 (metadata in DB, files in object storage)
 - Same engine code, different backing store
 

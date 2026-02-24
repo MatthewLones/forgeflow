@@ -1,4 +1,4 @@
-import type { FlowDefinition, FlowNode, FlowDiagnostic } from '@flowforge/types';
+import type { FlowDefinition, FlowNode, FlowDiagnostic } from '@forgeflow/types';
 import { createDiagnostic } from '../diagnostics.js';
 
 export function checkBudget(flow: FlowDefinition): FlowDiagnostic[] {

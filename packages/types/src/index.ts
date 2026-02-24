@@ -39,3 +39,13 @@ export type {
   DiagnosticLocation,
   FlowDiagnostic,
 } from './errors.js';
+
+export type {
+  StateFile,
+  RunStatus,
+  RunState,
+  CheckpointState,
+  PhaseResult,
+  ProgressEvent,
+  RunResult,
+} from './engine.js';

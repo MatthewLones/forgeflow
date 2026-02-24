@@ -1,4 +1,4 @@
-import type { FlowDefinition, FlowNode, FlowDiagnostic } from '@flowforge/types';
+import type { FlowDefinition, FlowNode, FlowDiagnostic } from '@forgeflow/types';
 import { topologicalSort, buildAdjacency } from '../graph.js';
 import { createDiagnostic } from '../diagnostics.js';
 

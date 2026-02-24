@@ -1,8 +1,8 @@
-# FlowForge Architecture
+# ForgeFlow Architecture
 
 ## Core Principle: Per-Phase Execution
 
-FlowForge does **not** compile the entire flow into one giant prompt. Instead, the execution engine orchestrates phase-by-phase — each top-level node gets its own agent run in its own sandbox, with only the skills and inputs it needs.
+ForgeFlow does **not** compile the entire flow into one giant prompt. Instead, the execution engine orchestrates phase-by-phase — each top-level node gets its own agent run in its own sandbox, with only the skills and inputs it needs.
 
 ```
 FLOW.json → Engine reads DAG → For each phase:
@@ -21,11 +21,11 @@ This gives us:
 - **Fault isolation** — if Phase 2 fails, retry just Phase 2 (all Phase 1 outputs are safe in the state store)
 - **Sandboxing** — each agent runs in isolation with only file system access to its workspace
 
-## FlowForge as a Language
+## ForgeFlow as a Language
 
-FlowForge is a domain-specific language for agent orchestration. This framing clarifies every architectural decision:
+ForgeFlow is a domain-specific language for agent orchestration. This framing clarifies every architectural decision:
 
-| Language Concept | FlowForge Equivalent |
+| Language Concept | ForgeFlow Equivalent |
 |-----------------|---------------------|
 | Source code | FLOW.json |
 | Type checker / linter | Flow Validator (dependency resolution, schema matching, structural checks) |
@@ -74,7 +74,7 @@ FlowForge is a domain-specific language for agent orchestration. This framing cl
                    │ reads/writes
 ┌──────────────────▼────────────────────────────────┐
 │  State Store                                      │
-│  Local:  ~/.flowforge/runs/{id}/ on disk          │
+│  Local:  ~/.forgeflow/runs/{id}/ on disk          │
 │  Cloud:  Postgres + S3/object storage             │
 └───────────────────────────────────────────────────┘
 ```
@@ -93,7 +93,7 @@ The compiler does NOT generate one master document. It generates a focused promp
 ```markdown
 # Phase: Parse Contract
 
-You are executing one phase of a FlowForge workflow.
+You are executing one phase of a ForgeFlow workflow.
 
 ## Your Task
 Read the contract PDF. Extract every clause as a structured object with:
@@ -123,7 +123,7 @@ When a node has children, the prompt tells Claude to spawn subagents within this
 ```markdown
 # Phase: Research
 
-You are executing one phase of a FlowForge workflow.
+You are executing one phase of a ForgeFlow workflow.
 
 ## Your Task
 Coordinate 3 parallel research subagents. Each writes its own output file.
@@ -304,7 +304,7 @@ For local development, each phase gets a Docker container:
 └─────────────────────────────────────┘
 ```
 
-The state store lives on the host filesystem at `~/.flowforge/runs/{runId}/`. Between phases, the engine:
+The state store lives on the host filesystem at `~/.forgeflow/runs/{runId}/`. Between phases, the engine:
 1. Reads output files from the sandbox's `workspace/output/`
 2. Writes them to the state store
 3. Destroys the container
@@ -444,7 +444,7 @@ interface StateFile {
 
 ```typescript
 class LocalStateStore implements StateStore {
-  // State lives at: ~/.flowforge/runs/{runId}/
+  // State lives at: ~/.forgeflow/runs/{runId}/
   //   ├── state.json          ← Run metadata
   //   ├── checkpoint.json     ← Checkpoint data (if paused)
   //   ├── inputs/             ← User-uploaded files
@@ -460,7 +460,7 @@ class LocalStateStore implements StateStore {
 ```typescript
 class CloudStateStore implements StateStore {
   // Run metadata: Postgres `runs` table
-  // Artifacts: S3 bucket at s3://flowforge-runs/{runId}/{filename}
+  // Artifacts: S3 bucket at s3://forgeflow-runs/{runId}/{filename}
   // Checkpoint data: Postgres `checkpoints` table
 }
 ```
@@ -699,14 +699,14 @@ The execution engine uses the same interface everywhere. Only the adapters chang
 | Concern | Local (MVP) | Cloud |
 |---------|-------------|-------|
 | **Sandbox** | Docker container per phase | Vercel Sandbox / Firecracker VM |
-| **State store** | `~/.flowforge/runs/{id}/` on disk | Postgres + S3 |
-| **Skill library** | `~/.flowforge/skills/` directory | Skill registry API |
+| **State store** | `~/.forgeflow/runs/{id}/` on disk | Postgres + S3 |
+| **Skill library** | `~/.forgeflow/skills/` directory | Skill registry API |
 | **Progress events** | EventEmitter / WebSocket to localhost | WebSocket / SSE to client |
 | **API key** | User's `.env` file | Platform-managed per user |
 | **Auth** | None (single user) | User accounts + API keys |
 | **Billing** | None (user pays Anthropic directly) | Per-run metering |
 | **Isolation** | Docker provides process isolation | VM-level isolation |
-| **Flow storage** | `~/.flowforge/flows/` directory | Postgres `flows` table |
+| **Flow storage** | `~/.forgeflow/flows/` directory | Postgres `flows` table |
 
 The engine interface stays the same — swap `LocalStateStore` for `CloudStateStore`, `DockerSandboxManager` for `VercelSandboxManager`, and you're running in the cloud.
 
@@ -715,7 +715,7 @@ The engine interface stays the same — swap `LocalStateStore` for `CloudStateSt
 Each phase's agent gets this appended to its system prompt:
 
 ```
-You are executing one phase of a FlowForge workflow inside an isolated sandbox.
+You are executing one phase of a ForgeFlow workflow inside an isolated sandbox.
 
 RULES:
 - Write all output files to the output/ directory

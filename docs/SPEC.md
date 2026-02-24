@@ -1,8 +1,8 @@
-# FlowForge Product Specification
+# ForgeFlow Product Specification
 
 ## Overview
 
-FlowForge is an open-source platform for building long-running AI agent workflows. Users define multi-phase flows visually (or in JSON/markdown), and the execution engine runs them via Claude Agent SDK with file-based state passing, parallel subagents, and human-in-the-loop checkpoints.
+ForgeFlow is an open-source platform for building long-running AI agent workflows. Users define multi-phase flows visually (or in JSON/markdown), and the execution engine runs them via Claude Agent SDK with file-based state passing, parallel subagents, and human-in-the-loop checkpoints.
 
 ## Target Users
 
@@ -163,7 +163,7 @@ workspace/
 
 **Between phases** (in the state store):
 ```
-~/.flowforge/runs/{runId}/          ← Local (MVP)
+~/.forgeflow/runs/{runId}/          ← Local (MVP)
 ├── state.json                      ← Run metadata, status, cost tracking
 ├── checkpoint.json                 ← Checkpoint data (if paused)
 ├── inputs/                         ← User-uploaded files

@@ -1,5 +1,5 @@
 {
-  "name": "@forgeflow/validator",
+  "name": "@forgeflow/engine",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -16,6 +16,9 @@
   },
   "files": ["dist"],
   "dependencies": {
-    "@forgeflow/types": "workspace:*"
+    "@forgeflow/types": "workspace:*",
+    "@forgeflow/compiler": "workspace:*",
+    "@forgeflow/state-store": "workspace:*",
+    "@forgeflow/validator": "workspace:*"
   }
 }

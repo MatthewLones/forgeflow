@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkBudget } from '../src/passes/budget.js';
-import type { FlowDefinition } from '@flowforge/types';
+import type { FlowDefinition } from '@forgeflow/types';
 
 function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
   return {

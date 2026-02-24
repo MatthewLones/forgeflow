@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkOutputUniqueness } from '../src/passes/output.js';
-import type { FlowDefinition } from '@flowforge/types';
+import type { FlowDefinition } from '@forgeflow/types';
 
 function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
   return {

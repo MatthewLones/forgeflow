@@ -3,6 +3,9 @@
   "references": [
     { "path": "packages/types" },
     { "path": "packages/parser" },
-    { "path": "packages/validator" }
+    { "path": "packages/validator" },
+    { "path": "packages/compiler" },
+    { "path": "packages/state-store" },
+    { "path": "packages/engine" }
   ]
 }

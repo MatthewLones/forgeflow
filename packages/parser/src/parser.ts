@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { flowDefinitionSchema } from './schema.js';
-import type { FlowDefinition, FlowDiagnostic } from '@flowforge/types';
+import type { FlowDefinition, FlowDiagnostic } from '@forgeflow/types';
 
 export interface ParseResult {
   success: boolean;

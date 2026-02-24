@@ -2,7 +2,7 @@
   "id": "simple_summary",
   "name": "Simple Document Summary",
   "version": "1.0",
-  "description": "Reads a document and produces a structured summary — the simplest possible FlowForge flow",
+  "description": "Reads a document and produces a structured summary — the simplest possible ForgeFlow flow",
   "skills": [],
   "budget": {
     "maxTurns": 60,

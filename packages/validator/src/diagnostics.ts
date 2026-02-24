@@ -1,4 +1,4 @@
-import type { FlowDiagnostic, DiagnosticSeverity, DiagnosticLocation } from '@flowforge/types';
+import type { FlowDiagnostic, DiagnosticSeverity, DiagnosticLocation } from '@forgeflow/types';
 
 export function createDiagnostic(
   code: string,

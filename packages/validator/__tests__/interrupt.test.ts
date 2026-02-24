@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkInterrupts } from '../src/passes/interrupt.js';
-import type { FlowDefinition } from '@flowforge/types';
+import type { FlowDefinition } from '@forgeflow/types';
 
 function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
   return {
