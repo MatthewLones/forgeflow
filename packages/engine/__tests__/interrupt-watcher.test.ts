@@ -151,19 +151,26 @@ describe('InterruptWatcher', () => {
     await watcher.stop();
   });
 
-  it('handles multiple interrupts', async () => {
+  it('handles multiple interrupts sequentially', async () => {
     const watcher = new InterruptWatcher();
     const receivedIds: string[] = [];
+    let concurrentCalls = 0;
+    let maxConcurrentCalls = 0;
 
     await watcher.start({
       workspacePath,
       onInterrupt: async (interrupt) => {
+        concurrentCalls++;
+        maxConcurrentCalls = Math.max(maxConcurrentCalls, concurrentCalls);
         receivedIds.push(interrupt.interrupt_id);
+        // Small delay to simulate real handler work
+        await new Promise((r) => setTimeout(r, 50));
+        concurrentCalls--;
         return { decision: 'approve' } as InterruptAnswer;
       },
     });
 
-    // Write two interrupt files with a small delay between them
+    // Write two interrupt files with a delay between them
     await writeFile(
       join(workspacePath, 'output', '__INTERRUPT__multi_1.json'),
       createInterruptFile(makeApprovalInterrupt('multi_1')),
@@ -176,10 +183,14 @@ describe('InterruptWatcher', () => {
       createInterruptFile(makeApprovalInterrupt('multi_2')),
     );
 
-    await new Promise((r) => setTimeout(r, 500));
+    // Give enough time for chokidar's awaitWriteFinish + queue processing
+    await new Promise((r) => setTimeout(r, 800));
 
     expect(receivedIds).toContain('multi_1');
     expect(receivedIds).toContain('multi_2');
+
+    // Verify sequential processing (never more than 1 concurrent handler)
+    expect(maxConcurrentCalls).toBe(1);
 
     // Verify both answer files exist
     const answer1 = await readFile(
@@ -225,6 +236,298 @@ describe('InterruptWatcher', () => {
 
     console.error = originalError;
     await watcher.stop();
+  });
+
+  it('detects child start marker and emits event', async () => {
+    const watcher = new InterruptWatcher();
+    const events: ProgressEvent[] = [];
+
+    await watcher.start({
+      workspacePath,
+      onInterrupt: async () => ({ decision: 'approve' } as InterruptAnswer),
+      onProgress: (event) => events.push(event),
+    });
+
+    await writeFile(
+      join(workspacePath, 'output', '__CHILD_START__analyze_coverage.json'),
+      JSON.stringify({
+        childId: 'analyze_coverage',
+        childName: 'Coverage Analysis',
+        parentPath: ['coverage_check'],
+      }),
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const startEvent = events.find((e) => e.type === 'child_started');
+    expect(startEvent).toBeDefined();
+    if (startEvent?.type === 'child_started') {
+      expect(startEvent.childId).toBe('analyze_coverage');
+      expect(startEvent.childName).toBe('Coverage Analysis');
+      expect(startEvent.parentPath).toEqual(['coverage_check']);
+    }
+
+    await watcher.stop();
+  });
+
+  it('detects child done marker and emits event', async () => {
+    const watcher = new InterruptWatcher();
+    const events: ProgressEvent[] = [];
+
+    await watcher.start({
+      workspacePath,
+      onInterrupt: async () => ({ decision: 'approve' } as InterruptAnswer),
+      onProgress: (event) => events.push(event),
+    });
+
+    await writeFile(
+      join(workspacePath, 'output', '__CHILD_DONE__analyze_coverage.json'),
+      JSON.stringify({
+        childId: 'analyze_coverage',
+        childName: 'Coverage Analysis',
+        parentPath: ['coverage_check'],
+        outputFiles: ['coverage_analysis.json'],
+      }),
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const doneEvent = events.find((e) => e.type === 'child_completed');
+    expect(doneEvent).toBeDefined();
+    if (doneEvent?.type === 'child_completed') {
+      expect(doneEvent.childId).toBe('analyze_coverage');
+      expect(doneEvent.outputFiles).toEqual(['coverage_analysis.json']);
+    }
+
+    await watcher.stop();
+  });
+
+  it('emits file_written for regular output files', async () => {
+    const watcher = new InterruptWatcher();
+    const events: ProgressEvent[] = [];
+
+    await watcher.start({
+      workspacePath,
+      onInterrupt: async () => ({ decision: 'approve' } as InterruptAnswer),
+      onProgress: (event) => events.push(event),
+      nodeId: 'test_node',
+    });
+
+    // Write a regular JSON output file
+    await writeFile(
+      join(workspacePath, 'output', 'results.json'),
+      '{"data": "test"}',
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const fileEvent = events.find((e) => e.type === 'file_written');
+    expect(fileEvent).toBeDefined();
+    if (fileEvent?.type === 'file_written') {
+      expect(fileEvent.fileName).toBe('results.json');
+      expect(fileEvent.fileSize).toBeGreaterThan(0);
+      expect(fileEvent.nodeId).toBe('test_node');
+    }
+
+    await watcher.stop();
+  });
+
+  it('emits file_written for non-json files', async () => {
+    const watcher = new InterruptWatcher();
+    const events: ProgressEvent[] = [];
+
+    await watcher.start({
+      workspacePath,
+      onInterrupt: async () => ({ decision: 'approve' } as InterruptAnswer),
+      onProgress: (event) => events.push(event),
+      nodeId: 'test_node',
+    });
+
+    await writeFile(
+      join(workspacePath, 'output', 'report.md'),
+      '# Report\n\nThis is a test report.',
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const fileEvent = events.find((e) => e.type === 'file_written');
+    expect(fileEvent).toBeDefined();
+    if (fileEvent?.type === 'file_written') {
+      expect(fileEvent.fileName).toBe('report.md');
+    }
+
+    await watcher.stop();
+  });
+
+  it('does not emit file_written for __ANSWER__ files', async () => {
+    const watcher = new InterruptWatcher();
+    const events: ProgressEvent[] = [];
+
+    await watcher.start({
+      workspacePath,
+      onInterrupt: async () => ({ decision: 'approve' } as InterruptAnswer),
+      onProgress: (event) => events.push(event),
+      nodeId: 'test_node',
+    });
+
+    await writeFile(
+      join(workspacePath, 'output', '__ANSWER__test_1.json'),
+      '{"decision":"approve"}',
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const fileEvents = events.filter((e) => e.type === 'file_written');
+    expect(fileEvents).toHaveLength(0);
+
+    await watcher.stop();
+  });
+
+  it('escalates inline interrupt on handler timeout', async () => {
+    const watcher = new InterruptWatcher();
+    const events: ProgressEvent[] = [];
+
+    await watcher.start({
+      workspacePath,
+      onInterrupt: async () => {
+        // Simulate a very slow handler (will be timed out)
+        await new Promise((r) => setTimeout(r, 5000));
+        return { decision: 'approve' } as InterruptAnswer;
+      },
+      onProgress: (event) => events.push(event),
+      nodeId: 'test_node',
+      escalateTimeoutMs: 200, // Very short timeout for testing
+    });
+
+    const interrupt = makeApprovalInterrupt('escalate_1');
+    await writeFile(
+      join(workspacePath, 'output', '__INTERRUPT__escalate_1.json'),
+      createInterruptFile(interrupt),
+    );
+
+    await new Promise((r) => setTimeout(r, 800));
+
+    // Should be escalated
+    expect(watcher.escalated).toBe(true);
+    expect(watcher.escalatedInterrupt).not.toBeNull();
+    expect(watcher.escalatedInterrupt!.interrupt_id).toBe('escalate_1');
+
+    // Should have written escalated answer
+    const answerContent = await readFile(
+      join(workspacePath, 'output', '__ANSWER__escalate_1.json'),
+      'utf-8',
+    );
+    const parsedAnswer = JSON.parse(answerContent);
+    expect(parsedAnswer.decision).toBe('escalated');
+    expect(parsedAnswer.originalInterruptId).toBe('escalate_1');
+    expect(parsedAnswer.reason).toBe('timeout');
+
+    // Should have emitted escalation_timeout event
+    const escalationEvent = events.find((e) => e.type === 'escalation_timeout');
+    expect(escalationEvent).toBeDefined();
+
+    await watcher.stop();
+  });
+
+  it('does not escalate when handler responds before timeout', async () => {
+    const watcher = new InterruptWatcher();
+
+    await watcher.start({
+      workspacePath,
+      onInterrupt: async () => {
+        // Fast handler
+        return { decision: 'approve' } as InterruptAnswer;
+      },
+      nodeId: 'test_node',
+      escalateTimeoutMs: 5000, // Long timeout
+    });
+
+    const interrupt = makeApprovalInterrupt('no_escalate_1');
+    await writeFile(
+      join(workspacePath, 'output', '__INTERRUPT__no_escalate_1.json'),
+      createInterruptFile(interrupt),
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(watcher.escalated).toBe(false);
+    expect(watcher.escalatedInterrupt).toBeNull();
+
+    // Normal answer should be written
+    const answerContent = await readFile(
+      join(workspacePath, 'output', '__ANSWER__no_escalate_1.json'),
+      'utf-8',
+    );
+    const parsedAnswer = JSON.parse(answerContent);
+    expect(parsedAnswer.decision).toBe('approve');
+
+    await watcher.stop();
+  });
+
+  it('does not escalate checkpoint-mode interrupts even with timeout', async () => {
+    const watcher = new InterruptWatcher();
+
+    await watcher.start({
+      workspacePath,
+      onInterrupt: async () => {
+        await new Promise((r) => setTimeout(r, 100));
+        return { decision: 'approve' } as InterruptAnswer;
+      },
+      nodeId: 'test_node',
+      escalateTimeoutMs: 50, // Very short — but should not trigger for checkpoint mode
+    });
+
+    // Create a checkpoint-mode interrupt
+    const interrupt: Interrupt = {
+      interrupt_id: 'checkpoint_no_escalate',
+      type: 'approval',
+      source: { agentPath: ['test'], depth: 0 },
+      mode: 'checkpoint',
+      title: 'Checkpoint Approval',
+      context: 'Testing',
+      proposal: 'Do something',
+      options: ['approve', 'reject'],
+    } as Interrupt;
+
+    await writeFile(
+      join(workspacePath, 'output', '__INTERRUPT__checkpoint_no_escalate.json'),
+      createInterruptFile(interrupt),
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(watcher.escalated).toBe(false);
+
+    await watcher.stop();
+  });
+
+  it('resets escalation state on stop', async () => {
+    const watcher = new InterruptWatcher();
+
+    await watcher.start({
+      workspacePath,
+      onInterrupt: async () => {
+        await new Promise((r) => setTimeout(r, 5000));
+        return { decision: 'approve' } as InterruptAnswer;
+      },
+      nodeId: 'test_node',
+      escalateTimeoutMs: 100,
+    });
+
+    const interrupt = makeApprovalInterrupt('reset_test');
+    await writeFile(
+      join(workspacePath, 'output', '__INTERRUPT__reset_test.json'),
+      createInterruptFile(interrupt),
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+    expect(watcher.escalated).toBe(true);
+
+    await watcher.stop();
+
+    // After stop, state should be reset
+    expect(watcher.escalated).toBe(false);
+    expect(watcher.escalatedInterrupt).toBeNull();
   });
 
   it('stops cleanly', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { compilePhasePrompt, FORGEFLOW_PHASE_SYSTEM_PROMPT } from '../src/compiler.js';
+import { compilePhasePrompt, compileChildPromptFiles, FORGEFLOW_PHASE_SYSTEM_PROMPT } from '../src/compiler.js';
 import type { CompileContext } from '../src/compiler.js';
 import type { FlowNode } from '@forgeflow/types';
 
@@ -76,7 +76,7 @@ describe('compilePhasePrompt', () => {
     expect(prompt).toContain('$20.00');
   });
 
-  it('includes subagent sections for nodes with children', () => {
+  it('includes subagent reference table for nodes with children', () => {
     const node = makeNode({
       name: 'Research Phase',
       instructions: 'Coordinate parallel research.',
@@ -117,14 +117,23 @@ describe('compilePhasePrompt', () => {
     });
     const prompt = compilePhasePrompt(node, makeContext());
 
+    // Parent prompt has reference table, NOT inline instructions
     expect(prompt).toContain('## Subagents — Launch All 2 Concurrently');
-    expect(prompt).toContain('### Subagent 1: Researcher A');
-    expect(prompt).toContain('### Subagent 2: Researcher B');
-    expect(prompt).toContain('Analyze liability.');
-    expect(prompt).toContain('Analyze IP.');
-    expect(prompt).toContain('**Budget:** 30 turns, $4.00');
-    expect(prompt).toContain('**Skills:** legal-basics');
+    expect(prompt).toContain('prompts/child_a.md');
+    expect(prompt).toContain('prompts/child_b.md');
+    expect(prompt).toContain('| 1 | Researcher A | child_a |');
+    expect(prompt).toContain('| 2 | Researcher B | child_b |');
     expect(prompt).toContain('Launch all subagents concurrently');
+
+    // Progress markers still present in parent prompt
+    expect(prompt).toContain('__CHILD_START__child_a.json');
+    expect(prompt).toContain('__CHILD_DONE__child_a.json');
+    expect(prompt).toContain('__CHILD_START__child_b.json');
+    expect(prompt).toContain('__CHILD_DONE__child_b.json');
+
+    // Child instructions NOT inlined in parent prompt
+    expect(prompt).not.toContain('Analyze liability.');
+    expect(prompt).not.toContain('Analyze IP.');
   });
 
   it('produces checkpoint prompt for checkpoint nodes', () => {
@@ -221,9 +230,206 @@ describe('compilePhasePrompt', () => {
     expect(skillMatches).toHaveLength(1);
   });
 
+  it('parent prompt only references children, not grandchildren', () => {
+    const node = makeNode({
+      name: 'Research Phase',
+      instructions: 'Coordinate research.',
+      config: {
+        inputs: [],
+        outputs: ['final.json'],
+        skills: [],
+        budget: { maxTurns: 100, maxBudgetUsd: 15 },
+      },
+      children: [
+        {
+          id: 'child_a',
+          type: 'agent' as const,
+          name: 'Parent Child',
+          instructions: 'Delegate to sub-researchers.',
+          config: {
+            inputs: [],
+            outputs: ['child_out.json'],
+            skills: [],
+            budget: { maxTurns: 50, maxBudgetUsd: 7 },
+          },
+          children: [
+            {
+              id: 'grandchild_x',
+              type: 'agent' as const,
+              name: 'Grandchild X',
+              instructions: 'Analyze subsection X.',
+              config: {
+                inputs: [],
+                outputs: ['gc_x_out.json'],
+                skills: ['analysis-skill'],
+                budget: { maxTurns: 20, maxBudgetUsd: 2 },
+              },
+              children: [],
+            },
+            {
+              id: 'grandchild_y',
+              type: 'agent' as const,
+              name: 'Grandchild Y',
+              instructions: 'Analyze subsection Y.',
+              config: {
+                inputs: [],
+                outputs: ['gc_y_out.json'],
+                skills: [],
+              },
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+    const prompt = compilePhasePrompt(node, makeContext());
+
+    // Parent prompt references child_a via table
+    expect(prompt).toContain('## Subagents — Launch All 1 Concurrently');
+    expect(prompt).toContain('prompts/child_a.md');
+    expect(prompt).toContain('__CHILD_START__child_a.json');
+
+    // Parent prompt does NOT contain grandchild details (those are in child_a.md)
+    expect(prompt).not.toContain('grandchild_x');
+    expect(prompt).not.toContain('grandchild_y');
+    expect(prompt).not.toContain('Analyze subsection X.');
+    expect(prompt).not.toContain('Analyze subsection Y.');
+  });
+
   it('exports FORGEFLOW_PHASE_SYSTEM_PROMPT constant', () => {
     expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('ForgeFlow workflow');
     expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('output/ directory');
     expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('input/ directory');
+  });
+});
+
+describe('compileChildPromptFiles', () => {
+  it('generates prompt files for direct children', () => {
+    const node = makeNode({
+      children: [
+        {
+          id: 'child_a',
+          type: 'agent' as const,
+          name: 'Researcher A',
+          instructions: 'Analyze liability.',
+          config: {
+            inputs: ['data.json'],
+            outputs: ['findings_a.json'],
+            skills: ['legal-basics'],
+            budget: { maxTurns: 30, maxBudgetUsd: 4 },
+          },
+          children: [],
+        },
+        {
+          id: 'child_b',
+          type: 'agent' as const,
+          name: 'Researcher B',
+          instructions: 'Analyze IP.',
+          config: {
+            inputs: ['data.json'],
+            outputs: ['findings_b.json'],
+            skills: [],
+          },
+          children: [],
+        },
+      ],
+    });
+    const files = compileChildPromptFiles(node, makeContext());
+
+    expect(files.size).toBe(2);
+    expect(files.has('child_a.md')).toBe(true);
+    expect(files.has('child_b.md')).toBe(true);
+
+    const promptA = files.get('child_a.md')!;
+    expect(promptA).toContain('# Subagent: Researcher A');
+    expect(promptA).toContain('Analyze liability.');
+    expect(promptA).toContain('input/data.json');
+    expect(promptA).toContain('output/findings_a.json');
+    expect(promptA).toContain('legal-basics');
+    expect(promptA).toContain('Max turns: 30');
+    expect(promptA).toContain('$4.00');
+
+    const promptB = files.get('child_b.md')!;
+    expect(promptB).toContain('# Subagent: Researcher B');
+    expect(promptB).toContain('Analyze IP.');
+  });
+
+  it('generates prompt files for all descendants recursively', () => {
+    const node = makeNode({
+      children: [
+        {
+          id: 'child_a',
+          type: 'agent' as const,
+          name: 'Parent Child',
+          instructions: 'Delegate to sub-researchers.',
+          config: {
+            inputs: [],
+            outputs: ['child_out.json'],
+            skills: [],
+            budget: { maxTurns: 50, maxBudgetUsd: 7 },
+          },
+          children: [
+            {
+              id: 'grandchild_x',
+              type: 'agent' as const,
+              name: 'Grandchild X',
+              instructions: 'Analyze subsection X.',
+              config: {
+                inputs: [],
+                outputs: ['gc_x_out.json'],
+                skills: ['analysis-skill'],
+                budget: { maxTurns: 20, maxBudgetUsd: 2 },
+              },
+              children: [],
+            },
+            {
+              id: 'grandchild_y',
+              type: 'agent' as const,
+              name: 'Grandchild Y',
+              instructions: 'Analyze subsection Y.',
+              config: {
+                inputs: [],
+                outputs: ['gc_y_out.json'],
+                skills: [],
+              },
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+    const files = compileChildPromptFiles(node, makeContext());
+
+    // 3 prompt files: child + 2 grandchildren
+    expect(files.size).toBe(3);
+    expect(files.has('child_a.md')).toBe(true);
+    expect(files.has('grandchild_x.md')).toBe(true);
+    expect(files.has('grandchild_y.md')).toBe(true);
+
+    // Child's prompt references grandchildren via table
+    const childPrompt = files.get('child_a.md')!;
+    expect(childPrompt).toContain('## Subagents — Launch All 2 Concurrently');
+    expect(childPrompt).toContain('prompts/grandchild_x.md');
+    expect(childPrompt).toContain('prompts/grandchild_y.md');
+    expect(childPrompt).toContain('__CHILD_START__grandchild_x.json');
+    expect(childPrompt).toContain('__CHILD_DONE__grandchild_y.json');
+    // Child's prompt does NOT inline grandchild instructions
+    expect(childPrompt).not.toContain('Analyze subsection X.');
+    expect(childPrompt).not.toContain('Analyze subsection Y.');
+
+    // Grandchild prompts are self-contained
+    const gcX = files.get('grandchild_x.md')!;
+    expect(gcX).toContain('# Subagent: Grandchild X');
+    expect(gcX).toContain('Analyze subsection X.');
+    expect(gcX).toContain('analysis-skill');
+    expect(gcX).toContain('Max turns: 20');
+    expect(gcX).toContain('$2.00');
+    expect(gcX).not.toContain('## Subagents'); // no children of its own
+  });
+
+  it('returns empty map for nodes with no children', () => {
+    const node = makeNode();
+    const files = compileChildPromptFiles(node, makeContext());
+    expect(files.size).toBe(0);
   });
 });

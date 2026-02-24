@@ -281,6 +281,148 @@ describe('FlowOrchestrator', () => {
     );
   });
 
+  it('resumes after checkpoint and completes', async () => {
+    const flow = await loadFlow('insurance-claim');
+
+    const behaviors = new Map<string, MockBehavior>([
+      [
+        'parse_claim',
+        {
+          outputFiles: {
+            'claim_parsed.json': '{"claim":"data"}',
+            'damage_assessment.json': '{"damage":"moderate"}',
+          },
+          cost: { turns: 8, usd: 1.0 },
+        },
+      ],
+      [
+        'coverage_check',
+        {
+          outputFiles: {
+            'coverage_analysis.json': '{"coverage":"full"}',
+            'comparable_claims.json': '{"claims":[]}',
+          },
+          cost: { turns: 20, usd: 3.0 },
+        },
+      ],
+      [
+        'generate_recommendation',
+        {
+          outputFiles: {
+            'determination_letter.md': '# Approved',
+            'reserve_recommendation.json': '{"reserve":5000}',
+            'decision_rationale.md': '# Rationale',
+          },
+          cost: { turns: 15, usd: 2.5 },
+        },
+      ],
+    ]);
+
+    const runner = new MockRunner(behaviors);
+    const events: ProgressEvent[] = [];
+    const orchestrator = new FlowOrchestrator(runner, store, {
+      workspaceBasePath: workspaceDir,
+      onProgress: (e) => events.push(e),
+    });
+
+    const userUploads: StateFile[] = [
+      { name: 'incident_report.pdf', content: Buffer.from('report'), producedByPhase: 'user_upload' },
+      { name: 'photos.zip', content: Buffer.from('photos'), producedByPhase: 'user_upload' },
+      { name: 'policy.pdf', content: Buffer.from('policy'), producedByPhase: 'user_upload' },
+    ];
+
+    // Phase 1: Execute — should pause at checkpoint
+    const firstResult = await orchestrator.execute(flow, userUploads);
+    expect(firstResult.status).toBe('awaiting_input');
+    expect(firstResult.success).toBe(true);
+
+    // Verify checkpoint was saved with correct state
+    const checkpoint = await store.loadCheckpoint(firstResult.runId);
+    expect(checkpoint).not.toBeNull();
+    expect(checkpoint!.checkpointNodeId).toBe('adjuster_review');
+    expect(checkpoint!.status).toBe('waiting');
+
+    const runStateBeforeResume = await store.loadRunState(firstResult.runId);
+    expect(runStateBeforeResume!.completedPhases).toEqual(['parse_claim', 'coverage_check']);
+
+    // Phase 2: Resume with adjuster input
+    events.length = 0;
+    const resumeResult = await orchestrator.resume(flow, firstResult.runId, {
+      fileName: 'adjuster_input.json',
+      content: Buffer.from('{"approved":true,"notes":"looks good"}'),
+    });
+
+    expect(resumeResult.success).toBe(true);
+    expect(resumeResult.status).toBe('completed');
+
+    // Cost should combine pre-checkpoint + post-checkpoint
+    expect(resumeResult.totalCost.turns).toBe(28 + 15); // (8+20) + 15
+    expect(resumeResult.totalCost.usd).toBeCloseTo(4.0 + 2.5); // (1+3) + 2.5
+
+    // Outputs should include post-checkpoint files
+    expect(resumeResult.outputFiles).toContain('determination_letter.md');
+    expect(resumeResult.outputFiles).toContain('reserve_recommendation.json');
+    expect(resumeResult.outputFiles).toContain('decision_rationale.md');
+
+    // Should have emitted resume event
+    const resumeEvent = events.find((e) => e.type === 'resume');
+    expect(resumeEvent).toBeDefined();
+    if (resumeEvent?.type === 'resume') {
+      expect(resumeEvent.checkpointNodeId).toBe('adjuster_review');
+    }
+
+    // Final state should be completed
+    const finalState = await store.loadRunState(firstResult.runId);
+    expect(finalState!.status).toBe('completed');
+    expect(finalState!.completedPhases).toContain('generate_recommendation');
+  });
+
+  it('resume fails if run is not awaiting_input', async () => {
+    const flow = await loadFlow('simple-summary');
+
+    const behaviors = new Map<string, MockBehavior>([
+      ['extract_content', { outputFiles: { 'content_extracted.json': '{}' } }],
+      ['generate_summary', { outputFiles: { 'summary.json': '{}' } }],
+    ]);
+
+    const runner = new MockRunner(behaviors);
+    const orchestrator = new FlowOrchestrator(runner, store, {
+      workspaceBasePath: workspaceDir,
+    });
+
+    const result = await orchestrator.execute(flow, [
+      { name: 'document.pdf', content: Buffer.from('pdf'), producedByPhase: 'user_upload' },
+    ]);
+
+    expect(result.status).toBe('completed');
+
+    // Try to resume a completed run
+    const resumeResult = await orchestrator.resume(flow, result.runId, {
+      fileName: 'answer.json',
+      content: Buffer.from('{}'),
+    });
+
+    expect(resumeResult.success).toBe(false);
+    expect(resumeResult.error).toContain('not awaiting input');
+  });
+
+  it('resume fails if run does not exist', async () => {
+    const flow = await loadFlow('simple-summary');
+
+    const runner = new MockRunner(new Map());
+    const orchestrator = new FlowOrchestrator(runner, store, {
+      workspaceBasePath: workspaceDir,
+    });
+
+    const resumeResult = await orchestrator.resume(flow, 'nonexistent-run-id', {
+      fileName: 'answer.json',
+      content: Buffer.from('{}'),
+    });
+
+    expect(resumeResult.success).toBe(false);
+    expect(resumeResult.error).toContain('not found');
+  });
+
   it('rejects invalid flow', async () => {
     const invalidFlow: FlowDefinition = {
       id: 'bad_flow',

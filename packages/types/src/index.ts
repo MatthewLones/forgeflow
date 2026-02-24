@@ -26,6 +26,7 @@ export type {
   ReviewAnswer,
   EscalationInterrupt,
   EscalationAnswer,
+  EscalatedAnswer,
   Interrupt,
   InterruptAnswer,
 } from './interrupt.js';

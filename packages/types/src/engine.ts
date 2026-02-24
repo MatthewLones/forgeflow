@@ -50,13 +50,19 @@ export interface PhaseResult {
 
 export type ProgressEvent =
   | { type: 'phase_started'; nodeId: string; nodeName: string; phaseNumber: number }
-  | { type: 'phase_completed'; nodeId: string; outputFiles: string[]; cost: number }
+  | { type: 'phase_completed'; nodeId: string; outputFiles: string[]; cost: number; missingOutputs?: string[] }
   | { type: 'message'; content: string }
   | { type: 'checkpoint'; checkpoint: CheckpointState }
   | { type: 'interrupt'; interrupt: Interrupt }
   | { type: 'cost_update'; turns: number; usd: number }
   | { type: 'run_completed'; success: boolean; totalCost: { turns: number; usd: number } }
-  | { type: 'phase_failed'; nodeId: string; error: string };
+  | { type: 'phase_failed'; nodeId: string; error: string }
+  | { type: 'child_started'; childId: string; childName: string; parentPath: string[] }
+  | { type: 'child_completed'; childId: string; childName: string; parentPath: string[]; outputFiles: string[] }
+  | { type: 'resume'; runId: string; checkpointNodeId: string }
+  | { type: 'file_written'; fileName: string; fileSize: number; nodeId: string }
+  | { type: 'escalation_timeout'; interruptId: string; nodeId: string; timeoutMs: number }
+  | { type: 'interrupt_answered'; interruptId: string; nodeId: string; escalated: boolean };
 
 // --- Run Result ---
 

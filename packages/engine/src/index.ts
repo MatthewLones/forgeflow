@@ -8,4 +8,10 @@ export { InterruptWatcher } from './interrupt-watcher.js';
 export type { InterruptHandler, InterruptWatcherOptions } from './interrupt-watcher.js';
 export { DockerAgentRunner } from './docker-runner.js';
 export type { DockerAgentRunnerOptions } from './docker-runner.js';
-export { prepareWorkspace, collectOutputs, cleanupWorkspace } from './workspace.js';
+export {
+  prepareWorkspace,
+  collectOutputs,
+  cleanupWorkspace,
+  getExpectedOutputs,
+  validateOutputs,
+} from './workspace.js';

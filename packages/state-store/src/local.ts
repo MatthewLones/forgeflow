@@ -59,7 +59,11 @@ export class LocalStateStore implements StateStore {
   async loadRunState(runId: string): Promise<RunState | null> {
     const data = await this.tryReadFile(join(this.runDir(runId), 'state.json'));
     if (!data) return null;
-    return JSON.parse(data.toString('utf-8')) as RunState;
+    try {
+      return JSON.parse(data.toString('utf-8')) as RunState;
+    } catch {
+      return null;
+    }
   }
 
   async saveCheckpoint(runId: string, checkpoint: CheckpointState): Promise<void> {
@@ -71,7 +75,11 @@ export class LocalStateStore implements StateStore {
   async loadCheckpoint(runId: string): Promise<CheckpointState | null> {
     const data = await this.tryReadFile(join(this.runDir(runId), 'checkpoint.json'));
     if (!data) return null;
-    return JSON.parse(data.toString('utf-8')) as CheckpointState;
+    try {
+      return JSON.parse(data.toString('utf-8')) as CheckpointState;
+    } catch {
+      return null;
+    }
   }
 
   async saveCheckpointAnswer(runId: string, fileName: string, content: Buffer): Promise<void> {

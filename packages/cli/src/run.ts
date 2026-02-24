@@ -12,7 +12,7 @@ import type { AgentRunner, MockBehavior } from '@forgeflow/engine';
 import type { StateFile, ProgressEvent } from '@forgeflow/types';
 import { createCliInterruptHandler } from './interrupt-handler.js';
 
-interface RunOptions {
+export interface RunOptions {
   flowDir: string;
   inputFiles: string[];
   model?: string;
@@ -63,7 +63,7 @@ function parseArgs(args: string[]): RunOptions {
   return options;
 }
 
-function createRunner(options: RunOptions): AgentRunner {
+export function createRunner(options: RunOptions): AgentRunner {
   switch (options.runner) {
     case 'mock':
       return new MockRunner(new Map<string, MockBehavior>());
@@ -80,12 +80,17 @@ function createRunner(options: RunOptions): AgentRunner {
   }
 }
 
-function formatProgressEvent(event: ProgressEvent): string {
+export function formatProgressEvent(event: ProgressEvent): string {
   switch (event.type) {
     case 'phase_started':
       return `\n--- Phase ${event.phaseNumber + 1}: ${event.nodeName} (${event.nodeId}) ---`;
-    case 'phase_completed':
-      return `  Phase complete. Outputs: [${event.outputFiles.join(', ')}] Cost: $${event.cost.toFixed(4)}`;
+    case 'phase_completed': {
+      let msg = `  Phase complete. Outputs: [${event.outputFiles.join(', ')}] Cost: $${event.cost.toFixed(4)}`;
+      if (event.missingOutputs && event.missingOutputs.length > 0) {
+        msg += `\n  WARNING: Missing expected outputs: [${event.missingOutputs.join(', ')}]`;
+      }
+      return msg;
+    }
     case 'phase_failed':
       return `  Phase FAILED: ${event.error}`;
     case 'checkpoint':
@@ -98,6 +103,22 @@ function formatProgressEvent(event: ProgressEvent): string {
       return `\n--- Run complete. Total cost: $${event.totalCost.usd.toFixed(4)} (${event.totalCost.turns} turns) ---`;
     case 'cost_update':
       return `  Cost update: $${event.usd.toFixed(4)} (${event.turns} turns)`;
+    case 'child_started':
+      return `    [child] ${event.childName} (${event.childId}) started`;
+    case 'child_completed':
+      return `    [child] ${event.childName} (${event.childId}) completed. Outputs: [${event.outputFiles.join(', ')}]`;
+    case 'resume':
+      return `\n--- Resuming from checkpoint ${event.checkpointNodeId} ---`;
+    case 'file_written': {
+      const sizeStr = event.fileSize < 1024
+        ? `${event.fileSize} B`
+        : `${(event.fileSize / 1024).toFixed(1)} KB`;
+      return `    [output] ${event.fileName} (${sizeStr})`;
+    }
+    case 'escalation_timeout':
+      return `  ESCALATED: Interrupt ${event.interruptId} timed out after ${(event.timeoutMs / 1000).toFixed(0)}s — saving checkpoint`;
+    case 'interrupt_answered':
+      return `  ${event.escalated ? 'ESCALATED' : 'ANSWERED'}: Interrupt ${event.interruptId} — answer delivered to agent`;
   }
 }
 

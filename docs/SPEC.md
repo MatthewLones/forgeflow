@@ -319,17 +319,21 @@ The Agent SDK enforces these. If the budget is exceeded, the agent stops gracefu
 
 ## MVP Deliverables
 
-1. **FLOW.json format spec** — TypeScript types, validation rules
-2. **Flow validator** — Compiler-style type checking (dependency resolution, cycle detection, budget checks, interrupt validation)
-3. **Phase compiler** — Node config → per-phase markdown prompt
-4. **Execution engine** — Per-phase orchestration with Agent SDK
-5. **Sandbox manager** — Docker container per phase (local MVP)
-6. **Bidirectional sandbox channel** — Filesystem watcher for real-time interrupts + progressive output streaming
-7. **State store** — Serialize artifacts between phases (local disk for MVP)
-8. **Checkpoint manager** — Phase boundary + pause for user input
-9. **5 interrupt types** — Approval, Q&A, selection, review, escalation with inline + checkpoint modes
-10. **Flow designer UI** — React app with DAG canvas, node inspector, recursive navigation
-11. **Run viewer** — Real-time progress stream, interrupt panel, state inspector, cost tracking
+| # | Component | Status |
+|---|-----------|--------|
+| 1 | **FLOW.json format spec** — TypeScript types, validation rules | Done |
+| 2 | **Flow validator** — Compiler-style type checking (dependency resolution, cycle detection, budget checks, interrupt validation) | Done |
+| 3 | **Phase compiler** — Node config → per-phase markdown prompt + per-child prompt files | Done |
+| 4 | **Execution engine** — Per-phase orchestration with execute + resume | Done |
+| 5 | **Sandbox manager** — Docker container per phase (local MVP) | Done |
+| 6 | **Bidirectional sandbox channel** — Filesystem watcher for real-time interrupts + progressive output streaming | Done |
+| 7 | **State store** — Serialize artifacts between phases (local disk for MVP) | Done |
+| 8 | **Checkpoint manager** — Pause at checkpoint + resume with user input | Done |
+| 9 | **5 interrupt types** — Approval, Q&A, selection, review, escalation with inline + checkpoint + auto-escalate modes | Done |
+| 10 | **Skill resolver** — Load SKILL.md + references from disk, search path resolution | Done |
+| 11 | **CLI** — `forgeflow run` + `forgeflow resume` with mock/local/docker runners | Done |
+| 12 | **Flow designer UI** — React app with DAG canvas, node inspector, recursive navigation | Not started |
+| 13 | **Run viewer** — Real-time progress stream, interrupt panel, state inspector, cost tracking | Not started |
 
 ## What's NOT in MVP
 

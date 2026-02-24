@@ -2,8 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, readdir, readFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { prepareWorkspace, collectOutputs, cleanupWorkspace } from '../src/workspace.js';
-import type { StateFile } from '@forgeflow/types';
+import {
+  prepareWorkspace,
+  collectOutputs,
+  cleanupWorkspace,
+  getExpectedOutputs,
+  validateOutputs,
+} from '../src/workspace.js';
+import type { FlowNode, StateFile } from '../../types/src/index.js';
 import { writeFile, mkdir } from 'node:fs/promises';
 
 let tempDir: string;
@@ -28,6 +34,27 @@ describe('prepareWorkspace', () => {
 
     const entries = await readdir(workspacePath);
     expect(entries.sort()).toEqual(['input', 'output', 'skills']);
+  });
+
+  it('writes child prompt files to prompts/ directory', async () => {
+    const childPrompts = new Map([
+      ['child_a.md', '# Subagent: Child A\n\nDo the work.'],
+      ['child_b.md', '# Subagent: Child B\n\nDo other work.'],
+    ]);
+
+    const workspacePath = await prepareWorkspace(tempDir, {
+      runId: 'run1',
+      phaseId: 'phase1',
+      inputFiles: [],
+      childPrompts,
+    });
+
+    const promptsDir = join(workspacePath, 'prompts');
+    const entries = await readdir(promptsDir);
+    expect(entries.sort()).toEqual(['child_a.md', 'child_b.md']);
+
+    const content = await readFile(join(promptsDir, 'child_a.md'), 'utf-8');
+    expect(content).toBe('# Subagent: Child A\n\nDo the work.');
   });
 
   it('populates input files', async () => {
@@ -71,7 +98,7 @@ describe('collectOutputs', () => {
     expect(outputs[0].producedByPhase).toBe('phase1');
   });
 
-  it('skips interrupt and answer signal files', async () => {
+  it('skips all sandbox channel signal files', async () => {
     const workspacePath = await prepareWorkspace(tempDir, {
       runId: 'run1',
       phaseId: 'phase1',
@@ -82,6 +109,8 @@ describe('collectOutputs', () => {
     await writeFile(join(outputDir, 'result.json'), 'data');
     await writeFile(join(outputDir, '__INTERRUPT__agent1.json'), '{}');
     await writeFile(join(outputDir, '__ANSWER__agent1.json'), '{}');
+    await writeFile(join(outputDir, '__CHILD_START__child1.json'), '{}');
+    await writeFile(join(outputDir, '__CHILD_DONE__child1.json'), '{}');
 
     const outputs = await collectOutputs(workspacePath, 'phase1');
     expect(outputs).toHaveLength(1);
@@ -91,6 +120,89 @@ describe('collectOutputs', () => {
   it('returns empty array when no output directory exists', async () => {
     const outputs = await collectOutputs(join(tempDir, 'nonexistent'), 'phase1');
     expect(outputs).toHaveLength(0);
+  });
+});
+
+describe('getExpectedOutputs', () => {
+  function makeNode(overrides: Partial<FlowNode> = {}): FlowNode {
+    return {
+      id: 'node1',
+      type: 'agent',
+      name: 'Test Node',
+      instructions: 'test',
+      config: {
+        inputs: [],
+        outputs: ['output_a.json'],
+        skills: [],
+      },
+      children: [],
+      ...overrides,
+    };
+  }
+
+  it('collects outputs from a simple node', () => {
+    const node = makeNode({ config: { inputs: [], outputs: ['a.json', 'b.json'], skills: [] } });
+    expect(getExpectedOutputs(node)).toEqual(['a.json', 'b.json']);
+  });
+
+  it('collects outputs recursively from children', () => {
+    const node = makeNode({
+      config: { inputs: [], outputs: ['parent_out.json'], skills: [] },
+      children: [
+        makeNode({ id: 'child1', config: { inputs: [], outputs: ['child1_out.json'], skills: [] } }),
+        makeNode({ id: 'child2', config: { inputs: [], outputs: ['child2_out.json'], skills: [] } }),
+      ],
+    });
+    const outputs = getExpectedOutputs(node);
+    expect(outputs).toEqual(['parent_out.json', 'child1_out.json', 'child2_out.json']);
+  });
+
+  it('collects outputs from deeply nested children', () => {
+    const grandchild = makeNode({
+      id: 'grandchild',
+      config: { inputs: [], outputs: ['gc_out.json'], skills: [] },
+    });
+    const child = makeNode({
+      id: 'child',
+      config: { inputs: [], outputs: ['child_out.json'], skills: [] },
+      children: [grandchild],
+    });
+    const parent = makeNode({
+      config: { inputs: [], outputs: ['parent_out.json'], skills: [] },
+      children: [child],
+    });
+
+    const outputs = getExpectedOutputs(parent);
+    expect(outputs).toEqual(['parent_out.json', 'child_out.json', 'gc_out.json']);
+  });
+});
+
+describe('validateOutputs', () => {
+  it('returns valid when all expected outputs are found', () => {
+    const collected: StateFile[] = [
+      { name: 'a.json', content: Buffer.from('{}'), producedByPhase: 'test' },
+      { name: 'b.json', content: Buffer.from('{}'), producedByPhase: 'test' },
+    ];
+    const result = validateOutputs(collected, ['a.json', 'b.json']);
+    expect(result.valid).toBe(true);
+    expect(result.missing).toEqual([]);
+    expect(result.found).toEqual(['a.json', 'b.json']);
+  });
+
+  it('reports missing outputs', () => {
+    const collected: StateFile[] = [
+      { name: 'a.json', content: Buffer.from('{}'), producedByPhase: 'test' },
+    ];
+    const result = validateOutputs(collected, ['a.json', 'b.json', 'c.json']);
+    expect(result.valid).toBe(false);
+    expect(result.missing).toEqual(['b.json', 'c.json']);
+    expect(result.found).toEqual(['a.json']);
+  });
+
+  it('handles empty expected outputs', () => {
+    const result = validateOutputs([], []);
+    expect(result.valid).toBe(true);
+    expect(result.missing).toEqual([]);
   });
 });
 

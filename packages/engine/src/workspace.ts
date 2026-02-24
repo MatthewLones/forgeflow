@@ -1,6 +1,6 @@
 import { mkdir, writeFile, readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { StateFile } from '@forgeflow/types';
+import type { FlowNode, StateFile } from '@forgeflow/types';
 import type { ResolvedSkill } from '@forgeflow/skill-resolver';
 
 /**
@@ -19,6 +19,7 @@ export async function prepareWorkspace(
     phaseId: string;
     inputFiles: StateFile[];
     skills?: ResolvedSkill[];
+    childPrompts?: Map<string, string>;
   },
 ): Promise<string> {
   const workspacePath = join(basePath, options.runId, options.phaseId);
@@ -33,6 +34,15 @@ export async function prepareWorkspace(
   // Write input files
   for (const file of options.inputFiles) {
     await writeFile(join(inputDir, file.name), file.content);
+  }
+
+  // Write child prompt files
+  if (options.childPrompts && options.childPrompts.size > 0) {
+    const promptsDir = join(workspacePath, 'prompts');
+    await mkdir(promptsDir, { recursive: true });
+    for (const [name, content] of options.childPrompts) {
+      await writeFile(join(promptsDir, name), content);
+    }
   }
 
   // Copy skills to workspace
@@ -81,14 +91,60 @@ export async function collectOutputs(
   }
 
   for (const name of entries) {
-    // Skip interrupt/answer signal files
-    if (name.startsWith('__INTERRUPT__') || name.startsWith('__ANSWER__')) continue;
+    // Skip sandbox channel signal files
+    if (
+      name.startsWith('__INTERRUPT__') ||
+      name.startsWith('__ANSWER__') ||
+      name.startsWith('__CHILD_START__') ||
+      name.startsWith('__CHILD_DONE__')
+    ) continue;
 
     const content = await readFile(join(outputDir, name));
     results.push({ name, content, producedByPhase: phaseId });
   }
 
   return results;
+}
+
+/**
+ * Recursively collect ALL expected output filenames from a node and its children at all depths.
+ * Deduplicates because parent nodes declare children's outputs in their own config.outputs.
+ */
+export function getExpectedOutputs(node: FlowNode): string[] {
+  const outputSet = new Set<string>();
+  collectExpectedOutputsRecursive(node, outputSet);
+  return [...outputSet];
+}
+
+function collectExpectedOutputsRecursive(node: FlowNode, outputs: Set<string>): void {
+  for (const file of node.config.outputs) {
+    outputs.add(file);
+  }
+  for (const child of node.children) {
+    collectExpectedOutputsRecursive(child, outputs);
+  }
+}
+
+/**
+ * Validate that collected outputs include all expected output filenames.
+ */
+export function validateOutputs(
+  collectedOutputs: StateFile[],
+  expectedOutputs: string[],
+): { valid: boolean; missing: string[]; found: string[] } {
+  const collectedNames = new Set(collectedOutputs.map((f) => f.name));
+  const found: string[] = [];
+  const missing: string[] = [];
+
+  for (const expected of expectedOutputs) {
+    if (collectedNames.has(expected)) {
+      found.push(expected);
+    } else {
+      missing.push(expected);
+    }
+  }
+
+  return { valid: missing.length === 0, missing, found };
 }
 
 /**

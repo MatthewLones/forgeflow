@@ -118,53 +118,38 @@ clause number, title, full text, clause type. Identify all defined terms.
 
 #### Per-Phase Prompt with Children (Subagents)
 
-When a node has children, the prompt tells Claude to spawn subagents within this phase:
+When a node has children, the compiler generates **per-child prompt files** instead of inlining all child instructions into the parent prompt. This keeps token usage O(n) per nesting level instead of O(n^depth).
+
+The parent prompt gets a reference table:
 
 ```markdown
-# Phase: Research
+## Subagents — Launch All Concurrently
 
-You are executing one phase of a ForgeFlow workflow.
+| Child | Prompt File | Outputs |
+|-------|-------------|---------|
+| Liability Analyst | prompts/analyze_liability.md | output/liability_findings.json |
+| IP Analyst | prompts/analyze_ip.md | output/ip_findings.json |
+| Termination Analyst | prompts/analyze_termination.md | output/termination_findings.json |
 
-## Your Task
-Coordinate 3 parallel research subagents. Each writes its own output file.
-
-## Input Files
-- input/clauses_parsed.json (from prior phase)
-
-## Output Files (you MUST produce ALL of these)
-- output/liability_findings.json
-- output/ip_findings.json
-- output/termination_findings.json
-
-## Skills Available
-- contract-law-basics (in skills/contract-law-basics/)
-
-## Budget
-- Max turns: 120
-- Max cost: $15.00
-
-## Subagents — Launch All 3 Concurrently
-
-### Subagent 1: Liability & Indemnification Analyst
-**Skills:** contract-law-basics
-**Inputs:** output/clauses_parsed.json
-**Outputs:** output/liability_findings.json
-**Budget:** 35 turns, $4.00
-
-Review all indemnification, limitation of liability, warranty, and insurance
-clauses. For each: assess if terms are one-sided...
-
-### Subagent 2: IP & Confidentiality Analyst
-[...]
-
-### Subagent 3: Termination & Governance Analyst
-[...]
-
-Launch all three concurrently using the Task tool. Each writes its own output file.
+Launch all subagents concurrently using the Task tool. Pass each the contents of its prompt file.
 After all complete, verify all output files exist.
 ```
 
-The key difference: subagents run **within** a phase (inside the same sandbox), spawned by Claude via the Task tool. Phase boundaries are managed by the engine.
+Each child prompt file (e.g., `prompts/analyze_liability.md`) is self-contained with its own instructions, inputs, outputs, budget, and skills. If a child has its own children, those are referenced the same way — prompt files all the way down.
+
+The workspace layout:
+```
+workspace/
+├── input/              ← Files from state store
+├── output/             ← Agent writes here
+├── skills/             ← Only skills this phase needs
+└── prompts/            ← Per-child prompt files (if node has children)
+    ├── analyze_liability.md
+    ├── analyze_ip.md
+    └── analyze_termination.md
+```
+
+Subagents run **within** a phase (inside the same sandbox), spawned by Claude via the Task tool. Phase boundaries are managed by the engine.
 
 ### 2. Flow Validator
 
@@ -360,56 +345,46 @@ See [INTERRUPTS.md](INTERRUPTS.md) for the full interrupt protocol, including in
 
 ### 5. Agent Runner
 
-Executes one phase at a time via Claude Agent SDK.
+Executes one phase at a time. The `AgentRunner` interface abstracts how a phase prompt is executed, allowing different implementations:
 
 ```typescript
-import { query } from '@anthropic-ai/claude-agent-sdk';
-
-interface PhaseRunOptions {
-  prompt: string;                // Per-phase compiled prompt
-  workspacePath: string;         // Sandbox workspace root
-  budget: { maxTurns: number; maxBudgetUsd: number };
-  onProgress: (event: ProgressEvent) => void;
-}
-
-async function runPhase(options: PhaseRunOptions): Promise<PhaseResult> {
-  const result = await query({
-    prompt: options.prompt,
-    options: {
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      maxTurns: options.budget.maxTurns,
-      maxBudgetUsd: options.budget.maxBudgetUsd,
-      tools: { type: 'preset', preset: 'claude_code' },
-      systemPrompt: {
-        type: 'preset',
-        preset: 'claude_code',
-        append: FLOWFORGE_PHASE_SYSTEM_PROMPT,
-      },
-      settingSources: ['project'],
-      cwd: options.workspacePath,
-      model: 'claude-opus-4-6',
-    },
-  });
-
-  let finalResult = null;
-
-  for await (const msg of result) {
-    if (msg.type === 'assistant') {
-      options.onProgress({ type: 'message', content: extractText(msg) });
-    } else if (msg.type === 'result') {
-      finalResult = msg;
-    }
-  }
-
-  return {
-    success: finalResult?.subtype === 'success',
-    cost: finalResult?.total_cost_usd ?? 0,
-    turns: finalResult?.num_turns ?? 0,
-    outputFiles: listOutputFiles(options.workspacePath),
-  };
+interface AgentRunner {
+  runPhase(options: {
+    nodeId: string;
+    prompt: string;
+    workspacePath: string;
+    budget: { maxTurns: number; maxBudgetUsd: number };
+    onProgress?: (event: ProgressEvent) => void;
+  }): Promise<PhaseResult>;
 }
 ```
+
+**Three implementations:**
+
+| Runner | Use case | How it works |
+|--------|----------|-------------|
+| `MockRunner` | Testing | Writes predefined output files, returns configured costs. No API calls. |
+| `ClaudeAgentRunner` | Local development | Runs Claude Agent SDK `query()` directly on the host. |
+| `DockerAgentRunner` | Production (local) | Builds a Docker image with Claude Code CLI, runs agent inside a container with mounted workspace volume. |
+
+`ClaudeAgentRunner` uses the Agent SDK:
+
+```typescript
+const result = await query({
+  prompt: options.prompt,
+  options: {
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
+    maxTurns: options.budget.maxTurns,
+    tools: { type: 'preset', preset: 'claude_code' },
+    systemPrompt: { type: 'preset', preset: 'claude_code', append: PHASE_SYSTEM_PROMPT },
+    cwd: options.workspacePath,
+    model: 'claude-sonnet-4-6',
+  },
+});
+```
+
+`DockerAgentRunner` builds a one-time Docker image (`forgeflow-sandbox:latest`) and creates a container per phase with the workspace mounted as a volume. The agent runs inside the container; the engine watches the host-side mount point for output files and interrupt signals.
 
 ### 6. State Store
 
@@ -417,20 +392,14 @@ The state store holds all artifacts between phases. It's the single source of tr
 
 ```typescript
 interface StateStore {
-  // Save output files from a completed phase
   savePhaseOutputs(runId: string, phaseId: string, files: StateFile[]): Promise<void>;
-
-  // Load input files needed for a phase (from user uploads + prior phase outputs)
-  loadPhaseInputs(runId: string, phaseId: string, inputNames: string[]): Promise<StateFile[]>;
-
-  // Save/load run metadata (status, cost, completed phases)
+  loadPhaseInputs(runId: string, inputNames: string[]): Promise<StateFile[]>;
   saveRunState(runId: string, state: RunState): Promise<void>;
-  loadRunState(runId: string): Promise<RunState>;
-
-  // Save/load checkpoint data (for human-in-the-loop pauses)
+  loadRunState(runId: string): Promise<RunState | null>;
   saveCheckpoint(runId: string, checkpoint: CheckpointState): Promise<void>;
   loadCheckpoint(runId: string): Promise<CheckpointState | null>;
-  saveCheckpointAnswer(runId: string, answerFile: StateFile): Promise<void>;
+  saveCheckpointAnswer(runId: string, fileName: string, content: Buffer): Promise<void>;
+  saveUserUploads(runId: string, files: StateFile[]): Promise<void>;
 }
 
 interface StateFile {
@@ -494,12 +463,18 @@ When the engine reaches a checkpoint node:
 1. All prior phase outputs are already in the state store
 2. Engine reads the checkpoint node's `config.inputs` from the state store
 3. Engine emits a `checkpoint` event to the frontend with the data to present
-4. Engine sets run status to `awaiting_input`
-5. **No sandbox running** — zero cost while waiting
+4. Engine sets run status to `awaiting_input` and saves `CheckpointState`
+5. Engine returns `{ status: 'awaiting_input' }` — **no sandbox running, zero cost**
 6. User takes 5 minutes or 5 days — doesn't matter
-7. User provides input → written to state store as the checkpoint's output file
-8. Engine sets run status back to `processing`
-9. Engine creates a new sandbox for the next phase, with all prior outputs + user input
+
+To resume after a checkpoint, call `orchestrator.resume(flow, runId, checkpointInput)`:
+1. Loads saved `RunState` (verifies `awaiting_input` status)
+2. Loads `CheckpointState` to get `costSoFar` and `completedPhases`
+3. Saves user's answer as an artifact in the state store
+4. Re-validates flow and finds checkpoint position in execution plan
+5. Continues execution from the phase after the checkpoint, carrying forward accumulated cost
+
+**Auto-escalated checkpoints:** When an inline interrupt handler times out, the `InterruptWatcher` writes an `EscalatedAnswer` and the orchestrator creates a synthetic checkpoint. The run pauses with `awaiting_input` just like a normal checkpoint, and `resume()` picks up from the next phase.
 
 ### 8. Progress Streamer
 
@@ -508,16 +483,19 @@ Emits events from the execution engine to the frontend:
 ```typescript
 type ProgressEvent =
   | { type: 'phase_started'; nodeId: string; nodeName: string; phaseNumber: number }
-  | { type: 'phase_completed'; nodeId: string; outputFiles: string[]; cost: number }
-  | { type: 'message'; content: string }          // Agent text output within a phase
-  | { type: 'tool_call'; toolName: string }        // Agent tool usage
-  | { type: 'subagent_spawned'; childId: string }  // Subagent within a phase
+  | { type: 'phase_completed'; nodeId: string; outputFiles: string[]; cost: number; missingOutputs?: string[] }
+  | { type: 'message'; content: string }
   | { type: 'checkpoint'; checkpoint: CheckpointState }
-  | { type: 'interrupt'; interrupt: Interrupt }    // Real-time interrupt from any depth
-  | { type: 'output_streamed'; file: string; nodeId: string }  // Progressive output
+  | { type: 'interrupt'; interrupt: Interrupt }
+  | { type: 'interrupt_answered'; interruptId: string; nodeId: string; escalated: boolean }
   | { type: 'cost_update'; turns: number; usd: number }
-  | { type: 'run_completed'; result: RunResult }
-  | { type: 'phase_failed'; nodeId: string; error: string };
+  | { type: 'run_completed'; success: boolean; totalCost: { turns: number; usd: number } }
+  | { type: 'phase_failed'; nodeId: string; error: string }
+  | { type: 'child_started'; childId: string; childName: string; parentPath: string[] }
+  | { type: 'child_completed'; childId: string; childName: string; parentPath: string[]; outputFiles: string[] }
+  | { type: 'resume'; runId: string; checkpointNodeId: string }
+  | { type: 'file_written'; fileName: string; fileSize: number; nodeId: string }
+  | { type: 'escalation_timeout'; interruptId: string; nodeId: string; timeoutMs: number };
 ```
 
 | Local (MVP) | Cloud |
@@ -527,89 +505,62 @@ type ProgressEvent =
 
 ### 9. Flow Orchestrator
 
-The top-level loop that coordinates everything:
+The `FlowOrchestrator` coordinates all phases. It supports both initial execution and resuming from checkpoints:
 
 ```typescript
-async function executeFlow(flowJson: FlowDefinition, userInputs: StateFile[]): Promise<RunResult> {
-  const runId = generateRunId();
-  const stateStore = getStateStore(); // Local or cloud adapter
+class FlowOrchestrator {
+  constructor(runner: AgentRunner, stateStore: StateStore, options?: OrchestratorOptions) {}
 
-  // Save user inputs to state store
-  await stateStore.savePhaseOutputs(runId, '__user_inputs__', userInputs);
+  // Execute a flow from the beginning
+  async execute(flow: FlowDefinition, userUploads: StateFile[]): Promise<RunResult>;
 
-  // Topological sort nodes by edges
-  const executionOrder = topologicalSort(flowJson.nodes, flowJson.edges);
+  // Resume a paused flow after the user provides checkpoint input
+  async resume(flow: FlowDefinition, runId: string, checkpointInput: { fileName: string; content: Buffer }): Promise<RunResult>;
 
-  let totalCost = 0;
-  let totalTurns = 0;
-
-  for (const node of executionOrder) {
-    // --- Checkpoint node: pause for user input ---
-    if (node.type === 'checkpoint') {
-      const checkpoint: CheckpointState = {
-        runId,
-        checkpointNodeId: node.id,
-        status: 'waiting',
-        presentFiles: node.config.inputs,
-        waitingForFile: node.config.outputs[0],
-        completedPhases: executionOrder
-          .slice(0, executionOrder.indexOf(node))
-          .map(n => n.id),
-        costSoFar: { turns: totalTurns, usd: totalCost },
-        presentation: node.config.presentation!,
-      };
-      await stateStore.saveCheckpoint(runId, checkpoint);
-      emit({ type: 'checkpoint', checkpoint });
-
-      // Wait for user to provide input (could be minutes or days)
-      await waitForCheckpointAnswer(runId);
-      continue;
-    }
-
-    // --- Agent or Merge node: execute in sandbox ---
-    emit({ type: 'phase_started', nodeId: node.id, nodeName: node.name });
-
-    // 1. Compile per-phase prompt
-    const prompt = compilePhasePrompt(node, flowJson.skills);
-
-    // 2. Resolve skills for this node
-    const skills = resolveSkills(node, flowJson.skills);
-
-    // 3. Load input files from state store
-    const inputs = await stateStore.loadPhaseInputs(runId, node.id, node.config.inputs);
-
-    // 4. Create sandbox with only what this phase needs
-    const sandbox = await sandboxManager.create({
-      phaseId: node.id,
-      runId,
-      skills,
-      inputFiles: inputs,
-    });
-
-    // 5. Run the agent
-    const result = await runPhase({
-      prompt,
-      workspacePath: sandbox.workspacePath,
-      budget: node.config.budget ?? flowJson.budget,
-      onProgress: emit,
-    });
-
-    // 6. Collect outputs → state store
-    const outputs = await sandboxManager.collect(sandbox);
-    await stateStore.savePhaseOutputs(runId, node.id, outputs);
-
-    // 7. Tear down sandbox
-    await sandboxManager.destroy(sandbox);
-
-    totalCost += result.cost;
-    totalTurns += result.turns;
-
-    emit({ type: 'phase_completed', nodeId: node.id, outputFiles: outputs.map(f => f.name), cost: result.cost });
-  }
-
-  return { success: true, totalCost, totalTurns };
+  // Shared phase loop (used by both execute and resume)
+  private async executePhases(ctx: ExecuteContext): Promise<RunResult>;
 }
 ```
+
+**Execute flow:** Validates FLOW.json → initializes run state → saves user uploads → calls `executePhases()` from phase 0.
+
+**Resume flow:** Loads saved RunState (verifies `awaiting_input`) → loads CheckpointState → saves user's answer as artifact → finds checkpoint in execution plan → calls `executePhases()` from checkpoint+1 with accumulated cost.
+
+**Phase loop** (simplified):
+```typescript
+for (const phase of executionPlan.phases) {
+  if (node.type === 'checkpoint') {
+    // Save checkpoint state, return { status: 'awaiting_input' }
+  }
+
+  // Compile prompt, resolve skills, prepare workspace
+  const prompt = compilePhasePrompt(node, context);
+
+  // Start InterruptWatcher if node has interrupts
+  if (interruptHandler && nodeHasInterrupts(node)) {
+    interruptWatcher = new InterruptWatcher();
+    await interruptWatcher.start({ workspacePath, onInterrupt, onProgress, nodeId, escalateTimeoutMs });
+  }
+
+  // Run the agent
+  const result = await runner.runPhase({ nodeId, prompt, workspacePath, budget });
+
+  await interruptWatcher?.stop();
+
+  // Check for auto-escalation (interrupt handler timed out)
+  if (interruptWatcher?.escalated) {
+    // Save outputs, create synthetic checkpoint, return { status: 'awaiting_input' }
+  }
+
+  // Collect outputs → state store → cleanup workspace
+}
+```
+
+The `InterruptWatcher` monitors the workspace `output/` directory using chokidar and handles:
+- `__INTERRUPT__*.json` → queued for sequential handler processing with optional auto-escalation timeout
+- `__CHILD_START__/*.json`, `__CHILD_DONE__*.json` → fire-and-forget progress events
+- `__ANSWER__*.json` → ignored (written by the watcher itself)
+- Regular files → emit `file_written` progress events for real-time streaming
 
 ## State Machine
 
@@ -734,11 +685,13 @@ RULES:
 |----------|--------|-----|
 | Per-phase execution | Engine orchestrates, one agent per phase | Clean context, resource savings, natural serialization |
 | Sandbox per phase | New container for each phase | Isolation, security, clean filesystem |
-| Bidirectional sandbox channel | Filesystem watcher, not just end-of-phase collection | Real-time interrupts, progressive output streaming, live monitoring |
+| Bidirectional sandbox channel | Filesystem watcher (chokidar), not just end-of-phase collection | Real-time interrupts, progressive output streaming, live monitoring |
 | Flow validation before execution | Compiler-style type checking on FLOW.json | Catch dependency errors, missing inputs, cycles at design time |
 | 5 interrupt types | approval, qa, selection, review, escalation | Covers all human-in-the-loop patterns across domains |
-| Inline + checkpoint interrupt modes | Auto-escalate from inline → checkpoint on timeout | Quick questions stay fast, long pauses cost nothing |
-| Progressive output streaming | Files stream to state store as written | Better fault recovery, real-time visibility |
+| Inline + checkpoint interrupt modes | Auto-escalate from inline → checkpoint on timeout via Promise.race | Quick questions stay fast, long pauses cost nothing |
+| Progressive output streaming | InterruptWatcher emits `file_written` events for all output files | Real-time visibility, future fault recovery |
 | State store abstraction | Interface with local/cloud adapters | Same engine code works everywhere |
-| Subagents within phases | Claude spawns via Task tool | Leverages Agent SDK's native concurrency |
+| Per-child prompt files | Child prompts written to `prompts/` directory, parent has reference table | O(n) tokens per level instead of O(n^depth) with inlining |
+| Resume after checkpoint | `orchestrator.resume()` reloads state and continues from checkpoint+1 | Supports long pauses (minutes, days) with zero cost |
+| AgentRunner interface | MockRunner / ClaudeAgentRunner / DockerAgentRunner | Test without API, run locally, or run in Docker sandbox |
 | Skills loaded per phase | Only declared skills copied to sandbox | Minimal context, faster startup |

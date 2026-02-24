@@ -110,6 +110,14 @@ export interface EscalationAnswer {
   routedTo?: string;
 }
 
+// --- Escalated (auto-escalate timeout) ---
+
+export interface EscalatedAnswer {
+  decision: 'escalated';
+  originalInterruptId: string;
+  reason: 'timeout';
+}
+
 // --- Union types ---
 
 export type Interrupt =
@@ -124,4 +132,5 @@ export type InterruptAnswer =
   | QAAnswer
   | SelectionAnswer
   | ReviewAnswer
-  | EscalationAnswer;
+  | EscalationAnswer
+  | EscalatedAnswer;

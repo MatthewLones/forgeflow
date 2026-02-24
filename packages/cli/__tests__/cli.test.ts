@@ -27,6 +27,7 @@ describe('CLI', () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain('ForgeFlow CLI');
     expect(stdout).toContain('forgeflow run');
+    expect(stdout).toContain('forgeflow resume');
   });
 
   it('shows help with --help', () => {
@@ -85,5 +86,30 @@ describe('CLI', () => {
     // Should pause at checkpoint (awaiting_input is still success=true)
     expect(exitCode).toBe(0);
     expect(stdout).toContain('Insurance Claim Analysis');
+  });
+
+  it('resume errors on missing flow-dir', () => {
+    const { stdout, exitCode } = runCli(['resume']);
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain('Missing required argument');
+  });
+
+  it('resume errors on missing run-id', () => {
+    const { stdout, exitCode } = runCli([
+      'resume',
+      join(EXAMPLES_DIR, 'insurance-claim'),
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain('Missing required argument');
+  });
+
+  it('resume errors on missing --input', () => {
+    const { stdout, exitCode } = runCli([
+      'resume',
+      join(EXAMPLES_DIR, 'insurance-claim'),
+      'fake-run-id',
+    ]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain('Missing required argument');
   });
 });
