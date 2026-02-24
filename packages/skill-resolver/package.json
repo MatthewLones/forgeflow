@@ -1,5 +1,5 @@
 {
-  "name": "@forgeflow/engine",
+  "name": "@forgeflow/skill-resolver",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,20 +14,9 @@
     "build": "tsup src/index.ts --format esm --dts",
     "dev": "tsup src/index.ts --format esm --dts --watch"
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
-    "@forgeflow/compiler": "workspace:*",
-    "@forgeflow/skill-resolver": "workspace:*",
-    "@forgeflow/state-store": "workspace:*",
     "@forgeflow/types": "workspace:*",
-    "@forgeflow/validator": "workspace:*",
-    "chokidar": "^4.0.0",
-    "dockerode": "^4.0.0"
-  },
-  "devDependencies": {
-    "@types/dockerode": "^4.0.1"
+    "yaml": "^2.7.0"
   }
 }

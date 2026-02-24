@@ -13,14 +13,22 @@ import { validateFlow } from '@forgeflow/validator';
 import { compilePhasePrompt } from '@forgeflow/compiler';
 import type { CompileContext } from '@forgeflow/compiler';
 import type { StateStore } from '@forgeflow/state-store';
+import { resolveSkills } from '@forgeflow/skill-resolver';
+import type { ResolvedSkill } from '@forgeflow/skill-resolver';
 import type { AgentRunner } from './runner.js';
 import { prepareWorkspace, collectOutputs, cleanupWorkspace } from './workspace.js';
+import { InterruptWatcher } from './interrupt-watcher.js';
+import type { InterruptHandler } from './interrupt-watcher.js';
 
 export interface OrchestratorOptions {
   /** Callback for progress events */
   onProgress?: (event: ProgressEvent) => void;
   /** Base path for workspace directories (default: os.tmpdir()) */
   workspaceBasePath?: string;
+  /** Ordered search paths for skill directories */
+  skillSearchPaths?: string[];
+  /** Handler for inline interrupts (if not provided, interrupts are ignored) */
+  interruptHandler?: InterruptHandler;
 }
 
 export class FlowOrchestrator {
@@ -140,19 +148,37 @@ export class FlowOrchestrator {
       // Load input files from state store
       const inputFiles = await this.stateStore.loadPhaseInputs(runId, node.config.inputs);
 
+      // Resolve skills for this phase
+      const allSkillNames = [...new Set([...flow.skills, ...node.config.skills])];
+      let resolvedSkills: ResolvedSkill[] = [];
+      if (allSkillNames.length > 0 && this.options?.skillSearchPaths?.length) {
+        resolvedSkills = await resolveSkills(allSkillNames, this.options.skillSearchPaths);
+      }
+
       // Prepare workspace
       const workspaceBase = this.options?.workspaceBasePath ?? '/tmp/forgeflow-workspaces';
       const workspacePath = await prepareWorkspace(workspaceBase, {
         runId,
         phaseId: node.id,
         inputFiles,
+        skills: resolvedSkills,
       });
 
-      // Run the phase
+      // Run the phase (with interrupt watcher if handler provided)
       const budget = node.config.budget ?? {
         maxTurns: flow.budget.maxTurns,
         maxBudgetUsd: flow.budget.maxBudgetUsd,
       };
+
+      let interruptWatcher: InterruptWatcher | undefined;
+      if (this.options?.interruptHandler && nodeHasInterrupts(node)) {
+        interruptWatcher = new InterruptWatcher();
+        await interruptWatcher.start({
+          workspacePath,
+          onInterrupt: this.options.interruptHandler,
+          onProgress: emit,
+        });
+      }
 
       const phaseResult = await this.runner.runPhase({
         nodeId: node.id,
@@ -161,6 +187,10 @@ export class FlowOrchestrator {
         budget,
         onProgress: emit,
       });
+
+      if (interruptWatcher) {
+        await interruptWatcher.stop();
+      }
 
       if (!phaseResult.success) {
         emit({ type: 'phase_failed', nodeId: node.id, error: phaseResult.error ?? 'Unknown error' });
@@ -244,4 +274,12 @@ function buildOutputMap(nodes: FlowNode[]): Map<string, string> {
     }
   }
   return map;
+}
+
+/**
+ * Check if a node or any of its children have interrupt configs.
+ */
+function nodeHasInterrupts(node: FlowNode): boolean {
+  if (node.config.interrupts && node.config.interrupts.length > 0) return true;
+  return node.children.some(nodeHasInterrupts);
 }

@@ -12,7 +12,10 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "cpu-features",
+      "esbuild",
+      "protobufjs",
+      "ssh2"
     ]
   },
   "devDependencies": {

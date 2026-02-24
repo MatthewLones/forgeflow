@@ -1,6 +1,7 @@
 import { mkdir, writeFile, readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { StateFile } from '@forgeflow/types';
+import type { ResolvedSkill } from '@forgeflow/skill-resolver';
 
 /**
  * Prepare a workspace directory for a phase execution.
@@ -9,7 +10,7 @@ import type { StateFile } from '@forgeflow/types';
  *   {basePath}/{runId}/{phaseId}/
  *   ├── input/     ← populated with input files
  *   ├── output/    ← agent writes here
- *   └── skills/    ← skill files (future)
+ *   └── skills/    ← populated with resolved skill files
  */
 export async function prepareWorkspace(
   basePath: string,
@@ -17,6 +18,7 @@ export async function prepareWorkspace(
     runId: string;
     phaseId: string;
     inputFiles: StateFile[];
+    skills?: ResolvedSkill[];
   },
 ): Promise<string> {
   const workspacePath = join(basePath, options.runId, options.phaseId);
@@ -31,6 +33,31 @@ export async function prepareWorkspace(
   // Write input files
   for (const file of options.inputFiles) {
     await writeFile(join(inputDir, file.name), file.content);
+  }
+
+  // Copy skills to workspace
+  if (options.skills && options.skills.length > 0) {
+    for (const skill of options.skills) {
+      const skillDir = join(skillsDir, skill.name);
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(join(skillDir, 'SKILL.md'), skill.skillMdContent);
+
+      if (skill.references.size > 0) {
+        const refsDir = join(skillDir, 'references');
+        await mkdir(refsDir, { recursive: true });
+        for (const [name, content] of skill.references) {
+          await writeFile(join(refsDir, name), content);
+        }
+      }
+
+      if (skill.scripts.size > 0) {
+        const scriptsDir = join(skillDir, 'scripts');
+        await mkdir(scriptsDir, { recursive: true });
+        for (const [name, content] of skill.scripts) {
+          await writeFile(join(scriptsDir, name), content);
+        }
+      }
+    }
   }
 
   return workspacePath;
