@@ -196,15 +196,16 @@ export const api = {
     },
 
     getFileUrl: (projectId: string, refPath: string) =>
-      `${API_BASE}/projects/${projectId}/references/file/${encodeURIComponent(refPath)}`,
+      `${API_BASE}/projects/${projectId}/references/file/${refPath.split('/').map(encodeURIComponent).join('/')}`,
 
     getTextContent: async (projectId: string, refPath: string): Promise<string> => {
-      const res = await getRaw(`/projects/${projectId}/references/file/${encodeURIComponent(refPath)}`);
+      const encodedPath = refPath.split('/').map(encodeURIComponent).join('/');
+      const res = await getRaw(`/projects/${projectId}/references/file/${encodedPath}`);
       return res.text();
     },
 
     delete: (projectId: string, refPath: string) =>
-      del(`/projects/${projectId}/references/file/${encodeURIComponent(refPath)}`),
+      del(`/projects/${projectId}/references/file/${refPath.split('/').map(encodeURIComponent).join('/')}`),
 
     createFolder: (projectId: string, path: string) =>
       post<{ ok: boolean }>(`/projects/${projectId}/references/folder`, { path }),

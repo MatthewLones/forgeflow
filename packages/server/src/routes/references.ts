@@ -53,9 +53,11 @@ router.post('/projects/:id/references/upload', upload.array('files', 20), async 
 });
 
 // GET /api/projects/:id/references/file/* — serve a reference file
+// Express 5 wildcard params return arrays — join segments into a path string
 router.get('/projects/:id/references/file/*path', async (req, res) => {
   try {
-    const refPath = req.params.path;
+    const segments = req.params.path;
+    const refPath = Array.isArray(segments) ? segments.join('/') : segments;
     if (!refPath) {
       res.status(400).json({ error: 'Path required' });
       return;
@@ -77,7 +79,8 @@ router.get('/projects/:id/references/file/*path', async (req, res) => {
 // DELETE /api/projects/:id/references/file/* — delete a reference file or folder
 router.delete('/projects/:id/references/file/*path', async (req, res) => {
   try {
-    const refPath = req.params.path;
+    const segments = req.params.path;
+    const refPath = Array.isArray(segments) ? segments.join('/') : segments;
     if (!refPath) {
       res.status(400).json({ error: 'Path required' });
       return;

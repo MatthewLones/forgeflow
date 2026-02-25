@@ -4,6 +4,42 @@ export type InterruptType = 'approval' | 'qa' | 'selection' | 'review' | 'escala
 
 export type InterruptMode = 'inline' | 'checkpoint';
 
+// --- Artifact types ---
+
+export type ArtifactFieldType = 'string' | 'number' | 'boolean' | 'array' | 'object';
+
+/** A field definition within a JSON artifact schema */
+export interface ArtifactField {
+  /** Field key name, e.g., "clause_id" */
+  key: string;
+  /** Field type */
+  type: ArtifactFieldType;
+  /** Human-readable description */
+  description: string;
+  /** Whether this field is required (default: true) */
+  required?: boolean;
+}
+
+/** Supported artifact file formats */
+export type ArtifactFormat = 'json' | 'markdown' | 'text' | 'csv' | 'pdf' | 'image' | 'binary';
+
+/** Full artifact schema describing a file's structure and purpose */
+export interface ArtifactSchema {
+  /** Filename, e.g., "clauses_parsed.json" */
+  name: string;
+  /** File format */
+  format: ArtifactFormat;
+  /** Human-readable description of what this file contains */
+  description: string;
+  /** Top-level field definitions (only for format='json') */
+  fields?: ArtifactField[];
+}
+
+/** Normalize a string or ArtifactSchema to just the filename */
+export function artifactName(artifact: string | ArtifactSchema): string {
+  return typeof artifact === 'string' ? artifact : artifact.name;
+}
+
 export interface NodeBudget {
   /** Max API round-trips for this node */
   maxTurns: number;

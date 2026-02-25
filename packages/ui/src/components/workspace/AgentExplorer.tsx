@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import type { FlowNode, FlowEdge, NodeType } from '@forgeflow/types';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import type { FlowNode, FlowEdge, NodeType, ArtifactSchema } from '@forgeflow/types';
+import { artifactName } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
 import { useLayout } from '../../context/LayoutContext';
 import { useProjectStore, type SkillSummary, type ReferenceEntry } from '../../context/ProjectStore';
@@ -484,22 +485,87 @@ function SkillTreeItem({ skill, allSkills, depth, activeTabId, visited, onSelect
   );
 }
 
+/* ── Artifact Lineage ────────────────────────────────────── */
+
+interface ArtifactLineage {
+  name: string;
+  format?: string;
+  producers: string[];  // node IDs that output this artifact
+  consumers: string[];  // node IDs that input this artifact
+}
+
+function buildArtifactLineage(nodes: FlowNode[]): ArtifactLineage[] {
+  const artifacts = new Map<string, { format?: string; producers: Set<string>; consumers: Set<string> }>();
+
+  function ensure(name: string) {
+    if (!artifacts.has(name)) {
+      artifacts.set(name, { producers: new Set(), consumers: new Set() });
+    }
+    return artifacts.get(name)!;
+  }
+
+  function walk(nodeList: FlowNode[]) {
+    for (const node of nodeList) {
+      for (const output of node.config.outputs) {
+        const name = artifactName(output);
+        const entry = ensure(name);
+        entry.producers.add(node.id);
+        if (typeof output !== 'string' && output.format) {
+          entry.format = output.format;
+        }
+      }
+      for (const input of node.config.inputs) {
+        const name = artifactName(input);
+        const entry = ensure(name);
+        entry.consumers.add(node.id);
+        if (typeof input !== 'string' && input.format && !entry.format) {
+          entry.format = input.format;
+        }
+      }
+      walk(node.children);
+    }
+  }
+
+  walk(nodes);
+
+  return Array.from(artifacts.entries())
+    .map(([name, { format, producers, consumers }]) => ({
+      name,
+      format,
+      producers: [...producers],
+      consumers: [...consumers],
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+const FORMAT_BADGE_COLORS: Record<string, string> = {
+  json: 'bg-amber-100 text-amber-700',
+  markdown: 'bg-blue-100 text-blue-700',
+  text: 'bg-gray-100 text-gray-600',
+  csv: 'bg-green-100 text-green-700',
+  pdf: 'bg-red-100 text-red-700',
+  image: 'bg-purple-100 text-purple-700',
+  binary: 'bg-gray-100 text-gray-600',
+};
+
 /* ── Main Explorer ───────────────────────────────────────── */
 
 export function AgentExplorer() {
   const { state, addNode, addChild, removeNode, updateNode, selectNode } = useFlow();
   const { activeTabId, selectAgent, selectSkill, selectReference } = useLayout();
-  const { skills, references, uploadReferences, deleteReference, createReferenceFolder, renameReference } = useProjectStore();
+  const { skills, references, uploadReferences, deleteReference, createReferenceFolder, renameReference, createSkill, deleteSkill } = useProjectStore();
 
   const [agentsExpanded, setAgentsExpanded] = useState(true);
   const [skillsExpanded, setSkillsExpanded] = useState(true);
   const [refsExpanded, setRefsExpanded] = useState(true);
+  const [artifactsExpanded, setArtifactsExpanded] = useState(true);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuEntry[] } | null>(null);
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sortedNodes = topologicalOrder(state.flow.nodes, state.flow.edges);
+  const artifactLineage = useMemo(() => buildArtifactLineage(state.flow.nodes), [state.flow.nodes]);
 
   const handleSelectAgent = useCallback(
     (nodeId: string, label: string) => {
@@ -512,6 +578,19 @@ export function AgentExplorer() {
   const handleAddAgent = useCallback(() => {
     addNode('agent', { x: 0, y: 0 });
   }, [addNode]);
+
+  const handleAddSkill = useCallback(async () => {
+    const name = window.prompt('Skill name (e.g. contract-law-basics):');
+    if (!name?.trim()) return;
+    const projectId = state.flow.id;
+    await createSkill(projectId, name.trim());
+  }, [state.flow.id, createSkill]);
+
+  const handleDeleteSkill = useCallback(async (skillName: string) => {
+    if (!window.confirm(`Delete skill "${skillName}"?`)) return;
+    const projectId = state.flow.id;
+    await deleteSkill(projectId, skillName);
+  }, [state.flow.id, deleteSkill]);
 
   const handleInlineRename = useCallback(
     (nodeId: string, newName: string) => {
@@ -549,14 +628,13 @@ export function AgentExplorer() {
       const items: ContextMenuEntry[] = [
         { label: 'Open', onClick: () => selectSkill(skillName) },
         { separator: true },
-        { label: 'New Skill', onClick: () => { /* TODO: create skill dialog */ }, disabled: true },
-        { label: 'Rename...', onClick: () => { /* TODO: rename skill */ }, disabled: true },
+        { label: 'New Skill', onClick: () => handleAddSkill() },
         { separator: true },
-        { label: 'Delete', onClick: () => { /* TODO: delete skill */ }, danger: true, disabled: true },
+        { label: 'Delete', onClick: () => handleDeleteSkill(skillName), danger: true },
       ];
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [selectSkill],
+    [selectSkill, handleAddSkill, handleDeleteSkill],
   );
 
   const handleOpenReference = useCallback(
@@ -666,8 +744,7 @@ export function AgentExplorer() {
         ];
       } else if (section === 'skills') {
         items = [
-          { label: 'New Skill', onClick: () => { /* TODO */ }, disabled: true },
-          { label: 'Import Skill...', onClick: () => { /* TODO */ }, disabled: true },
+          { label: 'New Skill', onClick: () => handleAddSkill() },
         ];
       } else {
         items = [
@@ -681,7 +758,7 @@ export function AgentExplorer() {
       }
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [addNode, handleUploadClick, state.flow.id, createReferenceFolder],
+    [addNode, handleAddSkill, handleUploadClick, state.flow.id, createReferenceFolder],
   );
 
   // Empty set for the root level of skill tree (no ancestors yet)
@@ -736,6 +813,7 @@ export function AgentExplorer() {
         title="Skills"
         expanded={skillsExpanded}
         onToggle={() => setSkillsExpanded(!skillsExpanded)}
+        onAdd={handleAddSkill}
         onContextMenu={(e) => handleSectionContextMenu(e, 'skills')}
       />
 
@@ -787,6 +865,65 @@ export function AgentExplorer() {
                 onOpen={handleOpenReference}
                 onContextMenu={handleRefContextMenu}
               />
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Artifacts */}
+      <SectionHeader
+        title="Artifacts"
+        expanded={artifactsExpanded}
+        onToggle={() => setArtifactsExpanded(!artifactsExpanded)}
+      />
+
+      {artifactsExpanded && (
+        <div className="py-0.5">
+          {artifactLineage.length === 0 ? (
+            <div className="px-3 py-3 text-center">
+              <div className="text-[10px] text-[var(--color-text-muted)]">
+                No artifacts declared yet
+              </div>
+            </div>
+          ) : (
+            artifactLineage.map((artifact) => (
+              <div
+                key={artifact.name}
+                className="px-2 py-1 text-xs border-l-2 border-l-transparent hover:bg-[var(--color-canvas-bg)] cursor-default"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 shrink-0" />
+                  <span className="font-mono text-[11px] text-[var(--color-text-primary)] truncate">
+                    {artifact.name}
+                  </span>
+                  {artifact.format && (
+                    <span className={`text-[9px] font-medium px-1 py-0 rounded ${
+                      FORMAT_BADGE_COLORS[artifact.format] ?? 'bg-gray-100 text-gray-600'
+                    }`}>
+                      {artifact.format.toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <div className="ml-6 text-[10px] text-[var(--color-text-muted)] space-y-0.5 mt-0.5">
+                  {artifact.producers.length > 0 ? (
+                    <div>
+                      <span className="text-[var(--color-node-merge)]">{'\u2192 '}</span>
+                      produced by: {artifact.producers.join(', ')}
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="text-[var(--color-node-checkpoint)]">{'\u2192 '}</span>
+                      user upload
+                    </div>
+                  )}
+                  {artifact.consumers.length > 0 && (
+                    <div>
+                      <span className="text-[var(--color-node-agent)]">{'\u2192 '}</span>
+                      consumed by: {artifact.consumers.join(', ')}
+                    </div>
+                  )}
+                </div>
+              </div>
             ))
           )}
         </div>

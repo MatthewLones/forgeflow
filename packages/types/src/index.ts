@@ -2,12 +2,18 @@ export type {
   NodeType,
   InterruptType,
   InterruptMode,
+  ArtifactFieldType,
+  ArtifactField,
+  ArtifactFormat,
+  ArtifactSchema,
   NodeBudget,
   CheckpointPresentation,
   InterruptConfig,
   NodeConfig,
   FlowNode,
 } from './node.js';
+
+export { artifactName } from './node.js';
 
 export type { FlowEdge, FlowBudget, FlowDefinition } from './flow.js';
 
