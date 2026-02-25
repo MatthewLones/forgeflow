@@ -8,6 +8,7 @@
     { "path": "packages/state-store" },
     { "path": "packages/engine" },
     { "path": "packages/skill-resolver" },
-    { "path": "packages/cli" }
+    { "path": "packages/cli" },
+    { "path": "packages/server" }
   ]
 }

@@ -1,0 +1,34 @@
+{
+  "name": "@forgeflow/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "dev": "tsx src/index.ts"
+  },
+  "files": ["dist"],
+  "dependencies": {
+    "@forgeflow/types": "workspace:*",
+    "@forgeflow/parser": "workspace:*",
+    "@forgeflow/validator": "workspace:*",
+    "@forgeflow/compiler": "workspace:*",
+    "@forgeflow/engine": "workspace:*",
+    "@forgeflow/state-store": "workspace:*",
+    "@forgeflow/skill-resolver": "workspace:*",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "tsx": "^4.19.0"
+  }
+}

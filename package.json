@@ -15,7 +15,8 @@
       "cpu-features",
       "esbuild",
       "protobufjs",
-      "ssh2"
+      "ssh2",
+      "electron"
     ]
   },
   "devDependencies": {
