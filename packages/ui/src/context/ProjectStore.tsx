@@ -3,258 +3,202 @@ import {
   useContext,
   useCallback,
   useState,
+  useEffect,
+  useMemo,
   type ReactNode,
 } from 'react';
-import type { SkillState } from './SkillContext';
+import type { FlowDefinition } from '@forgeflow/types';
+import { api } from '../lib/api-client';
+import type { ProjectSummary, SkillSummary, SkillState } from '../lib/api-client';
 
-export interface ProjectSummary {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  nodeCount: number;
-  skillCount: number;
-  hasCheckpoints: boolean;
-  updatedAt: string;
-}
+export type { ProjectSummary, SkillSummary };
 
-export interface SkillSummary {
-  name: string;
-  description: string;
-  referenceCount: number;
-}
+// Re-export SkillState for consumers that imported it from here
+export type { SkillState } from '../lib/api-client';
 
 interface ProjectStoreValue {
   projects: ProjectSummary[];
+  loading: boolean;
+  error: string | null;
+
   skills: SkillSummary[];
+  skillsLoading: boolean;
   skillData: Record<string, SkillState>;
-  createProject: (name: string, description: string) => string;
-  deleteProject: (id: string) => void;
+
+  flows: Record<string, FlowDefinition>;
+
+  createProject: (name: string, description: string) => Promise<string>;
+  deleteProject: (id: string) => Promise<void>;
+  getFlowById: (id: string) => FlowDefinition | null;
+  updateFlow: (id: string, flow: FlowDefinition) => void;
+  saveFlow: (id: string, flow: FlowDefinition) => Promise<void>;
+  loadProject: (id: string) => Promise<void>;
+  loadSkills: (projectId: string) => Promise<void>;
+  loadSkill: (projectId: string, skillName: string) => Promise<SkillState | null>;
+  saveSkill: (projectId: string, skillName: string, files: Array<{ path: string; content: string }>) => Promise<void>;
+  createSkill: (projectId: string, name: string) => Promise<void>;
+  deleteSkill: (projectId: string, name: string) => Promise<void>;
+  refreshProjects: () => Promise<void>;
 }
 
 const ProjectStoreContext = createContext<ProjectStoreValue | null>(null);
 
-// Mock data — replaced by API calls in 5.5
-const MOCK_PROJECTS: ProjectSummary[] = [
-  {
-    id: 'contract_review',
-    name: 'Legal Contract Review',
-    description: 'Reviews a contract, flags risks, and generates a redlined version with negotiation memo',
-    version: '1.0',
-    nodeCount: 4,
-    skillCount: 1,
-    hasCheckpoints: true,
-    updatedAt: '2026-02-24T10:30:00Z',
-  },
-  {
-    id: 'research_paper',
-    name: 'Research Paper Analysis',
-    description: 'Analyzes academic papers, extracts key findings, and generates a literature review',
-    version: '0.2',
-    nodeCount: 3,
-    skillCount: 2,
-    hasCheckpoints: false,
-    updatedAt: '2026-02-23T15:45:00Z',
-  },
-  {
-    id: 'code_review',
-    name: 'Automated Code Review',
-    description: 'Reviews pull requests for security issues, performance, and best practices',
-    version: '1.1',
-    nodeCount: 5,
-    skillCount: 3,
-    hasCheckpoints: true,
-    updatedAt: '2026-02-22T09:00:00Z',
-  },
-];
-
-const MOCK_SKILLS: SkillSummary[] = [
-  {
-    name: 'contract-law-basics',
-    description: 'California contract law fundamentals for reviewing agreements',
-    referenceCount: 8,
-  },
-  {
-    name: 'tax-deductions',
-    description: 'Common tax deduction rules for US individual filers',
-    referenceCount: 3,
-  },
-  {
-    name: 'code-security',
-    description: 'OWASP top 10 and common vulnerability patterns',
-    referenceCount: 12,
-  },
-];
-
-const MOCK_SKILL_DATA: Record<string, SkillState> = {
-  'tax-deductions': {
-    skillName: 'tax-deductions',
-    selectedFilePath: 'SKILL.md',
-    dirty: false,
-    viewMode: 'edit',
-    files: [
-      {
-        path: 'SKILL.md',
-        content: `---
-name: tax-deductions
-description: "Common tax deduction rules for US individual filers."
-version: "1.0.0"
-source: "IRS Publications 587, 463, 502"
----
-
-# Tax Deductions Guide
-
-## Overview
-
-Reference files for common US individual tax deductions. Covers home office (Publication 587), vehicle (Publication 463), and medical (Publication 502).
-
-## Quick Reference
-
-| Deduction | Standard Amount | Reference |
-|-----------|----------------|-----------|
-| Home office (simplified) | $5/sq ft, max 300 sq ft ($1,500) | \`home-office.md\` |
-| Standard mileage rate | $0.67/mile (2024) | \`vehicle.md\` |
-| Medical threshold | 7.5% of AGI | \`medical.md\` |
-`,
-      },
-      {
-        path: 'references/home-office.md',
-        content: `---
-title: "Home Office Deduction"
-category: deductions
-relevance: "Load when taxpayer works from home"
----
-
-# Home Office Deduction
-
-## Eligibility Requirements
-
-The home office deduction is available to taxpayers who use a portion of their home **regularly and exclusively** for business purposes.
-
-## Two Calculation Methods
-
-### Simplified Method
-- Rate: $5 per square foot
-- Maximum area: 300 square feet
-- Maximum deduction: $1,500
-
-### Regular Method (Form 8829)
-Calculate the **business percentage** of the home and apply to eligible expenses.
-`,
-      },
-      {
-        path: 'references/vehicle.md',
-        content: `---
-title: "Vehicle Expense Deduction"
-category: deductions
-relevance: "Load when taxpayer uses a vehicle for business"
----
-
-# Vehicle Expense Deduction
-
-## Standard Mileage Rates (2024)
-
-| Purpose | Rate per Mile |
-|---------|--------------|
-| Business | $0.67 |
-| Medical/Moving | $0.21 |
-| Charity | $0.14 |
-`,
-      },
-      {
-        path: 'references/medical.md',
-        content: `---
-title: "Medical Expense Deduction"
-category: deductions
-relevance: "Load when taxpayer has significant medical expenses"
----
-
-# Medical Expense Deduction
-
-## AGI Floor
-
-Medical expenses are deductible only to the extent they exceed **7.5% of AGI**.
-`,
-      },
-    ],
-  },
-  'contract-law-basics': {
-    skillName: 'contract-law-basics',
-    selectedFilePath: 'SKILL.md',
-    dirty: false,
-    viewMode: 'edit',
-    files: [
-      {
-        path: 'SKILL.md',
-        content: `---
-name: contract-law-basics
-description: "California contract law fundamentals for reviewing agreements"
-version: "1.0.0"
----
-
-# Contract Law Basics
-
-Fundamental contract law concepts for reviewing legal agreements. Covers formation, interpretation, breach, and remedies.
-`,
-      },
-    ],
-  },
-  'code-security': {
-    skillName: 'code-security',
-    selectedFilePath: 'SKILL.md',
-    dirty: false,
-    viewMode: 'edit',
-    files: [
-      {
-        path: 'SKILL.md',
-        content: `---
-name: code-security
-description: "OWASP top 10 and common vulnerability patterns"
-version: "1.0.0"
----
-
-# Code Security
-
-OWASP Top 10 vulnerability patterns and secure coding practices for code review.
-`,
-      },
-    ],
-  },
-};
-
 export function ProjectStoreProvider({ children }: { children: ReactNode }) {
-  const [projects, setProjects] = useState<ProjectSummary[]>(MOCK_PROJECTS);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [flows, setFlows] = useState<Record<string, FlowDefinition>>({});
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [skillData, setSkillData] = useState<Record<string, SkillState>>({});
+  const [loading, setLoading] = useState(true);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const createProject = useCallback((name: string, description: string) => {
-    const id = name
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
-      .replace(/\s+/g, '_')
-      .replace(/^[^a-z]/, 'p');
-
-    const project: ProjectSummary = {
-      id,
-      name,
-      description,
-      version: '0.1',
-      nodeCount: 0,
-      skillCount: 0,
-      hasCheckpoints: false,
-      updatedAt: new Date().toISOString(),
-    };
-
-    setProjects((prev) => [project, ...prev]);
-    return id;
+  // Fetch projects on mount
+  const refreshProjects = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const list = await api.projects.list();
+      setProjects(list);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load projects');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const deleteProject = useCallback((id: string) => {
+  useEffect(() => {
+    refreshProjects();
+  }, [refreshProjects]);
+
+  // Load a specific project's flow
+  const loadProject = useCallback(async (id: string) => {
+    try {
+      const project = await api.projects.get(id);
+      if (project?.flow) {
+        setFlows((prev) => ({ ...prev, [id]: project.flow! }));
+      }
+    } catch (err) {
+      console.error('Failed to load project:', err);
+    }
+  }, []);
+
+  // Load skills for a project
+  const loadSkills = useCallback(async (projectId: string) => {
+    try {
+      setSkillsLoading(true);
+      const list = await api.skills.list(projectId);
+      setSkills(list);
+    } catch (err) {
+      console.error('Failed to load skills:', err);
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, []);
+
+  // Load a specific skill's file data
+  const loadSkill = useCallback(async (projectId: string, skillName: string): Promise<SkillState | null> => {
+    try {
+      const data = await api.skills.get(projectId, skillName);
+      setSkillData((prev) => ({
+        ...prev,
+        [skillName]: data,
+      }));
+      return data;
+    } catch (err) {
+      console.error('Failed to load skill:', err);
+      return null;
+    }
+  }, []);
+
+  const createProject = useCallback(async (name: string, description: string) => {
+    const meta = await api.projects.create(name, description);
+    // Refresh list to pick up the new project
+    await refreshProjects();
+    return meta.id;
+  }, [refreshProjects]);
+
+  const deleteProject = useCallback(async (id: string) => {
+    await api.projects.delete(id);
     setProjects((prev) => prev.filter((p) => p.id !== id));
+    setFlows((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   }, []);
+
+  const getFlowById = useCallback(
+    (id: string): FlowDefinition | null => flows[id] ?? null,
+    [flows],
+  );
+
+  // Update flow in local state only (for immediate UI responsiveness)
+  const updateFlow = useCallback((id: string, flow: FlowDefinition) => {
+    setFlows((prev) => ({ ...prev, [id]: flow }));
+  }, []);
+
+  // Save flow to server
+  const saveFlow = useCallback(async (id: string, flow: FlowDefinition) => {
+    try {
+      await api.projects.saveFlow(id, flow);
+    } catch (err) {
+      console.error('Failed to save flow:', err);
+    }
+  }, []);
+
+  // Save skill files
+  const saveSkill = useCallback(async (projectId: string, skillName: string, files: Array<{ path: string; content: string }>) => {
+    try {
+      await api.skills.save(projectId, skillName, files);
+    } catch (err) {
+      console.error('Failed to save skill:', err);
+    }
+  }, []);
+
+  // Create a new skill
+  const createSkill = useCallback(async (projectId: string, name: string) => {
+    await api.skills.create(projectId, name);
+    await loadSkills(projectId);
+  }, [loadSkills]);
+
+  // Delete a skill
+  const deleteSkill = useCallback(async (projectId: string, name: string) => {
+    await api.skills.delete(projectId, name);
+    setSkills((prev) => prev.filter((s) => s.name !== name));
+    setSkillData((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+  }, []);
+
+  const value = useMemo<ProjectStoreValue>(
+    () => ({
+      projects,
+      loading,
+      error,
+      skills,
+      skillsLoading,
+      skillData,
+      flows,
+      createProject,
+      deleteProject,
+      getFlowById,
+      updateFlow,
+      saveFlow,
+      loadProject,
+      loadSkills,
+      loadSkill,
+      saveSkill,
+      createSkill,
+      deleteSkill,
+      refreshProjects,
+    }),
+    [projects, loading, error, skills, skillsLoading, skillData, flows, createProject, deleteProject, getFlowById, updateFlow, saveFlow, loadProject, loadSkills, loadSkill, saveSkill, createSkill, deleteSkill, refreshProjects],
+  );
 
   return (
-    <ProjectStoreContext.Provider
-      value={{ projects, skills: MOCK_SKILLS, skillData: MOCK_SKILL_DATA, createProject, deleteProject }}
-    >
+    <ProjectStoreContext.Provider value={value}>
       {children}
     </ProjectStoreContext.Provider>
   );

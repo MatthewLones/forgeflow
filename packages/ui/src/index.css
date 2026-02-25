@@ -29,6 +29,61 @@ html, body, #root {
   background: var(--color-canvas-bg);
 }
 
+/* ===========================
+   Dockview Theme Overrides
+   =========================== */
+
+.dockview-theme-light.forgeflow-dockview {
+  --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-tabs-and-actions-container-height: 36px;
+  --dv-group-view-background-color: white;
+  --dv-tabs-and-actions-container-background-color: #f8f9fa;
+  --dv-activegroup-visiblepanel-tab-background-color: white;
+  --dv-activegroup-hiddenpanel-tab-background-color: #f3f4f6;
+  --dv-inactivegroup-visiblepanel-tab-background-color: white;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #f3f4f6;
+  --dv-tab-divider-color: #e2e8f0;
+  --dv-activegroup-visiblepanel-tab-color: #0f172a;
+  --dv-activegroup-hiddenpanel-tab-color: #64748b;
+  --dv-inactivegroup-visiblepanel-tab-color: #64748b;
+  --dv-inactivegroup-hiddenpanel-tab-color: #94a3b8;
+  --dv-separator-border: #e2e8f0;
+  --dv-drag-over-background-color: rgba(59, 130, 246, 0.08);
+  --dv-drag-over-border-color: #3b82f6;
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: #3b82f6;
+  --dv-icon-hover-background-color: rgba(0, 0, 0, 0.06);
+}
+
+/* Tab bar border bottom */
+.dockview-theme-light.forgeflow-dockview .dv-tabs-and-actions-container {
+  border-bottom: 1px solid #e2e8f0;
+}
+
+/* Active group indicator — subtle blue top border */
+.dockview-theme-light.forgeflow-dockview .dv-groupview.dv-active-group > .dv-tabs-and-actions-container {
+  border-top: 2px solid #3b82f6;
+}
+
+/* Inactive group — no top border */
+.dockview-theme-light.forgeflow-dockview .dv-groupview.dv-inactive-group > .dv-tabs-and-actions-container {
+  border-top: 2px solid transparent;
+}
+
+/* Hide the default dockview close button since we render our own in ForgeFlowTab */
+.dockview-theme-light.forgeflow-dockview .dv-default-tab-action {
+  display: none;
+}
+
+/* Watermark (empty group placeholder) */
+.dockview-theme-light.forgeflow-dockview .dv-watermark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
 /* React Flow overrides */
 .react-flow__node {
   font-family: var(--font-sans);

@@ -1,8 +1,9 @@
-import { useMemo, useCallback, Fragment } from 'react';
+import { useMemo, useCallback, useEffect, Fragment } from 'react';
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
+  useReactFlow,
   type NodeMouseHandler,
   type NodeTypes,
   type EdgeTypes,
@@ -10,7 +11,8 @@ import {
 import '@xyflow/react/dist/style.css';
 import type { FlowNode } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
-import { useWorkspace } from '../../context/WorkspaceContext';
+import { useDag } from '../../context/DagContext';
+import { useLayout } from '../../context/LayoutContext';
 import {
   autoLayout,
   childrenLayout,
@@ -42,9 +44,28 @@ function findNode(nodes: FlowNode[], id: string): FlowNode | null {
   return null;
 }
 
-export function DagMiniView() {
+/** Re-fits the viewport whenever the ReactFlow container resizes */
+function FitViewOnResize() {
+  const { fitView } = useReactFlow();
+
+  useEffect(() => {
+    const container = document.querySelector('.react-flow') as HTMLElement | null;
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => {
+      fitView({ padding: 0.3, duration: 150 });
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [fitView]);
+
+  return null;
+}
+
+export function DagMiniView(props: { height?: number }) {
   const { state, selectNode } = useFlow();
-  const { activeTabId, selectAgent, dagBreadcrumb, dagDrillIn, dagDrillOut, dagDrillRoot } = useWorkspace();
+  const { dagBreadcrumb, dagDrillIn, dagDrillOut, dagDrillRoot } = useDag();
+  const { activeTabId, selectAgent } = useLayout();
 
   // Resolve which nodes/edges to display based on breadcrumb
   const displayData = useMemo(() => {
@@ -74,7 +95,6 @@ export function DagMiniView() {
   const rfNodes = useMemo(
     () => {
       const nodes = flowNodesToReactFlow(displayData.nodes, positions);
-      // Mark the active tab's node as selected
       if (activeTabId) {
         return nodes.map((n) => ({ ...n, selected: n.id === activeTabId }));
       }
@@ -107,7 +127,6 @@ export function DagMiniView() {
     [dagDrillIn, state.flow.nodes],
   );
 
-  // Resolve breadcrumb names
   const breadcrumbNames = useMemo(() => {
     return dagBreadcrumb.map((id) => {
       const node = findNode(state.flow.nodes, id);
@@ -116,8 +135,7 @@ export function DagMiniView() {
   }, [dagBreadcrumb, state.flow.nodes]);
 
   return (
-    <div className="h-32 border-b border-[var(--color-border)] bg-[var(--color-canvas-bg)] relative">
-      {/* Breadcrumb navigation */}
+    <div className="border-b border-[var(--color-border)] bg-[var(--color-canvas-bg)] relative" style={{ height: props.height ?? 128 }}>
       {dagBreadcrumb.length > 0 && (
         <div className="absolute top-1 left-2 z-10 flex items-center gap-1 text-[10px] bg-white/80 backdrop-blur-sm rounded px-1.5 py-0.5">
           <button
@@ -136,7 +154,6 @@ export function DagMiniView() {
                 <button
                   type="button"
                   onClick={() => {
-                    // Navigate to this level by drilling back
                     dagDrillRoot();
                     for (let j = 0; j <= i; j++) {
                       dagDrillIn(dagBreadcrumb[j]);
@@ -152,7 +169,6 @@ export function DagMiniView() {
         </div>
       )}
 
-      {/* Back button */}
       {dagBreadcrumb.length > 0 && (
         <button
           type="button"
@@ -185,6 +201,7 @@ export function DagMiniView() {
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={0.5} />
+        <FitViewOnResize />
       </ReactFlow>
     </div>
   );

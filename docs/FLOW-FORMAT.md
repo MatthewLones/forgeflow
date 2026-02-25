@@ -261,6 +261,20 @@ The engine does **not** compile the entire FLOW.json into a single document. Ins
 4. **Checkpoint nodes**: The engine handles these directly (serialize state, pause for user input) — no agent run needed
 5. **State between phases**: After each phase completes, outputs are collected from the sandbox and saved to the state store. The sandbox is torn down. The next phase gets a fresh sandbox with only its declared inputs.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full per-phase compilation algorithm, sandbox lifecycle, and state store design.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full per-phase compilation algorithm, sandbox lifecycle, state store design, and interrupt system (all 5 types, inline/checkpoint/auto-escalate modes).
 
-See [INTERRUPTS.md](INTERRUPTS.md) for the interrupt type system (approval, Q&A, selection, review, escalation), inline vs checkpoint modes, and nested interrupt bubbling.
+## How the UI Creates FLOW.json
+
+The ForgeFlow IDE maintains a `FlowDefinition` in memory via `FlowContext` (a React `useReducer`). Every UI action dispatches to the reducer:
+
+| UI Action | Reducer Action | Effect on FLOW.json |
+|-----------|---------------|---------------------|
+| Add node on DAG canvas | `ADD_NODE` | New entry in `nodes[]` |
+| Draw edge between nodes | `ADD_EDGE` | New entry in `edges[]` |
+| Edit instructions in AgentEditor | `UPDATE_NODE` | Updates `node.instructions` |
+| Modify config in ConfigBottomPanel | `UPDATE_NODE` | Updates `node.config.*` |
+| Add sub-agent | `ADD_CHILD` | New entry in `node.children[]` |
+| Create agent from slash command | `CREATE_AGENT_BY_NAME` | New node + edge |
+| Delete node | `REMOVE_NODE` | Removes from `nodes[]` and `edges[]` |
+
+The `ProjectStore` persists the flow. The same FLOW.json format can be hand-edited or produced by the CLI — the visual editor is one way to create it, not the only way.

@@ -283,3 +283,26 @@ description: "California state-level ADU rules from HCD Handbook. 28 reference f
 ```
 
 This pattern — decision tree routing + focused reference files — scales to any domain with structured rules.
+
+## Editing Skills in the UI
+
+The ForgeFlow IDE includes a visual skill editor accessible from the AgentExplorer sidebar (Skills section). Opening a skill launches a `SkillEditorPanel` in the dockview tab area.
+
+### Editor Features
+
+- **File tree** — Navigate between SKILL.md and files in references/ and scripts/
+- **CodeMirror 6 editor** — Syntax-highlighted markdown editing with custom slash commands:
+  - `//skill:name` — Reference another skill (renders as inline chip)
+  - `@file` — Reference a file in the skill's references/ directory (renders as chip)
+  - `/output` — Insert an output specification table
+  - `/input` — Insert an input specification table
+  - `/decision` — Insert a decision tree table
+  - `/guardrail` — Insert guardrail rules
+- **View modes** — Toggle between Edit (slash editor with widgets), Compiled (rendered markdown preview), and Raw (plain CodeMirror)
+- **Import suggestions bar** — Detects referenced skills and files, suggests adding them as dependencies
+
+### Connecting Skills to Flows
+
+In the AgentEditor's ConfigBottomPanel (Skills tab), users assign skills to nodes. The skill names in `node.config.skills` must match skill directory names resolved by `@forgeflow/skill-resolver`. Global skills declared at the flow level are available to all nodes.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full UI architecture and state management details.

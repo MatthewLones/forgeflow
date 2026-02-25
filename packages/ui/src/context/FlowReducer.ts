@@ -20,7 +20,8 @@ export type FlowAction =
   | { type: 'SET_NODE_CHILDREN'; nodeId: string; children: FlowNode[] }
   | { type: 'ADD_CHILD'; parentId: string; child: FlowNode; position: { x: number; y: number } }
   | { type: 'MOVE_NODE'; nodeId: string; position: { x: number; y: number } }
-  | { type: 'CREATE_AGENT_FROM_SLASH'; name: string; parentId?: string };
+  | { type: 'CREATE_AGENT_FROM_SLASH'; name: string; parentId?: string }
+  | { type: 'MARK_CLEAN' };
 
 export interface FlowState {
   flow: FlowDefinition;
@@ -284,6 +285,9 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         },
       };
     }
+
+    case 'MARK_CLEAN':
+      return { ...state, dirty: false };
 
     case 'CREATE_AGENT_FROM_SLASH': {
       const existingIds = collectAllNodeIds(state.flow.nodes);

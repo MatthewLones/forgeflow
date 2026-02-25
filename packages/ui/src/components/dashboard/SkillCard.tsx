@@ -1,4 +1,3 @@
-import { useNavigate } from 'react-router-dom';
 import type { SkillSummary } from '../../context/ProjectStore';
 
 interface SkillCardProps {
@@ -6,12 +5,10 @@ interface SkillCardProps {
 }
 
 export function SkillCard({ skill }: SkillCardProps) {
-  const navigate = useNavigate();
-
   return (
     <div
-      className="flex items-center gap-3 p-3.5 rounded-lg border border-[var(--color-border)] bg-white hover:shadow-sm hover:border-[var(--color-text-muted)] transition-all cursor-pointer"
-      onClick={() => navigate(`/workspace/contract_review?skill=${skill.name}`)}
+      className="flex items-center gap-3 p-3.5 rounded-lg border border-[var(--color-border)] bg-white hover:shadow-sm hover:border-[var(--color-text-muted)] transition-all"
+      title="Open any project to edit this skill in the workspace"
     >
       <div className="w-8 h-8 rounded-lg bg-[var(--color-node-merge-bg)] flex items-center justify-center shrink-0">
         <span className="text-xs font-bold text-[var(--color-node-merge)]">S</span>

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { ProjectStoreProvider } from './context/ProjectStore';
 import { DashboardPage } from './pages/DashboardPage';
 
@@ -15,6 +15,18 @@ function Loading() {
   );
 }
 
+/** Redirect /design/:id → /workspace/:id (preserving the actual param) */
+function DesignRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/workspace/${id}`} replace />;
+}
+
+/** Redirect /skills/:id → /workspace/:id with skill query param */
+function SkillRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/workspace/${id}`} replace />;
+}
+
 export function App() {
   return (
     <ProjectStoreProvider>
@@ -28,9 +40,9 @@ export function App() {
             </Suspense>
           }
         />
-        {/* Legacy routes redirect to workspace */}
-        <Route path="/design/:id" element={<Navigate to="/workspace/contract_review" replace />} />
-        <Route path="/skills/:id" element={<Navigate to="/workspace/contract_review" replace />} />
+        {/* Legacy routes redirect to workspace with actual :id param */}
+        <Route path="/design/:id" element={<DesignRedirect />} />
+        <Route path="/skills/:id" element={<SkillRedirect />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ProjectStoreProvider>

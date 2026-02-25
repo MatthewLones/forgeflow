@@ -1,7 +1,6 @@
-import { useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { FlowNode, NodeConfig, InterruptConfig } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
-import { useWorkspace } from '../../context/WorkspaceContext';
 import { TagList } from '../inspector/fields/TagList';
 import { InterruptEditor } from '../inspector/fields/InterruptEditor';
 
@@ -25,36 +24,56 @@ const CONFIG_TABS: ConfigTab[] = [
 ];
 
 export function ConfigBottomPanel({ node }: ConfigBottomPanelProps) {
-  const { bottomPanelHeight, bottomPanelTab, setBottomPanelHeight, setBottomPanelTab } = useWorkspace();
+  const [height, setHeight] = useState(0);
+  const [activeTab, setActiveTab] = useState('io');
   const visibleTabs = CONFIG_TABS.filter((t) => t.show(node));
-  const isOpen = bottomPanelHeight > 0;
+  const isOpen = height > 0;
 
-  const handleDragStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startY = e.clientY;
-      const startHeight = bottomPanelHeight;
-
-      const onMove = (ev: MouseEvent) => {
-        const delta = startY - ev.clientY;
-        setBottomPanelHeight(Math.max(28, startHeight + delta));
-      };
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+  const handleTabClick = useCallback(
+    (tabId: string) => {
+      if (activeTab === tabId && height > 0) {
+        setHeight(0);
+      } else {
+        setActiveTab(tabId);
+        if (height === 0) setHeight(160);
+      }
     },
-    [bottomPanelHeight, setBottomPanelHeight],
+    [activeTab, height],
   );
 
+  const dragging = useRef(false);
+  const startY = useRef(0);
+  const startH = useRef(0);
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      dragging.current = true;
+      startY.current = e.clientY;
+      startH.current = height;
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [height],
+  );
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragging.current) return;
+    const delta = startY.current - e.clientY;
+    setHeight(Math.max(0, Math.min(400, startH.current + delta)));
+  }, []);
+
+  const onPointerUp = useCallback(() => {
+    dragging.current = false;
+  }, []);
+
   return (
-    <div className="shrink-0 border-t border-[var(--color-border)] bg-white" style={{ height: isOpen ? bottomPanelHeight + 28 : 28 }}>
+    <div className="shrink-0 border-t border-[var(--color-border)] bg-white" style={{ height: isOpen ? height + 28 : 28 }}>
       {/* Drag handle */}
       {isOpen && (
         <div
-          onMouseDown={handleDragStart}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
           className="h-[3px] cursor-row-resize hover:bg-[var(--color-node-agent)]/30 transition-colors"
         />
       )}
@@ -65,9 +84,9 @@ export function ConfigBottomPanel({ node }: ConfigBottomPanelProps) {
           <button
             key={tab.id}
             type="button"
-            onClick={() => setBottomPanelTab(tab.id)}
+            onClick={() => handleTabClick(tab.id)}
             className={`px-3 py-1 text-[11px] font-medium transition-colors rounded-t ${
-              isOpen && bottomPanelTab === tab.id
+              isOpen && activeTab === tab.id
                 ? 'text-[var(--color-node-agent)] bg-white border-b-2 border-b-[var(--color-node-agent)]'
                 : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
             }`}
@@ -79,9 +98,9 @@ export function ConfigBottomPanel({ node }: ConfigBottomPanelProps) {
 
       {/* Content */}
       {isOpen && (
-        <div className="overflow-y-auto" style={{ height: bottomPanelHeight - 3 }}>
+        <div className="overflow-y-auto" style={{ height: height - 3 }}>
           <div className="p-3">
-            <ConfigTabContent node={node} activeTab={bottomPanelTab} />
+            <ConfigTabContent node={node} activeTab={activeTab} />
           </div>
         </div>
       )}

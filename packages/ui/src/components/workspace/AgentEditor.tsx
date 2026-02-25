@@ -2,7 +2,7 @@ import { useCallback, useMemo } from 'react';
 import type { FlowNode, NodeType } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
 import { useProjectStore } from '../../context/ProjectStore';
-import { useWorkspace } from '../../context/WorkspaceContext';
+import { useLayout } from '../../context/LayoutContext';
 import { SlashCommandEditor } from './slash-commands/SlashCommandEditor';
 import { ConfigBottomPanel } from './ConfigBottomPanel';
 
@@ -22,6 +22,16 @@ const TYPE_LABELS: Record<NodeType, string> = {
   merge: 'Merge',
 };
 
+/** Find a node by ID in a recursive tree */
+function findNode(nodes: FlowNode[], id: string): FlowNode | null {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    const found = findNode(n.children, id);
+    if (found) return found;
+  }
+  return null;
+}
+
 /** Collect all agent IDs from a node tree */
 function collectAgentNames(nodes: FlowNode[]): string[] {
   const names: string[] = [];
@@ -36,11 +46,14 @@ function collectAgentNames(nodes: FlowNode[]): string[] {
 }
 
 export function AgentEditor({ nodeId }: AgentEditorProps) {
-  const { state, selectedNode, updateNode, removeNode, createAgentByName } = useFlow();
+  const { state, updateNode, removeNode, createAgentByName } = useFlow();
   const { skills: availableSkills } = useProjectStore();
-  const { updateTabLabel } = useWorkspace();
+  const { updateTabLabel } = useLayout();
 
-  const node = selectedNode;
+  const node = useMemo(
+    () => findNode(state.flow.nodes, nodeId),
+    [state.flow.nodes, nodeId],
+  );
 
   const skillNames = useMemo(
     () => availableSkills.map((s) => s.name),

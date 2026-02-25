@@ -1,166 +1,226 @@
-import type { FlowDefinition } from '@forgeflow/types';
-import { FlowProvider } from '../context/FlowContext';
-import { WorkspaceProvider, useWorkspace } from '../context/WorkspaceContext';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { FlowProvider, useFlow } from '../context/FlowContext';
+import { DagProvider, useDag } from '../context/DagContext';
+import { LayoutProvider } from '../context/LayoutContext';
+import { useProjectStore } from '../context/ProjectStore';
 import { AgentExplorer } from '../components/workspace/AgentExplorer';
 import { WorkspaceToolbar } from '../components/workspace/WorkspaceToolbar';
 import { DagMiniView } from '../components/workspace/DagMiniView';
 import { EditorLayout } from '../components/workspace/EditorLayout';
+import { AISidePanel } from '../components/ai/AISidePanel';
 import { autoLayout } from '../lib/flow-to-reactflow';
+import { useSyncFlow, type SaveStatus } from '../hooks/useSyncFlow';
 
-// Hardcoded contract-review example — loaded from server in 5.5
-const exampleFlow: FlowDefinition = {
-  id: 'contract_review',
-  name: 'Legal Contract Review',
-  version: '1.0',
-  description: 'Reviews a contract, flags risks, and generates a redlined version with negotiation memo',
-  skills: ['contract-law-basics'],
-  budget: { maxTurns: 400, maxBudgetUsd: 40.0, timeoutMs: 1200000 },
-  nodes: [
-    {
-      id: 'parse_contract',
-      type: 'agent',
-      name: 'Parse Contract',
-      instructions: 'Read the contract PDF. Extract every clause as a structured object.',
-      config: {
-        inputs: ['contract.pdf'],
-        outputs: ['clauses_parsed.json'],
-        skills: [],
-        budget: { maxTurns: 25, maxBudgetUsd: 3.0 },
-        estimatedDuration: '45s',
-      },
-      children: [],
-    },
-    {
-      id: 'risk_analysis',
-      type: 'agent',
-      name: 'Risk Analysis',
-      instructions: 'Coordinate 3 parallel research subagents analyzing different aspects of the contract.',
-      config: {
-        inputs: ['clauses_parsed.json'],
-        outputs: ['liability_findings.json', 'ip_findings.json', 'termination_findings.json'],
-        skills: ['contract-law-basics'],
-        budget: { maxTurns: 120, maxBudgetUsd: 15.0 },
-        estimatedDuration: '2min',
-      },
-      children: [
-        {
-          id: 'analyze_liability',
-          type: 'agent',
-          name: 'Liability Analyst',
-          instructions: 'Review all indemnification and liability clauses.',
-          config: {
-            inputs: ['clauses_parsed.json'],
-            outputs: ['liability_findings.json'],
-            skills: ['contract-law-basics'],
-            budget: { maxTurns: 35, maxBudgetUsd: 4.0 },
-          },
-          children: [],
-        },
-        {
-          id: 'analyze_ip',
-          type: 'agent',
-          name: 'IP & Confidentiality Analyst',
-          instructions: 'Review all IP, confidentiality, and non-compete clauses.',
-          config: {
-            inputs: ['clauses_parsed.json'],
-            outputs: ['ip_findings.json'],
-            skills: ['contract-law-basics'],
-            budget: { maxTurns: 35, maxBudgetUsd: 4.0 },
-          },
-          children: [],
-        },
-        {
-          id: 'analyze_termination',
-          type: 'agent',
-          name: 'Termination Analyst',
-          instructions: 'Review termination, governance, and dispute resolution clauses.',
-          config: {
-            inputs: ['clauses_parsed.json'],
-            outputs: ['termination_findings.json'],
-            skills: ['contract-law-basics'],
-            budget: { maxTurns: 35, maxBudgetUsd: 4.0 },
-          },
-          children: [],
-        },
-      ],
-    },
-    {
-      id: 'review_checkpoint',
-      type: 'checkpoint',
-      name: 'Attorney Review',
-      instructions: 'Present the risk analysis to the reviewing attorney.',
-      config: {
-        inputs: ['risk_matrix.json'],
-        outputs: ['attorney_decisions.json'],
-        skills: [],
-        presentation: {
-          title: 'Contract Risk Analysis Complete',
-          sections: ['high_risk', 'medium_risk', 'low_risk', 'clean_clauses'],
-        },
-      },
-      children: [],
-    },
-    {
-      id: 'generate_output',
-      type: 'agent',
-      name: 'Generate Deliverables',
-      instructions: 'Generate redlined contract, negotiation memo, and risk summary.',
-      config: {
-        inputs: ['clauses_parsed.json', 'risk_matrix.json', 'attorney_decisions.json'],
-        outputs: ['redline_changes.md', 'negotiation_memo.md', 'risk_summary.json'],
-        skills: ['contract-law-basics'],
-        budget: { maxTurns: 100, maxBudgetUsd: 12.0 },
-        estimatedDuration: '2min',
-      },
-      children: [],
-    },
-  ],
-  edges: [
-    { from: 'parse_contract', to: 'risk_analysis' },
-    { from: 'risk_analysis', to: 'review_checkpoint' },
-    { from: 'review_checkpoint', to: 'generate_output' },
-  ],
-};
+/* ── Resize hook ────────────────────────────────────────── */
 
-const examplePositions = autoLayout(exampleFlow.nodes, exampleFlow.edges);
+const SIDEBAR_MIN = 140;
+const SIDEBAR_MAX = 480;
+const SIDEBAR_DEFAULT = 224;
+const DAG_MIN = 64;
+const DAG_MAX = 400;
+const DAG_DEFAULT = 128;
+const AI_PANEL_MIN = 280;
+const AI_PANEL_MAX = 600;
+const AI_PANEL_DEFAULT = 360;
 
-function WorkspaceContent() {
-  const { dagCollapsed } = useWorkspace();
+function useResize(
+  axis: 'x' | 'y',
+  initial: number,
+  min: number,
+  max: number,
+  reverse = false,
+) {
+  const [size, setSize] = useState(initial);
+  const dragging = useRef(false);
+  const startPos = useRef(0);
+  const startSize = useRef(0);
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      dragging.current = true;
+      startPos.current = axis === 'x' ? e.clientX : e.clientY;
+      startSize.current = size;
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [axis, size],
+  );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!dragging.current) return;
+      const raw =
+        axis === 'x'
+          ? e.clientX - startPos.current
+          : e.clientY - startPos.current;
+      const delta = reverse ? -raw : raw;
+      setSize(Math.min(max, Math.max(min, startSize.current + delta)));
+    },
+    [axis, min, max, reverse],
+  );
+
+  const onPointerUp = useCallback(() => {
+    dragging.current = false;
+  }, []);
+
+  return { size, onPointerDown, onPointerMove, onPointerUp };
+}
+
+/* ── Workspace content (inside providers) ───────────────── */
+
+function WorkspaceContent({ projectId }: { projectId: string }) {
+  const { dagCollapsed } = useDag();
+  const { state, dispatch } = useFlow();
+  const sidebar = useResize('x', SIDEBAR_DEFAULT, SIDEBAR_MIN, SIDEBAR_MAX);
+  const dag = useResize('y', DAG_DEFAULT, DAG_MIN, DAG_MAX);
+  const aiPanel = useResize('x', AI_PANEL_DEFAULT, AI_PANEL_MIN, AI_PANEL_MAX, true);
+  const [aiPanelOpen, setAiPanelOpen] = useState(true);
+
+  const saveStatus = useSyncFlow(projectId, state.flow, state.dirty, dispatch);
 
   return (
     <div className="h-screen flex flex-col">
-      <WorkspaceToolbar />
+      <WorkspaceToolbar onToggleAI={() => setAiPanelOpen((v) => !v)} aiPanelOpen={aiPanelOpen} saveStatus={saveStatus} />
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left sidebar — Agent Explorer */}
-        <div className="w-56 border-r border-[var(--color-border)] shrink-0 overflow-hidden bg-[var(--color-sidebar-bg)]">
+        <div
+          className="border-r border-[var(--color-border)] shrink-0 overflow-hidden bg-[var(--color-sidebar-bg)]"
+          style={{ width: sidebar.size }}
+        >
           <AgentExplorer />
         </div>
 
+        {/* Sidebar resize handle */}
+        <div
+          className="w-1 shrink-0 cursor-col-resize hover:bg-[var(--color-node-agent)]/20 active:bg-[var(--color-node-agent)]/30 transition-colors"
+          onPointerDown={sidebar.onPointerDown}
+          onPointerMove={sidebar.onPointerMove}
+          onPointerUp={sidebar.onPointerUp}
+        />
+
         {/* Main area */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* DAG mini-view (collapsible) */}
-          {!dagCollapsed && <DagMiniView />}
+          {/* DAG mini-view (collapsible + resizable) */}
+          {!dagCollapsed && (
+            <>
+              <DagMiniView height={dag.size} />
+              <div
+                className="h-1 shrink-0 cursor-row-resize hover:bg-[var(--color-node-agent)]/20 active:bg-[var(--color-node-agent)]/30 transition-colors"
+                onPointerDown={dag.onPointerDown}
+                onPointerMove={dag.onPointerMove}
+                onPointerUp={dag.onPointerUp}
+              />
+            </>
+          )}
           {dagCollapsed && (
             <div className="h-0 border-b border-[var(--color-border)]" />
           )}
 
-          {/* Editor panel(s) — supports split panes */}
+          {/* Editor panel(s) — dockview manages splits */}
           <div className="flex-1 overflow-hidden bg-white">
             <EditorLayout />
           </div>
         </div>
+
+        {/* AI Side Panel */}
+        {aiPanelOpen && (
+          <>
+            {/* AI panel resize handle */}
+            <div
+              className="w-1 shrink-0 cursor-col-resize hover:bg-[var(--color-node-agent)]/20 active:bg-[var(--color-node-agent)]/30 transition-colors"
+              onPointerDown={aiPanel.onPointerDown}
+              onPointerMove={aiPanel.onPointerMove}
+              onPointerUp={aiPanel.onPointerUp}
+            />
+            <div
+              className="shrink-0 border-l border-[var(--color-border)] overflow-hidden"
+              style={{ width: aiPanel.size }}
+            >
+              <AISidePanel />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
+/* ── Page component (reads URL param, loads flow) ───────── */
+
 export function WorkspacePage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { getFlowById, loadProject, loadSkills } = useProjectStore();
+  const [loading, setLoading] = useState(true);
+
+  // Load project data from API on mount
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      await loadProject(id!);
+      await loadSkills(id!);
+      if (!cancelled) setLoading(false);
+    }
+    load();
+
+    return () => { cancelled = true; };
+  }, [id, loadProject, loadSkills]);
+
+  const flow = id ? getFlowById(id) : null;
+
+  const positions = useMemo(
+    () => (flow ? autoLayout(flow.nodes, flow.edges) : {}),
+    [flow],
+  );
+
+  if (!id) {
+    return (
+      <div className="h-screen flex items-center justify-center text-sm text-[var(--color-text-muted)]">
+        No project ID specified
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="flex items-center gap-3 text-sm text-[var(--color-text-muted)]">
+          <div className="w-4 h-4 border-2 border-[var(--color-node-agent)] border-t-transparent rounded-full animate-spin" />
+          Loading project...
+        </div>
+      </div>
+    );
+  }
+
+  if (!flow) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center gap-4">
+        <div className="text-sm text-[var(--color-text-muted)]">
+          Project not found: <span className="font-mono">{id}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => navigate('/')}
+          className="text-xs font-medium px-4 py-2 rounded-lg bg-[var(--color-node-agent)] text-white hover:bg-[var(--color-node-agent)]/90 transition-colors"
+        >
+          Back to Dashboard
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <FlowProvider flow={exampleFlow} positions={examplePositions}>
-      <WorkspaceProvider>
-        <WorkspaceContent />
-      </WorkspaceProvider>
+    <FlowProvider key={id} flow={flow} positions={positions}>
+      <DagProvider>
+        <LayoutProvider>
+          <WorkspaceContent projectId={id} />
+        </LayoutProvider>
+      </DagProvider>
     </FlowProvider>
   );
 }

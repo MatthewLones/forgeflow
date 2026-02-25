@@ -7,12 +7,49 @@ import {
   acceptCompletion,
 } from '@codemirror/autocomplete';
 import { markdown } from '@codemirror/lang-markdown';
-import { createSkillSlashAutocomplete } from './slash-commands/skill-slash-autocomplete';
+import { createSkillSlashAutocomplete, type SkillSlashOptions } from './slash-commands/skill-slash-autocomplete';
 import { skillBlockDecorationPlugin } from './slash-commands/skill-block-decoration';
+import { skillChipDecorationPlugin, SKILL_CHIP_PATTERNS } from './slash-commands/skill-chip-decoration';
 
 interface SkillSlashEditorProps {
   content: string;
   onChange: (content: string) => void;
+  skills?: string[];
+  files?: string[];
+  currentSkill?: string;
+}
+
+/**
+ * Custom backspace handler that deletes an entire chip if the cursor is
+ * positioned at the end of one (//skill:NAME or @file).
+ */
+function chipBackspace(view: EditorView): boolean {
+  const { state } = view;
+  if (state.selection.ranges.length !== 1) return false;
+  const range = state.selection.main;
+  if (!range.empty) return false;
+
+  const pos = range.head;
+  const line = state.doc.lineAt(pos);
+  const textBefore = state.doc.sliceString(line.from, pos);
+
+  for (const { regex } of SKILL_CHIP_PATTERNS) {
+    const r = new RegExp(regex.source, regex.flags);
+    let match: RegExpExecArray | null;
+    while ((match = r.exec(textBefore)) !== null) {
+      const chipStart = line.from + match.index;
+      const chipEnd = line.from + match.index + match[0].length;
+      if (chipEnd === pos || (chipStart < pos && pos <= chipEnd)) {
+        view.dispatch({
+          changes: { from: chipStart, to: chipEnd },
+          selection: { anchor: chipStart },
+        });
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 /** Split YAML frontmatter from body. Returns { frontmatter, body, reconstruct }. */
@@ -38,13 +75,21 @@ function splitFrontmatter(content: string): {
  * Structured skill editor with slash command support and widget decorations.
  *
  * - Strips YAML frontmatter and only shows the body for editing
- * - `/output`, `/input`, `/decision`, `/guardrail` trigger autocomplete
+ * - `/output`, `/input`, `/decision`, `/guardrail` trigger block autocomplete
+ * - `//` triggers sub-skill autocomplete (inserts `//skill:NAME`)
+ * - `@` triggers file reference autocomplete (inserts `@path/to/file.md`)
  * - Forgeflow fenced blocks render as interactive widgets
  * - Regular markdown editing between blocks
  *
  * Use `key={filePath}` to remount when switching files.
  */
-export function SkillSlashEditor({ content, onChange }: SkillSlashEditorProps) {
+export function SkillSlashEditor({
+  content,
+  onChange,
+  skills = [],
+  files = [],
+  currentSkill = '',
+}: SkillSlashEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -88,6 +133,25 @@ export function SkillSlashEditor({ content, onChange }: SkillSlashEditorProps) {
       '.cm-line': {
         padding: '0 16px',
       },
+      // Chip styles for sub-skills and file references
+      '.cm-chip': {
+        padding: '1px 6px',
+        borderRadius: '4px',
+        fontSize: '12px',
+        fontWeight: '500',
+      },
+      '.cm-chip-subskill': {
+        backgroundColor: 'rgba(16, 185, 129, 0.12)',
+        color: '#059669',
+      },
+      '.cm-chip-fileref': {
+        backgroundColor: 'rgba(245, 158, 11, 0.12)',
+        color: '#d97706',
+      },
+      '.cm-chip-interrupt': {
+        backgroundColor: 'rgba(239, 68, 68, 0.12)',
+        color: '#dc2626',
+      },
       // Autocomplete dropdown styling
       '.cm-tooltip-autocomplete': {
         border: '1px solid var(--color-border)',
@@ -121,7 +185,8 @@ export function SkillSlashEditor({ content, onChange }: SkillSlashEditorProps) {
       },
     });
 
-    const slashComplete = createSkillSlashAutocomplete();
+    const slashOpts: SkillSlashOptions = { skills, files, currentSkill };
+    const slashComplete = createSkillSlashAutocomplete(slashOpts);
 
     const state = EditorState.create({
       doc: body,
@@ -132,6 +197,7 @@ export function SkillSlashEditor({ content, onChange }: SkillSlashEditorProps) {
           { key: 'Tab', run: acceptCompletion },
         ])),
         keymap.of([
+          { key: 'Backspace', run: chipBackspace },
           ...defaultKeymap,
           ...historyKeymap,
         ]),
@@ -144,6 +210,7 @@ export function SkillSlashEditor({ content, onChange }: SkillSlashEditorProps) {
         }),
         markdown(),
         skillBlockDecorationPlugin,
+        skillChipDecorationPlugin,
         theme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {

@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { FlowNode, FlowEdge, NodeType } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
-import { useWorkspace } from '../../context/WorkspaceContext';
-import { useProjectStore } from '../../context/ProjectStore';
+import { useLayout } from '../../context/LayoutContext';
+import { useProjectStore, type SkillSummary } from '../../context/ProjectStore';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 
 /* ── Topological sort ────────────────────────────────────── */
@@ -390,11 +390,117 @@ function ReferenceTreeItem({
   );
 }
 
+/* ── Skill Tree Item ─────────────────────────────────────── */
+
+interface SkillTreeItemProps {
+  skill: SkillSummary;
+  allSkills: SkillSummary[];
+  depth: number;
+  activeTabId: string | null;
+  visited: Set<string>;
+  onSelect: (skillName: string) => void;
+  onContextMenu: (e: React.MouseEvent, skillName: string) => void;
+}
+
+function SkillTreeItem({ skill, allSkills, depth, activeTabId, visited, onSelect, onContextMenu }: SkillTreeItemProps) {
+  const [expanded, setExpanded] = useState(false);
+  const hasSubSkills = skill.subSkills.length > 0;
+  const isActive = activeTabId === `skill:${skill.name}`;
+
+  // Resolve sub-skills by name, guarding against circular references
+  const resolvedSubSkills = hasSubSkills
+    ? skill.subSkills
+        .filter((name) => !visited.has(name))
+        .map((name) => allSkills.find((s) => s.name === name))
+        .filter(Boolean) as SkillSummary[]
+    : [];
+
+  const nextVisited = hasSubSkills ? new Set([...visited, skill.name]) : visited;
+
+  return (
+    <div>
+      <div
+        role="treeitem"
+        tabIndex={0}
+        onClick={() => onSelect(skill.name)}
+        onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, skill.name); }}
+        className={`w-full flex items-center gap-1.5 py-1 text-left text-xs transition-colors relative cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-node-agent)] focus-visible:ring-inset ${
+          isActive
+            ? 'bg-[var(--color-node-merge)]/8 text-[var(--color-text-primary)] border-l-2 border-l-[var(--color-node-merge)]'
+            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] border-l-2 border-l-transparent'
+        }`}
+        style={{ paddingLeft: `${8 + depth * 16}px` }}
+      >
+        {/* Indent guides */}
+        {depth > 0 && Array.from({ length: depth }).map((_, i) => (
+          <span
+            key={i}
+            className="absolute top-0 bottom-0 w-px bg-[var(--color-border)]"
+            style={{ left: `${8 + i * 16 + 7}px` }}
+          />
+        ))}
+
+        {/* Expand/collapse */}
+        {hasSubSkills ? (
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(!expanded);
+            }}
+            className="w-3 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] shrink-0 text-center"
+          >
+            {expanded ? '\u25BE' : '\u25B8'}
+          </span>
+        ) : (
+          <span className="w-3 shrink-0" />
+        )}
+
+        {/* Skill glyph */}
+        <span className={`w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold shrink-0 ${
+          isActive ? 'text-white bg-[var(--color-node-merge)]' : 'text-[var(--color-text-muted)] bg-[var(--color-canvas-bg)]'
+        }`}>
+          S
+        </span>
+
+        {/* Skill name */}
+        <span className={`truncate ${isActive ? 'font-medium' : ''}`}>
+          {skill.name}
+        </span>
+
+        {/* Badge: sub-skill count or reference count */}
+        <span className="ml-auto text-[9px] text-[var(--color-text-muted)] pr-2">
+          {hasSubSkills ? `${skill.subSkills.length} sub` : skill.referenceCount}
+        </span>
+      </div>
+
+      {/* Sub-skills */}
+      {hasSubSkills && expanded && (
+        <div>
+          {resolvedSubSkills.map((sub) => (
+            <SkillTreeItem
+              key={sub.name}
+              skill={sub}
+              allSkills={allSkills}
+              depth={depth + 1}
+              activeTabId={activeTabId}
+              visited={nextVisited}
+              onSelect={onSelect}
+              onContextMenu={onContextMenu}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Main Explorer ───────────────────────────────────────── */
 
 export function AgentExplorer() {
   const { state, addNode, addChild, removeNode, updateNode, selectNode } = useFlow();
-  const { activeTabId, selectAgent, selectSkill, selectReference } = useWorkspace();
+  const { activeTabId, selectAgent, selectSkill, selectReference } = useLayout();
   const { skills } = useProjectStore();
 
   const [agentsExpanded, setAgentsExpanded] = useState(true);
@@ -521,9 +627,12 @@ export function AgentExplorer() {
     [addNode],
   );
 
+  // Empty set for the root level of skill tree (no ancestors yet)
+  const emptyVisited = useState(() => new Set<string>())[0];
+
   return (
     <div className="h-full flex flex-col select-none overflow-y-auto">
-      {/* ── Agents ─────────────────────────────────────── */}
+      {/* Agents */}
       <SectionHeader
         title="Agents"
         expanded={agentsExpanded}
@@ -565,7 +674,7 @@ export function AgentExplorer() {
         </div>
       )}
 
-      {/* ── Skills ─────────────────────────────────────── */}
+      {/* Skills */}
       <SectionHeader
         title="Skills"
         expanded={skillsExpanded}
@@ -575,40 +684,22 @@ export function AgentExplorer() {
 
       {skillsExpanded && (
         <div className="py-0.5">
-          {skills.map((skill) => {
-            const isActive = activeTabId === `skill:${skill.name}`;
-            return (
-              <button
-                key={skill.name}
-                type="button"
-                onClick={() => selectSkill(skill.name)}
-                onContextMenu={(e) => handleSkillContextMenu(e, skill.name)}
-                className={`w-full flex items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors ${
-                  isActive
-                    ? 'bg-[var(--color-node-merge)]/8 text-[var(--color-text-primary)] border-l-2 border-l-[var(--color-node-merge)]'
-                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] border-l-2 border-l-transparent'
-                }`}
-                style={{ paddingLeft: '8px' }}
-              >
-                <span className="w-3 shrink-0" />
-                <span className={`w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold shrink-0 ${
-                  isActive ? 'text-white bg-[var(--color-node-merge)]' : 'text-[var(--color-text-muted)] bg-[var(--color-canvas-bg)]'
-                }`}>
-                  S
-                </span>
-                <span className={`truncate ${isActive ? 'font-medium' : ''}`}>
-                  {skill.name}
-                </span>
-                <span className="ml-auto text-[9px] text-[var(--color-text-muted)] pr-2">
-                  {skill.referenceCount}
-                </span>
-              </button>
-            );
-          })}
+          {skills.map((skill) => (
+            <SkillTreeItem
+              key={skill.name}
+              skill={skill}
+              allSkills={skills}
+              depth={0}
+              activeTabId={activeTabId}
+              visited={emptyVisited}
+              onSelect={selectSkill}
+              onContextMenu={handleSkillContextMenu}
+            />
+          ))}
         </div>
       )}
 
-      {/* ── References ─────────────────────────────────── */}
+      {/* References */}
       <SectionHeader
         title="References"
         expanded={refsExpanded}

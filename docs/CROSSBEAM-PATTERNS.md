@@ -1,5 +1,7 @@
 # Patterns Extracted from CrossBeam
 
+> **Historical Reference** — These patterns were extracted from CrossBeam and have been generalized into ForgeFlow's architecture. See [ARCHITECTURE.md](ARCHITECTURE.md) for the current system design.
+
 CrossBeam is an ADU (Accessory Dwelling Unit) permit assistant that won first place at the Claude Code Hackathon (Feb 2026). It demonstrates 8 key patterns for building long-running, stateful AI agent workflows. Each pattern below is described generically — independent of ADU permits — with the exact structure used, ready to implement.
 
 ## Pattern 1: Skill Format
