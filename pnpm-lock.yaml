@@ -190,6 +190,9 @@ importers:
       '@codemirror/lang-markdown':
         specifier: ^6.5.0
         version: 6.5.0
+      '@codemirror/language':
+        specifier: ^6.10.0
+        version: 6.12.1
       '@codemirror/state':
         specifier: ^6.5.4
         version: 6.5.4

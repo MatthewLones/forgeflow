@@ -12,12 +12,14 @@ const agentDeco = Decoration.mark({ class: 'cm-chip cm-chip-agent' });
 const mergeDeco = Decoration.mark({ class: 'cm-chip cm-chip-merge' });
 const interruptDeco = Decoration.mark({ class: 'cm-chip cm-chip-interrupt' });
 const artifactDeco = Decoration.mark({ class: 'cm-chip cm-chip-artifact' });
+const artifactOutputDeco = Decoration.mark({ class: 'cm-chip cm-chip-artifact-output' });
 
 const PATTERNS = [
   { regex: /\/skill:([\w-]+)/g, deco: skillDeco },
   { regex: /\/\/agent:([\w-]+)/g, deco: agentDeco },
   { regex: /\/merge\b/g, deco: mergeDeco },
   { regex: /\/interrupt:(approval|qa|selection|review|escalation)\b/g, deco: interruptDeco },
+  { regex: /\\([\w._-]+)/g, deco: artifactOutputDeco },
   { regex: /@([\w._-]+)/g, deco: artifactDeco },
 ];
 

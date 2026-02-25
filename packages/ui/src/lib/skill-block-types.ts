@@ -2,17 +2,6 @@
 
 export type SkillBlockType = 'output' | 'input' | 'decision' | 'guardrail';
 
-export interface OutputFile {
-  name: string;
-  format: string;
-  phase: string;
-  description: string;
-}
-
-export interface OutputBlock {
-  files: OutputFile[];
-}
-
 export interface InputFile {
   name: string;
   format: string;
@@ -47,7 +36,7 @@ export interface GuardrailBlock {
   rules: GuardrailRule[];
 }
 
-export type SkillBlockData = OutputBlock | InputBlock | DecisionBlock | GuardrailBlock;
+export type SkillBlockData = InputBlock | DecisionBlock | GuardrailBlock;
 
 /** A parsed skill block with its position in the source document. */
 export interface ParsedSkillBlock {

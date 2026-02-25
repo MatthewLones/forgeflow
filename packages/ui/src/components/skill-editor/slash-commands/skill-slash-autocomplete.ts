@@ -1,6 +1,6 @@
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import type { EditorView } from '@codemirror/view';
-import { BLOCK_TEMPLATES } from './skill-block-templates';
+import { BLOCK_TEMPLATES } from '../../shared/block-widgets/block-templates';
 
 interface SkillBlockOption {
   name: string;
@@ -9,7 +9,7 @@ interface SkillBlockOption {
 }
 
 const BLOCK_OPTIONS: SkillBlockOption[] = [
-  { name: 'output', label: 'output', detail: 'Structured output file table' },
+  { name: 'input', label: 'input', detail: 'Input file requirements' },
   { name: 'decision', label: 'decision', detail: 'Decision tree / routing logic' },
   { name: 'guardrail', label: 'guardrail', detail: 'Do / Don\'t rules' },
 ];
@@ -26,6 +26,7 @@ export interface SkillSlashOptions {
   skills: string[];
   files: string[];
   currentSkill: string;
+  onCreateSkill?: (name: string) => void;
 }
 
 /**
@@ -37,12 +38,14 @@ export interface SkillSlashOptions {
  * - `/`  → block commands (inserts fenced code block template)
  */
 export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills: [], files: [], currentSkill: '' }) {
+  const { onCreateSkill } = opts;
+
   return function skillSlashAutocomplete(context: CompletionContext): CompletionResult | null {
     // 1. Check for // first (sub-skill reference) — HIGHEST PRIORITY
     const doubleSlash = context.matchBefore(/\/\/[\w-]*/);
     if (doubleSlash) {
       const query = doubleSlash.text.slice(2).toLowerCase();
-      const options = opts.skills
+      const options: Array<{ label: string; type: string; detail: string; apply: string | ((view: EditorView, _completion: Completion, from: number, to: number) => void) }> = opts.skills
         .filter((s) => s !== opts.currentSkill && s.toLowerCase().includes(query))
         .map((s) => ({
           label: s,
@@ -135,6 +138,37 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
           detail: int.detail,
         });
       }
+    }
+
+    // Skill references (/skill:NAME) — existing skills
+    for (const skill of opts.skills) {
+      if (skill === opts.currentSkill) continue;
+      if (skill.toLowerCase().includes(query)) {
+        options.push({
+          label: skill,
+          type: 'variable',
+          apply: `/skill:${skill}`,
+          detail: 'skill',
+        });
+      }
+    }
+
+    // Offer "Create skill" if query doesn't match a built-in command or existing skill
+    if (query && !opts.skills.some((s) => s.toLowerCase() === query)
+        && !BLOCK_OPTIONS.some((o) => o.name === query)
+        && !query.startsWith('interrupt')) {
+      options.push({
+        label: `Create "${query}"`,
+        type: 'class',
+        detail: 'new skill',
+        apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+          view.dispatch({
+            changes: { from, to, insert: `/skill:${query}` },
+            selection: { anchor: from + query.length + 7 },
+          });
+          onCreateSkill?.(query);
+        },
+      });
     }
 
     if (options.length === 0) return null;

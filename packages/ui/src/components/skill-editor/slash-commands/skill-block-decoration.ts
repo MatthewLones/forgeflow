@@ -5,7 +5,7 @@ import {
 } from '@codemirror/view';
 import { StateField, type Transaction, RangeSetBuilder } from '@codemirror/state';
 import type { SkillBlockType, SkillBlockData } from '../../../lib/skill-block-types';
-import { SkillBlockWidget } from '../widgets/WidgetPortal';
+import { SkillBlockWidget } from '../../shared/block-widgets/WidgetPortal';
 
 const BLOCK_TYPES = new Set<string>(['output', 'input', 'decision', 'guardrail']);
 

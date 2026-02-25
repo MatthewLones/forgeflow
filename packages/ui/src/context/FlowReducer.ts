@@ -5,6 +5,7 @@ import type {
   NodeConfig,
   FlowBudget,
   NodeType,
+  ArtifactSchema,
 } from '@forgeflow/types';
 
 export type FlowAction =
@@ -16,11 +17,15 @@ export type FlowAction =
   | { type: 'UPDATE_NODE_CONFIG'; nodeId: string; config: Partial<NodeConfig> }
   | { type: 'ADD_EDGE'; edge: FlowEdge }
   | { type: 'REMOVE_EDGE'; from: string; to: string }
+  | { type: 'REMOVE_AUTO_EDGE'; from: string; to: string }
   | { type: 'UPDATE_FLOW_METADATA'; updates: Partial<Pick<FlowDefinition, 'name' | 'description' | 'version' | 'skills' | 'budget'>> }
   | { type: 'SET_NODE_CHILDREN'; nodeId: string; children: FlowNode[] }
   | { type: 'ADD_CHILD'; parentId: string; child: FlowNode; position: { x: number; y: number } }
   | { type: 'MOVE_NODE'; nodeId: string; position: { x: number; y: number } }
   | { type: 'CREATE_AGENT_FROM_SLASH'; name: string; parentId?: string }
+  | { type: 'ADD_ARTIFACT'; artifact: ArtifactSchema }
+  | { type: 'UPDATE_ARTIFACT'; name: string; updates: Partial<ArtifactSchema> }
+  | { type: 'REMOVE_ARTIFACT'; name: string }
   | { type: 'MARK_CLEAN' };
 
 export interface FlowState {
@@ -240,6 +245,19 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       };
     }
 
+    case 'REMOVE_AUTO_EDGE': {
+      return {
+        ...state,
+        flow: {
+          ...state.flow,
+          edges: state.flow.edges.filter(
+            (e) => !(e.from === action.from && e.to === action.to && e.auto),
+          ),
+        },
+        dirty: true,
+      };
+    }
+
     case 'UPDATE_FLOW_METADATA': {
       return {
         ...state,
@@ -283,6 +301,39 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
           ...state.positions,
           [action.nodeId]: action.position,
         },
+      };
+    }
+
+    case 'ADD_ARTIFACT': {
+      const artifacts = { ...(state.flow.artifacts ?? {}), [action.artifact.name]: action.artifact };
+      return {
+        ...state,
+        flow: { ...state.flow, artifacts },
+        dirty: true,
+      };
+    }
+
+    case 'UPDATE_ARTIFACT': {
+      const prev = state.flow.artifacts?.[action.name];
+      if (!prev) return state;
+      const artifacts = {
+        ...(state.flow.artifacts ?? {}),
+        [action.name]: { ...prev, ...action.updates },
+      };
+      return {
+        ...state,
+        flow: { ...state.flow, artifacts },
+        dirty: true,
+      };
+    }
+
+    case 'REMOVE_ARTIFACT': {
+      const artifacts = { ...(state.flow.artifacts ?? {}) };
+      delete artifacts[action.name];
+      return {
+        ...state,
+        flow: { ...state.flow, artifacts },
+        dirty: true,
       };
     }
 

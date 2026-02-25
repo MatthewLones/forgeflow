@@ -66,6 +66,25 @@ router.post('/projects/:id/skills', async (req, res) => {
   }
 });
 
+// PATCH /api/projects/:id/skills/:name — rename a skill
+router.patch('/projects/:id/skills/:name', async (req, res) => {
+  try {
+    const { newName } = req.body;
+    if (!newName || typeof newName !== 'string') {
+      res.status(400).json({ error: 'newName is required' });
+      return;
+    }
+    const renamed = await store.renameSkill(req.params.id, req.params.name, newName);
+    if (!renamed) {
+      res.status(404).json({ error: 'Skill not found or rename failed' });
+      return;
+    }
+    res.json({ ok: true, name: newName });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to rename skill' });
+  }
+});
+
 // DELETE /api/projects/:id/skills/:name — delete a skill
 router.delete('/projects/:id/skills/:name', async (req, res) => {
   try {

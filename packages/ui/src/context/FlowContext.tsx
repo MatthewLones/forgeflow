@@ -6,7 +6,7 @@ import {
   type ReactNode,
   type Dispatch,
 } from 'react';
-import type { FlowDefinition, FlowNode, FlowEdge, NodeConfig, NodeType } from '@forgeflow/types';
+import type { FlowDefinition, FlowNode, FlowEdge, NodeConfig, NodeType, ArtifactSchema } from '@forgeflow/types';
 import {
   flowReducer,
   createDefaultNode,
@@ -27,8 +27,12 @@ interface FlowContextValue {
   updateNodeConfig: (nodeId: string, config: Partial<NodeConfig>) => void;
   addEdge: (edge: FlowEdge) => void;
   removeEdge: (from: string, to: string) => void;
+  removeAutoEdge: (from: string, to: string) => void;
   addChild: (parentId: string, position: { x: number; y: number }) => void;
   createAgentByName: (name: string, parentId?: string) => void;
+  addArtifact: (artifact: ArtifactSchema) => void;
+  updateArtifact: (name: string, updates: Partial<ArtifactSchema>) => void;
+  removeArtifact: (name: string) => void;
 }
 
 const FlowContext = createContext<FlowContextValue | null>(null);
@@ -119,6 +123,11 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
     [],
   );
 
+  const removeAutoEdge = useCallback(
+    (from: string, to: string) => dispatch({ type: 'REMOVE_AUTO_EDGE', from, to }),
+    [],
+  );
+
   const addChild = useCallback(
     (parentId: string, position: { x: number; y: number }) => {
       const existingIds = collectAllIds(state.flow.nodes);
@@ -136,6 +145,22 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
     [],
   );
 
+  const addArtifact = useCallback(
+    (artifact: ArtifactSchema) => dispatch({ type: 'ADD_ARTIFACT', artifact }),
+    [],
+  );
+
+  const updateArtifact = useCallback(
+    (name: string, updates: Partial<ArtifactSchema>) =>
+      dispatch({ type: 'UPDATE_ARTIFACT', name, updates }),
+    [],
+  );
+
+  const removeArtifact = useCallback(
+    (name: string) => dispatch({ type: 'REMOVE_ARTIFACT', name }),
+    [],
+  );
+
   return (
     <FlowContext.Provider
       value={{
@@ -149,8 +174,12 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
         updateNodeConfig,
         addEdge,
         removeEdge,
+        removeAutoEdge,
         addChild,
         createAgentByName,
+        addArtifact,
+        updateArtifact,
+        removeArtifact,
       }}
     >
       {children}

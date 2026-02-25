@@ -107,6 +107,19 @@ async function put<T>(path: string, body?: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function patch<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, (data as { error?: string }).error ?? res.statusText);
+  }
+  return res.json() as Promise<T>;
+}
+
 async function del(path: string): Promise<void> {
   const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE' });
   if (!res.ok && res.status !== 204) {
@@ -175,6 +188,9 @@ export const api = {
 
     delete: (projectId: string, name: string) =>
       del(`/projects/${projectId}/skills/${name}`),
+
+    rename: (projectId: string, oldName: string, newName: string) =>
+      patch<{ ok: boolean; name: string }>(`/projects/${projectId}/skills/${oldName}`, { newName }),
   },
 
   references: {

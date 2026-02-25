@@ -1,10 +1,12 @@
-import type { FlowNode } from './node.js';
+import type { FlowNode, ArtifactSchema } from './node.js';
 
 export interface FlowEdge {
   /** Source node ID */
   from: string;
   /** Target node ID */
   to: string;
+  /** True if this edge was auto-created from artifact dependencies */
+  auto?: boolean;
 }
 
 export interface FlowBudget {
@@ -33,4 +35,6 @@ export interface FlowDefinition {
   nodes: FlowNode[];
   /** Connections between top-level nodes */
   edges: FlowEdge[];
+  /** Flow-level artifact registry (keyed by artifact name) */
+  artifacts?: Record<string, ArtifactSchema>;
 }

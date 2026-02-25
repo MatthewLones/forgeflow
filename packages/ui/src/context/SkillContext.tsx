@@ -12,14 +12,11 @@ export interface SkillFile {
   content: string;
 }
 
-export type SkillViewMode = 'edit' | 'compiled' | 'raw';
-
 export interface SkillState {
   skillName: string;
   files: SkillFile[];
   selectedFilePath: string | null;
   dirty: boolean;
-  viewMode: SkillViewMode;
 }
 
 export type SkillAction =
@@ -28,8 +25,7 @@ export type SkillAction =
   | { type: 'ADD_FILE'; path: string; content: string }
   | { type: 'DELETE_FILE'; path: string }
   | { type: 'RENAME_FILE'; oldPath: string; newPath: string }
-  | { type: 'SET_SKILL'; state: SkillState }
-  | { type: 'SET_VIEW_MODE'; mode: SkillViewMode };
+  | { type: 'SET_SKILL'; state: SkillState };
 
 function skillReducer(state: SkillState, action: SkillAction): SkillState {
   switch (action.type) {
@@ -82,9 +78,6 @@ function skillReducer(state: SkillState, action: SkillAction): SkillState {
     case 'SET_SKILL':
       return action.state;
 
-    case 'SET_VIEW_MODE':
-      return { ...state, viewMode: action.mode };
-
     default:
       return state;
   }
@@ -100,8 +93,6 @@ interface SkillContextValue {
   addFile: (path: string, content?: string) => void;
   deleteFile: (path: string) => void;
   renameFile: (oldPath: string, newPath: string) => void;
-  viewMode: SkillViewMode;
-  setViewMode: (mode: SkillViewMode) => void;
 }
 
 const SkillContext = createContext<SkillContextValue | null>(null);
@@ -149,11 +140,6 @@ export function SkillProvider({ initialState, children }: SkillProviderProps) {
     [],
   );
 
-  const setViewMode = useCallback(
-    (mode: SkillViewMode) => dispatch({ type: 'SET_VIEW_MODE', mode }),
-    [],
-  );
-
   return (
     <SkillContext.Provider
       value={{
@@ -165,8 +151,6 @@ export function SkillProvider({ initialState, children }: SkillProviderProps) {
         addFile,
         deleteFile,
         renameFile,
-        viewMode: state.viewMode,
-        setViewMode,
       }}
     >
       {children}

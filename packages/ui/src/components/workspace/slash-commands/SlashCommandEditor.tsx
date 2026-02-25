@@ -1,15 +1,16 @@
 import { useEffect, useRef } from 'react';
-import { EditorState } from '@codemirror/state';
+import { EditorState, Prec } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import {
   autocompletion,
   acceptCompletion,
-  completionKeymap,
 } from '@codemirror/autocomplete';
+import { markdown } from '@codemirror/lang-markdown';
 import { chipDecorationPlugin, CHIP_PATTERNS } from './chip-decoration';
 import { createSlashAutocomplete } from './slash-autocomplete';
 import { blockDecorationPlugin } from '../../shared/block-widgets';
+import { markdownDecorationPlugin } from '../../shared/markdown-decoration';
 
 /**
  * Custom backspace handler that deletes an entire chip if the cursor is
@@ -56,6 +57,12 @@ interface SlashCommandEditorProps {
   agents: string[];
   artifacts: string[];
   onCreateAgent?: (name: string) => void;
+  onCreateArtifact?: (name: string) => void;
+  onCreateSkill?: (name: string) => void;
+  onClickSkill?: (name: string) => void;
+  onClickAgent?: (name: string) => void;
+  onClickArtifact?: (name: string) => void;
+  onClickArtifactOutput?: (name: string) => void;
 }
 
 /**
@@ -67,6 +74,14 @@ interface SlashCommandEditorProps {
  *
  * Use `key={nodeId}` to remount when switching nodes.
  */
+/** Chip click patterns — map CSS class → regex to extract the entity name */
+const CHIP_CLICK_MAP: { className: string; regex: RegExp; type: 'skill' | 'agent' | 'artifact' | 'artifact-output' }[] = [
+  { className: 'cm-chip-skill', regex: /\/skill:([\w-]+)/g, type: 'skill' },
+  { className: 'cm-chip-agent', regex: /\/\/agent:([\w-]+)/g, type: 'agent' },
+  { className: 'cm-chip-artifact', regex: /@([\w._-]+)/g, type: 'artifact' },
+  { className: 'cm-chip-artifact-output', regex: /\\([\w._-]+)/g, type: 'artifact-output' },
+];
+
 export function SlashCommandEditor({
   content,
   onChange,
@@ -74,14 +89,32 @@ export function SlashCommandEditor({
   agents,
   artifacts,
   onCreateAgent,
+  onCreateArtifact,
+  onCreateSkill,
+  onClickSkill,
+  onClickAgent,
+  onClickArtifact,
+  onClickArtifactOutput,
 }: SlashCommandEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const onCreateAgentRef = useRef(onCreateAgent);
+  const onCreateArtifactRef = useRef(onCreateArtifact);
+  const onCreateSkillRef = useRef(onCreateSkill);
+  const onClickSkillRef = useRef(onClickSkill);
+  const onClickAgentRef = useRef(onClickAgent);
+  const onClickArtifactRef = useRef(onClickArtifact);
+  const onClickArtifactOutputRef = useRef(onClickArtifactOutput);
 
   onChangeRef.current = onChange;
   onCreateAgentRef.current = onCreateAgent;
+  onCreateArtifactRef.current = onCreateArtifact;
+  onCreateSkillRef.current = onCreateSkill;
+  onClickSkillRef.current = onClickSkill;
+  onClickAgentRef.current = onClickAgent;
+  onClickArtifactRef.current = onClickArtifact;
+  onClickArtifactOutputRef.current = onClickArtifactOutput;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -127,6 +160,7 @@ export function SlashCommandEditor({
         borderRadius: '4px',
         fontSize: '12px',
         fontWeight: '500',
+        cursor: 'pointer',
       },
       '.cm-chip-skill': {
         backgroundColor: 'rgba(16, 185, 129, 0.12)',
@@ -147,6 +181,10 @@ export function SlashCommandEditor({
       '.cm-chip-artifact': {
         backgroundColor: 'rgba(139, 92, 246, 0.12)',
         color: '#7c3aed',
+      },
+      '.cm-chip-artifact-output': {
+        backgroundColor: 'rgba(139, 92, 246, 0.20)',
+        color: '#6d28d9',
       },
       // Autocomplete dropdown
       '.cm-tooltip-autocomplete': {
@@ -181,27 +219,65 @@ export function SlashCommandEditor({
       agents,
       artifacts,
       onCreateAgent: (name) => onCreateAgentRef.current?.(name),
+      onCreateArtifact: (name) => onCreateArtifactRef.current?.(name),
+      onCreateSkill: (name) => onCreateSkillRef.current?.(name),
     });
 
     const state = EditorState.create({
       doc: content,
       extensions: [
         history(),
-        keymap.of([
-          { key: 'Enter', run: acceptCompletion },
+        // Tab to accept completion at highest priority
+        Prec.highest(keymap.of([
           { key: 'Tab', run: acceptCompletion },
+        ])),
+        keymap.of([
           { key: 'Backspace', run: chipBackspace },
           ...defaultKeymap,
           ...historyKeymap,
-          ...completionKeymap,
         ]),
         autocompletion({
           override: [slashComplete],
           activateOnTyping: true,
-          defaultKeymap: false,
+          selectOnOpen: true,
+          // defaultKeymap: true registers Enter + ArrowUp/Down at Prec.highest
+          defaultKeymap: true,
         }),
+        markdown(),
+        markdownDecorationPlugin,
         chipDecorationPlugin,
         blockDecorationPlugin,
+        EditorView.domEventHandlers({
+          click(event: MouseEvent, view: EditorView) {
+            const target = event.target as HTMLElement;
+            if (!target?.classList?.contains('cm-chip')) return false;
+
+            const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+            if (pos === null) return false;
+
+            const line = view.state.doc.lineAt(pos);
+            const lineText = line.text;
+
+            for (const { className, regex, type } of CHIP_CLICK_MAP) {
+              if (!target.classList.contains(className)) continue;
+              const re = new RegExp(regex.source, regex.flags);
+              let match: RegExpExecArray | null;
+              while ((match = re.exec(lineText)) !== null) {
+                const chipFrom = line.from + match.index;
+                const chipTo = chipFrom + match[0].length;
+                if (pos >= chipFrom && pos <= chipTo) {
+                  const name = match[1];
+                  if (type === 'skill') onClickSkillRef.current?.(name);
+                  else if (type === 'agent') onClickAgentRef.current?.(name);
+                  else if (type === 'artifact') onClickArtifactRef.current?.(name);
+                  else if (type === 'artifact-output') onClickArtifactOutputRef.current?.(name);
+                  return true;
+                }
+              }
+            }
+            return false;
+          },
+        }),
         theme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {

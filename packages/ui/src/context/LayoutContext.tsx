@@ -13,17 +13,19 @@ import type { DockviewApi } from 'dockview-react';
 
 export interface EditorTab {
   id: string;
-  type: 'agent' | 'skill' | 'reference';
+  type: 'agent' | 'skill' | 'reference' | 'artifact';
   label: string;
   nodeId?: string;
   skillName?: string;
   refPath?: string;
+  artifactName?: string;
 }
 
 export type WorkspaceSelection =
   | { type: 'agent'; nodeId: string }
   | { type: 'skill'; skillName: string }
   | { type: 'reference'; refPath: string }
+  | { type: 'artifact'; artifactName: string }
   | null;
 
 /* ── Context value ────────────────────────────────────────── */
@@ -47,6 +49,8 @@ interface LayoutContextValue {
   selectSkill: (skillName: string) => void;
   /** Convenience: open a reference tab */
   selectReference: (refPath: string, label?: string) => void;
+  /** Convenience: open an artifact tab */
+  selectArtifact: (artifactName: string) => void;
 
   /** Current active panel's selection info */
   selection: WorkspaceSelection;
@@ -86,6 +90,8 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
         setSelection({ type: 'skill', skillName: params.skillName });
       } else if (params.type === 'reference' && params.refPath) {
         setSelection({ type: 'reference', refPath: params.refPath });
+      } else if (params.type === 'artifact' && params.artifactName) {
+        setSelection({ type: 'artifact', artifactName: params.artifactName });
       } else {
         setSelection(null);
       }
@@ -108,7 +114,9 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
       ? 'agent-editor'
       : tab.type === 'skill'
         ? 'skill-editor'
-        : 'reference-viewer';
+        : tab.type === 'artifact'
+          ? 'artifact-editor'
+          : 'reference-viewer';
 
     api.addPanel({
       id: tab.id,
@@ -150,6 +158,10 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
     openTab({ id: `ref:${refPath}`, type: 'reference', label: displayLabel, refPath });
   }, [openTab]);
 
+  const selectArtifact = useCallback((artifactName: string) => {
+    openTab({ id: `artifact:${artifactName}`, type: 'artifact', label: artifactName, artifactName });
+  }, [openTab]);
+
   const value = useMemo<LayoutContextValue>(
     () => ({
       setApi,
@@ -160,10 +172,11 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
       selectAgent,
       selectSkill,
       selectReference,
+      selectArtifact,
       selection,
       activeTabId,
     }),
-    [setApi, openTab, closeTab, updateTabLabel, selectAgent, selectSkill, selectReference, selection, activeTabId],
+    [setApi, openTab, closeTab, updateTabLabel, selectAgent, selectSkill, selectReference, selectArtifact, selection, activeTabId],
   );
 
   return (

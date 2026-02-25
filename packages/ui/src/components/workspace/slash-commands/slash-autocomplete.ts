@@ -7,10 +7,11 @@ export interface SlashAutocompleteOptions {
   agents: string[];
   artifacts: string[];
   onCreateAgent?: (name: string) => void;
+  onCreateArtifact?: (name: string) => void;
+  onCreateSkill?: (name: string) => void;
 }
 
 const BLOCK_OPTIONS = [
-  { name: 'output', label: 'output', detail: 'Structured output file table' },
   { name: 'decision', label: 'decision', detail: 'Decision tree / routing logic' },
   { name: 'guardrail', label: 'guardrail', detail: 'Do / Don\'t rules' },
 ];
@@ -23,9 +24,47 @@ const INTERRUPT_TYPES = [
   { name: 'escalation', detail: 'flag a risk' },
 ];
 
-export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAgent }: SlashAutocompleteOptions) {
+export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAgent, onCreateArtifact, onCreateSkill }: SlashAutocompleteOptions) {
   return function slashAutocomplete(context: CompletionContext): CompletionResult | null {
-    // 1. Check for @ (artifact reference)
+    // 1. Check for \ (artifact output declaration)
+    const backslash = context.matchBefore(/\\[\w._-]*/);
+    if (backslash) {
+      const charBefore = backslash.from > 0
+        ? context.state.doc.sliceString(backslash.from - 1, backslash.from)
+        : '';
+      if (charBefore && !/[\s\n]/.test(charBefore)) return null;
+
+      const query = backslash.text.slice(1).toLowerCase();
+      const options: Array<{ label: string; type: string; detail: string; apply: string | ((view: EditorView, _completion: Completion, from: number, to: number) => void) }> = artifacts
+        .filter((a) => a.toLowerCase().includes(query))
+        .map((a) => ({
+          label: a,
+          type: 'property' as const,
+          apply: `\\${a}`,
+          detail: 'output artifact',
+        }));
+
+      // Offer "Create" if query doesn't match an existing artifact
+      if (query && !artifacts.some((a) => a.toLowerCase() === query)) {
+        options.push({
+          label: `Create "${query}"`,
+          type: 'property',
+          detail: 'new artifact',
+          apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+            view.dispatch({
+              changes: { from, to, insert: `\\${query}` },
+              selection: { anchor: from + query.length + 1 },
+            });
+            onCreateArtifact?.(query);
+          },
+        });
+      }
+
+      if (options.length === 0) return null;
+      return { from: backslash.from, options, filter: false };
+    }
+
+    // 2. Check for @ (artifact input reference)
     const atSign = context.matchBefore(/@[\w._-]*/);
     if (atSign) {
       const charBefore = atSign.from > 0
@@ -34,7 +73,7 @@ export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAge
       if (charBefore && !/[\s\n]/.test(charBefore)) return null;
 
       const query = atSign.text.slice(1).toLowerCase();
-      const options = artifacts
+      const options: Array<{ label: string; type: string; detail: string; apply: string | ((view: EditorView, _completion: Completion, from: number, to: number) => void) }> = artifacts
         .filter((a) => a.toLowerCase().includes(query))
         .map((a) => ({
           label: a,
@@ -42,6 +81,22 @@ export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAge
           apply: `@${a}`,
           detail: 'artifact',
         }));
+
+      // Offer "Create" if query doesn't match an existing artifact
+      if (query && !artifacts.some((a) => a.toLowerCase() === query)) {
+        options.push({
+          label: `Create "${query}"`,
+          type: 'property',
+          detail: 'new artifact',
+          apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+            view.dispatch({
+              changes: { from, to, insert: `@${query}` },
+              selection: { anchor: from + query.length + 1 },
+            });
+            onCreateArtifact?.(query);
+          },
+        });
+      }
 
       if (options.length === 0) return null;
       return { from: atSign.from, options, filter: false };
@@ -140,6 +195,24 @@ export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAge
             detail: 'skill',
           });
         }
+      }
+
+      // Offer "Create skill" if query doesn't match a built-in command or existing skill
+      if (query && !skills.some((s) => s.toLowerCase() === query)
+          && !BLOCK_OPTIONS.some((o) => o.name === query)
+          && !query.startsWith('interrupt') && query !== 'merge') {
+        options.push({
+          label: `Create "${query}"`,
+          type: 'class',
+          detail: 'new skill',
+          apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+            view.dispatch({
+              changes: { from, to, insert: `/skill:${query}` },
+              selection: { anchor: from + query.length + 7 },
+            });
+            onCreateSkill?.(query);
+          },
+        });
       }
 
       if (options.length === 0) return null;

@@ -39,9 +39,24 @@ const flowNodeSchema: z.ZodType<unknown> = z.lazy(() =>
   }),
 );
 
+const artifactFieldSchema = z.object({
+  key: z.string().min(1),
+  type: z.enum(['string', 'number', 'boolean', 'array', 'object']),
+  description: z.string(),
+  required: z.boolean().optional(),
+});
+
+const artifactSchemaSchema = z.object({
+  name: z.string().min(1),
+  format: z.enum(['json', 'markdown', 'text', 'csv', 'pdf', 'image', 'binary']),
+  description: z.string(),
+  fields: z.array(artifactFieldSchema).optional(),
+});
+
 const flowEdgeSchema = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
+  auto: z.boolean().optional(),
 });
 
 const flowBudgetSchema = z.object({
@@ -59,4 +74,5 @@ export const flowDefinitionSchema = z.object({
   budget: flowBudgetSchema,
   nodes: z.array(flowNodeSchema).min(1),
   edges: z.array(flowEdgeSchema),
+  artifacts: z.record(z.string(), artifactSchemaSchema).optional(),
 });

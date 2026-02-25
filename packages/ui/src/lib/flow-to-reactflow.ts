@@ -77,6 +77,7 @@ export function flowEdgesToReactFlow(edges: FlowEdge[]): Edge[] {
     source: edge.from,
     target: edge.to,
     type: 'flow',
+    data: { auto: edge.auto ?? false },
   }));
 }
 

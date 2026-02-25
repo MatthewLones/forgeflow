@@ -46,8 +46,11 @@ interface ProjectStoreValue {
   loadSkill: (projectId: string, skillName: string) => Promise<SkillState | null>;
   saveSkill: (projectId: string, skillName: string, files: Array<{ path: string; content: string }>) => Promise<void>;
   createSkill: (projectId: string, name: string) => Promise<void>;
+  renameSkill: (projectId: string, oldName: string, newName: string) => Promise<void>;
   deleteSkill: (projectId: string, name: string) => Promise<void>;
   refreshProjects: () => Promise<void>;
+  /** Update the in-memory skill cache without a server round-trip */
+  updateSkillCache: (skillName: string, files: Array<{ path: string; content: string }>) => void;
 }
 
 const ProjectStoreContext = createContext<ProjectStoreValue | null>(null);
@@ -222,6 +225,28 @@ export function ProjectStoreProvider({ children }: { children: ReactNode }) {
     await loadSkills(projectId);
   }, [loadSkills]);
 
+  // Update in-memory skill cache (for live edits without server round-trip)
+  const updateSkillCache = useCallback((skillName: string, files: Array<{ path: string; content: string }>) => {
+    setSkillData((prev) => ({
+      ...prev,
+      [skillName]: { skillName, files, selectedFilePath: 'SKILL.md', dirty: false },
+    }));
+  }, []);
+
+  // Rename a skill
+  const renameSkill = useCallback(async (projectId: string, oldName: string, newName: string) => {
+    await api.skills.rename(projectId, oldName, newName);
+    setSkills((prev) => prev.map((s) => (s.name === oldName ? { ...s, name: newName } : s)));
+    setSkillData((prev) => {
+      const next = { ...prev };
+      if (next[oldName]) {
+        next[newName] = { ...next[oldName], skillName: newName };
+        delete next[oldName];
+      }
+      return next;
+    });
+  }, []);
+
   // Delete a skill
   const deleteSkill = useCallback(async (projectId: string, name: string) => {
     await api.skills.delete(projectId, name);
@@ -259,10 +284,12 @@ export function ProjectStoreProvider({ children }: { children: ReactNode }) {
       loadSkill,
       saveSkill,
       createSkill,
+      renameSkill,
       deleteSkill,
       refreshProjects,
+      updateSkillCache,
     }),
-    [projects, loading, error, skills, skillsLoading, skillData, references, referencesLoading, flows, loadReferences, uploadReferences, deleteReference, createReferenceFolder, renameReference, createProject, deleteProject, getFlowById, updateFlow, saveFlow, loadProject, loadSkills, loadSkill, saveSkill, createSkill, deleteSkill, refreshProjects],
+    [projects, loading, error, skills, skillsLoading, skillData, references, referencesLoading, flows, loadReferences, uploadReferences, deleteReference, createReferenceFolder, renameReference, createProject, deleteProject, getFlowById, updateFlow, saveFlow, loadProject, loadSkills, loadSkill, saveSkill, createSkill, renameSkill, deleteSkill, refreshProjects, updateSkillCache],
   );
 
   return (

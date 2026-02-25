@@ -1,6 +1,5 @@
 import type {
   ConvertibleSection,
-  OutputBlock,
   InputBlock,
   GuardrailBlock,
 } from './skill-block-types';
@@ -10,7 +9,6 @@ import type {
  * forgeflow structured blocks. Returns suggested conversions.
  *
  * Detection patterns:
- * - Markdown table with "Output" column header → /output block
  * - Markdown table with "Input" column header → /input block
  * - Blockquote lines with "DO NOT" / "DO" language → /guardrail block
  */
@@ -20,64 +18,12 @@ export function detectConvertibleSections(content: string): ConvertibleSection[]
   // Skip content that already has forgeflow blocks
   if (content.includes('```forgeflow:')) return sections;
 
-  sections.push(...detectOutputTables(content));
   sections.push(...detectInputTables(content));
   sections.push(...detectGuardrails(content));
 
   // Sort by position and deduplicate overlapping ranges
   sections.sort((a, b) => a.from - b.from);
   return deduplicateOverlapping(sections);
-}
-
-/**
- * Detect markdown tables with "Output" column header.
- */
-function detectOutputTables(content: string): ConvertibleSection[] {
-  const results: ConvertibleSection[] = [];
-  // Match a markdown table whose header row contains "Output"
-  const tableRe = /^(\|[^\n]*Output[^\n]*\|)\n(\|[-| :]+\|)\n((?:\|[^\n]*\|\n?)+)/gm;
-  let match: RegExpExecArray | null;
-
-  while ((match = tableRe.exec(content)) !== null) {
-    const headerRow = match[1];
-    const dataRows = match[3].trim().split('\n');
-    const headers = parseTableRow(headerRow);
-
-    // Find column indices
-    const nameIdx = findColumnIndex(headers, ['output', 'name', 'file']);
-    const formatIdx = findColumnIndex(headers, ['format', 'type']);
-    const phaseIdx = findColumnIndex(headers, ['phase', 'when']);
-    const descIdx = findColumnIndex(headers, ['description', 'desc', 'contents', 'content']);
-
-    if (nameIdx === -1) continue;
-
-    const files = dataRows
-      .map((row) => {
-        const cells = parseTableRow(row);
-        return {
-          name: stripBackticks(cells[nameIdx] ?? ''),
-          format: cells[formatIdx] ?? '',
-          phase: cells[phaseIdx] ?? '',
-          description: cells[descIdx] ?? '',
-        };
-      })
-      .filter((f) => f.name);
-
-    if (files.length === 0) continue;
-
-    const block: OutputBlock = { files };
-    const replacement = '```forgeflow:output\n' + JSON.stringify(block, null, 2) + '\n```';
-
-    results.push({
-      type: 'output',
-      from: match.index,
-      to: match.index + match[0].length,
-      original: match[0],
-      replacement,
-    });
-  }
-
-  return results;
 }
 
 /**

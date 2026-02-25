@@ -1,12 +1,6 @@
-import type { OutputBlock, InputBlock, DecisionBlock, GuardrailBlock } from '../../../lib/skill-block-types';
+import type { InputBlock, DecisionBlock, GuardrailBlock } from '../../../lib/skill-block-types';
 
 /** Default JSON data for each block type, inserted when the user selects a slash command. */
-
-export const DEFAULT_OUTPUT: OutputBlock = {
-  files: [
-    { name: '', format: 'json', description: '' },
-  ],
-};
 
 export const DEFAULT_INPUT: InputBlock = {
   files: [
@@ -36,7 +30,6 @@ export function buildFencedBlock(type: string, data: unknown): string {
 
 /** Templates map: slash command name → fenced block string. */
 export const BLOCK_TEMPLATES: Record<string, string> = {
-  output: buildFencedBlock('output', DEFAULT_OUTPUT),
   input: buildFencedBlock('input', DEFAULT_INPUT),
   decision: buildFencedBlock('decision', DEFAULT_DECISION),
   guardrail: buildFencedBlock('guardrail', DEFAULT_GUARDRAIL),

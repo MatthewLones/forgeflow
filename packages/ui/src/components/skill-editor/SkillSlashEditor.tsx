@@ -10,6 +10,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { createSkillSlashAutocomplete, type SkillSlashOptions } from './slash-commands/skill-slash-autocomplete';
 import { skillBlockDecorationPlugin } from './slash-commands/skill-block-decoration';
 import { skillChipDecorationPlugin, SKILL_CHIP_PATTERNS } from './slash-commands/skill-chip-decoration';
+import { markdownDecorationPlugin } from '../shared/markdown-decoration';
 
 interface SkillSlashEditorProps {
   content: string;
@@ -17,6 +18,9 @@ interface SkillSlashEditorProps {
   skills?: string[];
   files?: string[];
   currentSkill?: string;
+  onCreateSkill?: (name: string) => void;
+  onClickSkill?: (name: string) => void;
+  onClickFile?: (path: string) => void;
 }
 
 /**
@@ -83,20 +87,35 @@ function splitFrontmatter(content: string): {
  *
  * Use `key={filePath}` to remount when switching files.
  */
+/** Chip click patterns for the skill editor */
+const SKILL_CHIP_CLICK_MAP: { className: string; regex: RegExp; type: 'skill' | 'file' }[] = [
+  { className: 'cm-chip-subskill', regex: /\/\/?skill:([\w-]+)/g, type: 'skill' },
+  { className: 'cm-chip-fileref', regex: /@([\w./-]+\.\w+)/g, type: 'file' },
+];
+
 export function SkillSlashEditor({
   content,
   onChange,
   skills = [],
   files = [],
   currentSkill = '',
+  onCreateSkill,
+  onClickSkill,
+  onClickFile,
 }: SkillSlashEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
+  const onCreateSkillRef = useRef(onCreateSkill);
+  const onClickSkillRef = useRef(onClickSkill);
+  const onClickFileRef = useRef(onClickFile);
   // Capture the frontmatter at mount time so we can reconstruct on changes
   const frontmatterRef = useRef('');
 
   onChangeRef.current = onChange;
+  onCreateSkillRef.current = onCreateSkill;
+  onClickSkillRef.current = onClickSkill;
+  onClickFileRef.current = onClickFile;
 
   const { frontmatter, body } = useMemo(() => splitFrontmatter(content), [content]);
   frontmatterRef.current = frontmatter;
@@ -139,6 +158,7 @@ export function SkillSlashEditor({
         borderRadius: '4px',
         fontSize: '12px',
         fontWeight: '500',
+        cursor: 'pointer',
       },
       '.cm-chip-subskill': {
         backgroundColor: 'rgba(16, 185, 129, 0.12)',
@@ -185,7 +205,12 @@ export function SkillSlashEditor({
       },
     });
 
-    const slashOpts: SkillSlashOptions = { skills, files, currentSkill };
+    const slashOpts: SkillSlashOptions = {
+      skills,
+      files,
+      currentSkill,
+      onCreateSkill: (name: string) => onCreateSkillRef.current?.(name),
+    };
     const slashComplete = createSkillSlashAutocomplete(slashOpts);
 
     const state = EditorState.create({
@@ -209,8 +234,38 @@ export function SkillSlashEditor({
           defaultKeymap: true,
         }),
         markdown(),
+        markdownDecorationPlugin,
         skillBlockDecorationPlugin,
         skillChipDecorationPlugin,
+        EditorView.domEventHandlers({
+          click(event: MouseEvent, view: EditorView) {
+            const target = event.target as HTMLElement;
+            if (!target?.classList?.contains('cm-chip')) return false;
+
+            const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+            if (pos === null) return false;
+
+            const line = view.state.doc.lineAt(pos);
+            const lineText = line.text;
+
+            for (const { className, regex, type } of SKILL_CHIP_CLICK_MAP) {
+              if (!target.classList.contains(className)) continue;
+              const re = new RegExp(regex.source, regex.flags);
+              let match: RegExpExecArray | null;
+              while ((match = re.exec(lineText)) !== null) {
+                const chipFrom = line.from + match.index;
+                const chipTo = chipFrom + match[0].length;
+                if (pos >= chipFrom && pos <= chipTo) {
+                  const name = match[1];
+                  if (type === 'skill') onClickSkillRef.current?.(name);
+                  else if (type === 'file') onClickFileRef.current?.(name);
+                  return true;
+                }
+              }
+            }
+            return false;
+          },
+        }),
         theme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {

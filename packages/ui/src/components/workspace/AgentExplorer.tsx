@@ -494,7 +494,7 @@ interface ArtifactLineage {
   consumers: string[];  // node IDs that input this artifact
 }
 
-function buildArtifactLineage(nodes: FlowNode[]): ArtifactLineage[] {
+function buildArtifactLineage(nodes: FlowNode[], registry?: Record<string, ArtifactSchema>): ArtifactLineage[] {
   const artifacts = new Map<string, { format?: string; producers: Set<string>; consumers: Set<string> }>();
 
   function ensure(name: string) {
@@ -504,23 +504,25 @@ function buildArtifactLineage(nodes: FlowNode[]): ArtifactLineage[] {
     return artifacts.get(name)!;
   }
 
+  // Seed from flow-level artifact registry
+  if (registry) {
+    for (const [name, schema] of Object.entries(registry)) {
+      const entry = ensure(name);
+      if (schema.format) entry.format = schema.format;
+    }
+  }
+
   function walk(nodeList: FlowNode[]) {
     for (const node of nodeList) {
       for (const output of node.config.outputs) {
         const name = artifactName(output);
         const entry = ensure(name);
         entry.producers.add(node.id);
-        if (typeof output !== 'string' && output.format) {
-          entry.format = output.format;
-        }
       }
       for (const input of node.config.inputs) {
         const name = artifactName(input);
         const entry = ensure(name);
         entry.consumers.add(node.id);
-        if (typeof input !== 'string' && input.format && !entry.format) {
-          entry.format = input.format;
-        }
       }
       walk(node.children);
     }
@@ -552,7 +554,7 @@ const FORMAT_BADGE_COLORS: Record<string, string> = {
 
 export function AgentExplorer() {
   const { state, addNode, addChild, removeNode, updateNode, selectNode } = useFlow();
-  const { activeTabId, selectAgent, selectSkill, selectReference } = useLayout();
+  const { activeTabId, selectAgent, selectSkill, selectReference, selectArtifact } = useLayout();
   const { skills, references, uploadReferences, deleteReference, createReferenceFolder, renameReference, createSkill, deleteSkill } = useProjectStore();
 
   const [agentsExpanded, setAgentsExpanded] = useState(true);
@@ -565,7 +567,7 @@ export function AgentExplorer() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sortedNodes = topologicalOrder(state.flow.nodes, state.flow.edges);
-  const artifactLineage = useMemo(() => buildArtifactLineage(state.flow.nodes), [state.flow.nodes]);
+  const artifactLineage = useMemo(() => buildArtifactLineage(state.flow.nodes, state.flow.artifacts), [state.flow.nodes, state.flow.artifacts]);
 
   const handleSelectAgent = useCallback(
     (nodeId: string, label: string) => {
@@ -889,7 +891,8 @@ export function AgentExplorer() {
             artifactLineage.map((artifact) => (
               <div
                 key={artifact.name}
-                className="px-2 py-1 text-xs border-l-2 border-l-transparent hover:bg-[var(--color-canvas-bg)] cursor-default"
+                className="px-2 py-1 text-xs border-l-2 border-l-transparent hover:bg-[var(--color-canvas-bg)] cursor-pointer"
+                onClick={() => selectArtifact(artifact.name)}
               >
                 <div className="flex items-center gap-1.5">
                   <span className="w-3 shrink-0" />

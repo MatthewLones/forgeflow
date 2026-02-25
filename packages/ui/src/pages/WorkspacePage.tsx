@@ -11,6 +11,7 @@ import { EditorLayout } from '../components/workspace/EditorLayout';
 import { AISidePanel } from '../components/ai/AISidePanel';
 import { autoLayout } from '../lib/flow-to-reactflow';
 import { useSyncFlow, type SaveStatus } from '../hooks/useSyncFlow';
+import { useAutoEdges } from '../hooks/useAutoEdges';
 
 /* ── Resize hook ────────────────────────────────────────── */
 
@@ -78,6 +79,9 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
 
   const saveStatus = useSyncFlow(projectId, state.flow, state.dirty, dispatch);
+
+  // Auto-create/remove DAG edges based on artifact dependencies
+  useAutoEdges();
 
   return (
     <div className="h-screen flex flex-col">

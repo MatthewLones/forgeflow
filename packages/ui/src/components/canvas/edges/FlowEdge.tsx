@@ -11,7 +11,10 @@ export const FlowEdge = memo(function FlowEdge(props: EdgeProps) {
     sourcePosition,
     targetPosition,
     selected,
+    data,
   } = props;
+
+  const isAuto = (data as Record<string, unknown>)?.auto === true;
 
   const [edgePath] = getSmoothStepPath({
     sourceX,
@@ -28,8 +31,13 @@ export const FlowEdge = memo(function FlowEdge(props: EdgeProps) {
       {...props}
       path={edgePath}
       style={{
-        stroke: selected ? 'var(--color-border-selected)' : 'var(--color-text-muted)',
+        stroke: selected
+          ? 'var(--color-border-selected)'
+          : isAuto
+            ? 'var(--color-node-agent)'
+            : 'var(--color-text-muted)',
         strokeWidth: selected ? 2 : 1.5,
+        strokeDasharray: isAuto ? '6 3' : undefined,
       }}
     />
   );

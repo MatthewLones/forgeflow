@@ -1,5 +1,4 @@
 import type {
-  OutputBlock,
   InputBlock,
   DecisionBlock,
   GuardrailBlock,
@@ -26,8 +25,6 @@ export function compileSkillContent(content: string): string {
     }
 
     switch (type as SkillBlockType) {
-      case 'output':
-        return compileOutputBlock(data as OutputBlock);
       case 'input':
         return compileInputBlock(data as InputBlock);
       case 'decision':
@@ -38,16 +35,6 @@ export function compileSkillContent(content: string): string {
         return _match;
     }
   });
-}
-
-function compileOutputBlock(block: OutputBlock): string {
-  if (!block.files?.length) return '';
-
-  const rows = block.files
-    .map((f) => `| \`${f.name}\` | ${f.format} | ${f.phase} | ${f.description} |`)
-    .join('\n');
-
-  return `| Output | Format | Phase | Description |\n|--------|--------|-------|-------------|\n${rows}`;
 }
 
 function compileInputBlock(block: InputBlock): string {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import {
   DockviewReact,
   type DockviewReadyEvent,
@@ -10,15 +10,13 @@ import 'dockview-react/dist/styles/dockview.css';
 import { useLayout, type EditorTab } from '../../context/LayoutContext';
 import { useFlow } from '../../context/FlowContext';
 import { useProjectStore } from '../../context/ProjectStore';
-import { SkillProvider, useSkill, type SkillViewMode } from '../../context/SkillContext';
+import { SkillProvider, useSkill } from '../../context/SkillContext';
 import { AgentEditor } from './AgentEditor';
+import { ArtifactEditor } from './ArtifactViewer';
 import { ReferenceViewer } from './ReferenceViewer';
-import { CodeMirrorEditor } from '../skill-editor/CodeMirrorEditor';
 import { SkillSlashEditor } from '../skill-editor/SkillSlashEditor';
-import { MarkdownPreview } from '../skill-editor/MarkdownPreview';
-import { compileSkillContent } from '../../lib/compile-skill';
 import { ImportSuggestionsBar } from '../skill-editor/ImportSuggestionsBar';
-import { useMemo } from 'react';
+import { useSyncSkill } from '../../hooks/useSyncSkill';
 import { useParams } from 'react-router-dom';
 
 /* ── Panel components ─────────────────────────────────────── */
@@ -81,21 +79,22 @@ function SkillEditorPanel(props: IDockviewPanelProps<EditorTab>) {
   }
 
   return (
-    <SkillProvider initialState={{ ...data, selectedFilePath: 'SKILL.md', dirty: false, viewMode: 'edit' }}>
-      <SkillEditorContent skillName={skillName} />
+    <SkillProvider initialState={{ ...data, selectedFilePath: 'SKILL.md', dirty: false }}>
+      <SkillEditorContent skillName={skillName} projectId={projectId} />
     </SkillProvider>
   );
 }
 
-const VIEW_MODE_LABELS: Record<SkillViewMode, string> = {
-  edit: 'Edit',
-  compiled: 'Compiled',
-  raw: 'Raw',
-};
+function SkillEditorContent({ skillName, projectId }: { skillName: string; projectId: string }) {
+  const { state, selectedFile, selectFile, updateFile } = useSkill();
+  const { skills, createSkill, renameSkill, deleteSkill } = useProjectStore();
+  const { selectSkill, updateTabLabel } = useLayout();
 
-function SkillEditorContent({ skillName }: { skillName: string }) {
-  const { state, selectedFile, selectFile, updateFile, viewMode, setViewMode } = useSkill();
-  const { skills } = useProjectStore();
+  // Local state for editable skill name
+  const [editName, setEditName] = useState(skillName);
+
+  // Sync skill edits back to ProjectStore cache + server
+  useSyncSkill(projectId, skillName, state);
 
   const handleChange = useCallback(
     (content: string) => {
@@ -106,10 +105,38 @@ function SkillEditorContent({ skillName }: { skillName: string }) {
     [selectedFile, updateFile],
   );
 
-  const compiledContent = useMemo(
-    () => (selectedFile ? compileSkillContent(selectedFile.content) : ''),
-    [selectedFile],
+  const handleCreateSkill = useCallback(
+    (name: string) => {
+      createSkill(projectId, name);
+    },
+    [createSkill, projectId],
   );
+
+  const handleClickSkill = useCallback(
+    (name: string) => selectSkill(name),
+    [selectSkill],
+  );
+
+  const handleClickFile = useCallback(
+    (path: string) => selectFile(path),
+    [selectFile],
+  );
+
+  const handleRename = useCallback(() => {
+    const trimmed = editName.trim();
+    if (trimmed && trimmed !== skillName) {
+      renameSkill(projectId, skillName, trimmed).catch(() => setEditName(skillName));
+      updateTabLabel(skillName, trimmed);
+    } else {
+      setEditName(skillName);
+    }
+  }, [editName, skillName, projectId, renameSkill, updateTabLabel]);
+
+  const handleDelete = useCallback(() => {
+    if (window.confirm(`Delete skill "${skillName}"?`)) {
+      deleteSkill(projectId, skillName);
+    }
+  }, [skillName, projectId, deleteSkill]);
 
   // Derive skill names and file paths for slash command autocomplete
   const skillNames = useMemo(() => skills.map((s) => s.name), [skills]);
@@ -118,56 +145,83 @@ function SkillEditorContent({ skillName }: { skillName: string }) {
   const skillMd = state.files.find((f) => f.path === 'SKILL.md');
   const references = state.files.filter((f) => f.path.startsWith('references/'));
   const scripts = state.files.filter((f) => f.path.startsWith('scripts/'));
+  const hasFileTabs = references.length > 0 || scripts.length > 0;
 
   return (
     <div className="h-full flex flex-col">
-      <div className="shrink-0 flex items-center gap-1 px-3 py-1.5 border-b border-[var(--color-border)] bg-white overflow-x-auto">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] mr-2 shrink-0">
+      {/* Primary header — agent-style */}
+      <div className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-[var(--color-border)] bg-white">
+        <input
+          type="text"
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          onBlur={handleRename}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+          className="text-sm font-semibold text-[var(--color-text-primary)] bg-transparent border-none outline-none flex-1 min-w-0 placeholder:text-[var(--color-text-muted)]"
+          placeholder="Skill name"
+        />
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          <span className="text-[11px] text-[var(--color-text-muted)]">Skill</span>
+        </div>
+
+        <span className="text-[10px] text-[var(--color-text-muted)] shrink-0">
           {skillName}
         </span>
 
-        {skillMd && (
-          <FileChip
-            path="SKILL.md"
-            isActive={selectedFile?.path === 'SKILL.md'}
-            onClick={() => selectFile('SKILL.md')}
-          />
-        )}
-
-        {references.length > 0 && (
-          <>
-            <span className="text-[var(--color-border)] mx-1 shrink-0">|</span>
-            {references.map((f) => (
-              <FileChip
-                key={f.path}
-                path={f.path}
-                isActive={selectedFile?.path === f.path}
-                onClick={() => selectFile(f.path)}
-              />
-            ))}
-          </>
-        )}
-
-        {scripts.length > 0 && (
-          <>
-            <span className="text-[var(--color-border)] mx-1 shrink-0">|</span>
-            {scripts.map((f) => (
-              <FileChip
-                key={f.path}
-                path={f.path}
-                isActive={selectedFile?.path === f.path}
-                onClick={() => selectFile(f.path)}
-              />
-            ))}
-          </>
-        )}
-
-        <div className="flex-1" />
-
-        <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+        <button
+          type="button"
+          onClick={handleDelete}
+          title="Delete skill"
+          className="text-[var(--color-text-muted)] hover:text-red-500 transition-colors shrink-0 text-xs"
+        >
+          Delete
+        </button>
       </div>
 
-      {viewMode === 'edit' && selectedFile && (
+      {/* Secondary bar — file tabs (only if refs/scripts exist) */}
+      {hasFileTabs && (
+        <div className="shrink-0 flex items-center gap-1 px-3 py-1 border-b border-[var(--color-border)] bg-white overflow-x-auto">
+          {skillMd && (
+            <FileChip
+              path="SKILL.md"
+              isActive={selectedFile?.path === 'SKILL.md'}
+              onClick={() => selectFile('SKILL.md')}
+            />
+          )}
+
+          {references.length > 0 && (
+            <>
+              <span className="text-[var(--color-border)] mx-1 shrink-0">|</span>
+              {references.map((f) => (
+                <FileChip
+                  key={f.path}
+                  path={f.path}
+                  isActive={selectedFile?.path === f.path}
+                  onClick={() => selectFile(f.path)}
+                />
+              ))}
+            </>
+          )}
+
+          {scripts.length > 0 && (
+            <>
+              <span className="text-[var(--color-border)] mx-1 shrink-0">|</span>
+              {scripts.map((f) => (
+                <FileChip
+                  key={f.path}
+                  path={f.path}
+                  isActive={selectedFile?.path === f.path}
+                  onClick={() => selectFile(f.path)}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {selectedFile && (
         <ImportSuggestionsBar
           content={selectedFile.content}
           onConvert={(converted) => updateFile(selectedFile.path, converted)}
@@ -176,61 +230,23 @@ function SkillEditorContent({ skillName }: { skillName: string }) {
 
       <div className="flex-1 overflow-hidden bg-white">
         {selectedFile ? (
-          viewMode === 'edit' ? (
-            <SkillSlashEditor
-              key={`edit-${selectedFile.path}`}
-              content={selectedFile.content}
-              onChange={handleChange}
-              skills={skillNames}
-              files={filePaths}
-              currentSkill={skillName}
-            />
-          ) : viewMode === 'compiled' ? (
-            <MarkdownPreview
-              key={`compiled-${selectedFile.path}`}
-              content={compiledContent}
-              fileName={selectedFile.path}
-            />
-          ) : (
-            <CodeMirrorEditor
-              key={`raw-${selectedFile.path}`}
-              content={selectedFile.content}
-              onChange={handleChange}
-            />
-          )
+          <SkillSlashEditor
+            key={`edit-${selectedFile.path}`}
+            content={selectedFile.content}
+            onChange={handleChange}
+            skills={skillNames}
+            files={filePaths}
+            currentSkill={skillName}
+            onCreateSkill={handleCreateSkill}
+            onClickSkill={handleClickSkill}
+            onClickFile={handleClickFile}
+          />
         ) : (
           <div className="h-full flex items-center justify-center text-sm text-[var(--color-text-muted)]">
             Select a file to edit
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function ViewModeToggle({
-  viewMode,
-  onChange,
-}: {
-  viewMode: SkillViewMode;
-  onChange: (mode: SkillViewMode) => void;
-}) {
-  return (
-    <div className="flex items-center gap-0 rounded-md border border-[var(--color-border)] overflow-hidden shrink-0">
-      {(['edit', 'compiled', 'raw'] as SkillViewMode[]).map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          onClick={() => onChange(mode)}
-          className={`px-2.5 py-0.5 text-[10px] font-medium transition-colors ${
-            viewMode === mode
-              ? 'bg-[var(--color-node-agent)] text-white'
-              : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)]'
-          }`}
-        >
-          {VIEW_MODE_LABELS[mode]}
-        </button>
-      ))}
     </div>
   );
 }
@@ -261,6 +277,12 @@ function FileChip({
   );
 }
 
+function ArtifactEditorPanel(props: IDockviewPanelProps<EditorTab>) {
+  const params = props.params;
+  if (!params.artifactName) return null;
+  return <ArtifactEditor key={params.artifactName} artifactName={params.artifactName} />;
+}
+
 function ReferenceViewerPanel(props: IDockviewPanelProps<EditorTab>) {
   const params = props.params;
   if (!params.refPath) return null;
@@ -280,6 +302,7 @@ function EmptyPanel() {
 const components = {
   'agent-editor': AgentEditorPanel,
   'skill-editor': SkillEditorPanel,
+  'artifact-editor': ArtifactEditorPanel,
   'reference-viewer': ReferenceViewerPanel,
   'empty': EmptyPanel,
 };
@@ -290,6 +313,7 @@ const TYPE_DOT_COLORS: Record<string, string> = {
   agent: 'bg-[var(--color-node-agent)]',
   skill: 'bg-[var(--color-node-merge)]',
   reference: 'bg-[var(--color-node-checkpoint)]',
+  artifact: 'bg-purple-500',
 };
 
 function ForgeFlowTab(props: IDockviewPanelHeaderProps<EditorTab>) {

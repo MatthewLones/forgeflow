@@ -2,7 +2,6 @@ import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { WidgetType, type EditorView } from '@codemirror/view';
 import type { SkillBlockType, SkillBlockData } from '../../../lib/skill-block-types';
-import { OutputTableWidget } from './OutputTableWidget';
 import { InputTableWidget } from './InputTableWidget';
 import { DecisionTreeWidget } from './DecisionTreeWidget';
 import { GuardrailWidget } from './GuardrailWidget';
@@ -147,8 +146,7 @@ export class SkillBlockWidget extends WidgetType {
 }
 
 /** Map block types to their React widget components. */
-const WIDGET_MAP: Record<SkillBlockType, React.FC<{ data: any; onChange: (data: any) => void }>> = {
-  output: OutputTableWidget,
+const WIDGET_MAP: Partial<Record<SkillBlockType, React.FC<{ data: any; onChange: (data: any) => void }>>> = {
   input: InputTableWidget,
   decision: DecisionTreeWidget,
   guardrail: GuardrailWidget,
