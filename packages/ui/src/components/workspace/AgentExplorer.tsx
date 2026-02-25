@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { FlowNode, FlowEdge, NodeType } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
 import { useLayout } from '../../context/LayoutContext';
-import { useProjectStore, type SkillSummary } from '../../context/ProjectStore';
+import { useProjectStore, type SkillSummary, type ReferenceEntry } from '../../context/ProjectStore';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 
 /* ── Topological sort ────────────────────────────────────── */
@@ -272,29 +272,11 @@ function AgentTreeItem({ node, depth, activeTabId, renamingNodeId, onSelect, onR
 
 /* ── Reference File Tree ─────────────────────────────────── */
 
-type FileType = 'pdf' | 'md' | 'json' | 'txt' | 'other';
-
-interface ReferenceEntry {
-  name: string;
-  type: FileType | 'folder';
-  path: string;           // full path like "regulations/height-limits.pdf"
-  children?: ReferenceEntry[];
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
-
-const MOCK_REFERENCES: ReferenceEntry[] = [
-  {
-    name: 'regulations',
-    type: 'folder',
-    path: 'regulations',
-    children: [
-      { name: 'height-limits.pdf', type: 'pdf', path: 'regulations/height-limits.pdf' },
-      { name: 'setback-rules.md', type: 'md', path: 'regulations/setback-rules.md' },
-    ],
-  },
-  { name: 'contract.pdf', type: 'pdf', path: 'contract.pdf' },
-  { name: 'standards-height.md', type: 'md', path: 'standards-height.md' },
-  { name: 'compliance-rules.json', type: 'json', path: 'compliance-rules.json' },
-];
 
 const FILE_TYPE_ICONS: Record<string, string> = {
   folder: '\u25B8',
@@ -302,6 +284,7 @@ const FILE_TYPE_ICONS: Record<string, string> = {
   md: '#',
   json: 'J',
   txt: 'T',
+  image: 'I',
   other: 'F',
 };
 
@@ -311,6 +294,7 @@ const FILE_TYPE_COLORS: Record<string, string> = {
   md: 'text-blue-500',
   json: 'text-amber-500',
   txt: 'text-[var(--color-text-muted)]',
+  image: 'text-green-500',
   other: 'text-[var(--color-text-muted)]',
 };
 
@@ -365,12 +349,16 @@ function ReferenceTreeItem({
 
         <span className="truncate">{entry.name}</span>
 
-        {/* File count for folders */}
-        {isFolder && entry.children && (
-          <span className="ml-auto text-[9px] text-[var(--color-text-muted)] pr-2">
+        {/* File count for folders, file size for files */}
+        {isFolder && entry.children ? (
+          <span className="ml-auto text-[9px] text-[var(--color-text-muted)] pr-2 shrink-0">
             {entry.children.length}
           </span>
-        )}
+        ) : !isFolder && entry.size != null ? (
+          <span className="ml-auto text-[9px] text-[var(--color-text-muted)] pr-2 shrink-0">
+            {formatFileSize(entry.size)}
+          </span>
+        ) : null}
       </div>
 
       {isFolder && expanded && entry.children && (
@@ -501,13 +489,15 @@ function SkillTreeItem({ skill, allSkills, depth, activeTabId, visited, onSelect
 export function AgentExplorer() {
   const { state, addNode, addChild, removeNode, updateNode, selectNode } = useFlow();
   const { activeTabId, selectAgent, selectSkill, selectReference } = useLayout();
-  const { skills } = useProjectStore();
+  const { skills, references, uploadReferences, deleteReference, createReferenceFolder, renameReference } = useProjectStore();
 
   const [agentsExpanded, setAgentsExpanded] = useState(true);
   const [skillsExpanded, setSkillsExpanded] = useState(true);
   const [refsExpanded, setRefsExpanded] = useState(true);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuEntry[] } | null>(null);
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sortedNodes = topologicalOrder(state.flow.nodes, state.flow.edges);
 
@@ -578,27 +568,90 @@ export function AgentExplorer() {
     [selectReference],
   );
 
+  // File upload handlers
+  const handleUploadClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    await uploadReferences(state.flow.id, Array.from(files));
+    e.target.value = '';
+  }, [state.flow.id, uploadReferences]);
+
+  // Drag and drop handlers
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    await uploadReferences(state.flow.id, files);
+  }, [state.flow.id, uploadReferences]);
+
   const handleRefContextMenu = useCallback(
     (e: React.MouseEvent, entry: ReferenceEntry) => {
       e.preventDefault();
       const isFolder = entry.type === 'folder';
+      const projectId = state.flow.id;
       const items: ContextMenuEntry[] = isFolder
         ? [
-            { label: 'New File...', onClick: () => { /* TODO */ }, disabled: true },
-            { label: 'New Folder...', onClick: () => { /* TODO */ }, disabled: true },
+            { label: 'Upload File...', onClick: () => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.multiple = true;
+              input.onchange = async () => {
+                if (input.files) await uploadReferences(projectId, Array.from(input.files), entry.path);
+              };
+              input.click();
+            }},
+            { label: 'New Folder...', onClick: () => {
+              const name = window.prompt('Folder name:');
+              if (!name?.trim()) return;
+              createReferenceFolder(projectId, entry.path + '/' + name.trim());
+            }},
             { separator: true },
-            { label: 'Rename', onClick: () => { /* TODO */ }, disabled: true },
-            { label: 'Delete', onClick: () => { /* TODO */ }, danger: true, disabled: true },
+            { label: 'Rename', onClick: () => {
+              const newName = window.prompt('New name:', entry.name);
+              if (!newName?.trim() || newName === entry.name) return;
+              const dir = entry.path.includes('/') ? entry.path.substring(0, entry.path.lastIndexOf('/') + 1) : '';
+              renameReference(projectId, entry.path, dir + newName.trim());
+            }},
+            { label: 'Delete', onClick: () => {
+              if (window.confirm(`Delete folder "${entry.name}" and all its contents?`)) {
+                deleteReference(projectId, entry.path);
+              }
+            }, danger: true },
           ]
         : [
             { label: 'Open', onClick: () => handleOpenReference(entry) },
             { separator: true },
-            { label: 'Rename', onClick: () => { /* TODO */ }, disabled: true },
-            { label: 'Delete', onClick: () => { /* TODO */ }, danger: true, disabled: true },
+            { label: 'Rename', onClick: () => {
+              const newName = window.prompt('New name:', entry.name);
+              if (!newName?.trim() || newName === entry.name) return;
+              const dir = entry.path.includes('/') ? entry.path.substring(0, entry.path.lastIndexOf('/') + 1) : '';
+              renameReference(projectId, entry.path, dir + newName.trim());
+            }},
+            { label: 'Delete', onClick: () => {
+              if (window.confirm(`Delete "${entry.name}"?`)) {
+                deleteReference(projectId, entry.path);
+              }
+            }, danger: true },
           ];
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [handleOpenReference],
+    [handleOpenReference, state.flow.id, uploadReferences, deleteReference, createReferenceFolder, renameReference],
   );
 
   const handleSectionContextMenu = useCallback(
@@ -618,13 +671,17 @@ export function AgentExplorer() {
         ];
       } else {
         items = [
-          { label: 'Upload File...', onClick: () => { /* TODO */ }, disabled: true },
-          { label: 'New Folder', onClick: () => { /* TODO */ }, disabled: true },
+          { label: 'Upload File...', onClick: handleUploadClick },
+          { label: 'New Folder', onClick: () => {
+            const name = window.prompt('Folder name:');
+            if (!name?.trim()) return;
+            createReferenceFolder(state.flow.id, name.trim());
+          }},
         ];
       }
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [addNode],
+    [addNode, handleUploadClick, state.flow.id, createReferenceFolder],
   );
 
   // Empty set for the root level of skill tree (no ancestors yet)
@@ -704,20 +761,25 @@ export function AgentExplorer() {
         title="References"
         expanded={refsExpanded}
         onToggle={() => setRefsExpanded(!refsExpanded)}
-        onAdd={() => {/* TODO: file upload dialog */}}
+        onAdd={handleUploadClick}
         onContextMenu={(e) => handleSectionContextMenu(e, 'references')}
       />
 
       {refsExpanded && (
-        <div className="py-0.5">
-          {MOCK_REFERENCES.length === 0 ? (
+        <div
+          className={`py-0.5 transition-colors ${dragOver ? 'bg-[var(--color-node-agent)]/10 ring-1 ring-inset ring-[var(--color-node-agent)]/30' : ''}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {references.length === 0 ? (
             <div className="px-3 py-3 text-center">
               <div className="text-[10px] text-[var(--color-text-muted)]">
                 Drop files here or click + to upload
               </div>
             </div>
           ) : (
-            MOCK_REFERENCES.map((entry) => (
+            references.map((entry) => (
               <ReferenceTreeItem
                 key={entry.path}
                 entry={entry}
@@ -729,6 +791,15 @@ export function AgentExplorer() {
           )}
         </div>
       )}
+
+      {/* Hidden file input for reference uploads */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFileChange}
+      />
 
       {/* Context menu */}
       {contextMenu && (

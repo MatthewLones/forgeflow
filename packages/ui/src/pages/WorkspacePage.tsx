@@ -152,7 +152,7 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
 export function WorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getFlowById, loadProject, loadSkills } = useProjectStore();
+  const { getFlowById, loadProject, loadSkills, loadReferences } = useProjectStore();
   const [loading, setLoading] = useState(true);
 
   // Load project data from API on mount
@@ -163,13 +163,13 @@ export function WorkspacePage() {
     async function load() {
       setLoading(true);
       await loadProject(id!);
-      await loadSkills(id!);
+      await Promise.all([loadSkills(id!), loadReferences(id!)]);
       if (!cancelled) setLoading(false);
     }
     load();
 
     return () => { cancelled = true; };
-  }, [id, loadProject, loadSkills]);
+  }, [id, loadProject, loadSkills, loadReferences]);
 
   const flow = id ? getFlowById(id) : null;
 

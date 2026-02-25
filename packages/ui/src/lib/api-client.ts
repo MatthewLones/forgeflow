@@ -35,6 +35,17 @@ export interface SkillState {
   files: SkillFile[];
 }
 
+export type ReferenceFileType = 'folder' | 'pdf' | 'md' | 'json' | 'txt' | 'image' | 'other';
+
+export interface ReferenceEntry {
+  name: string;
+  type: ReferenceFileType;
+  path: string;
+  size?: number;
+  modifiedAt?: string;
+  children?: ReferenceEntry[];
+}
+
 export interface CompilePhase {
   nodeId: string;
   nodeName: string;
@@ -104,6 +115,26 @@ async function del(path: string): Promise<void> {
   }
 }
 
+async function postFormData<T>(path: string, formData: FormData): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, (data as { error?: string }).error ?? res.statusText);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function getRaw(path: string): Promise<Response> {
+  const res = await fetch(`${API_BASE}${path}`);
+  if (!res.ok) {
+    throw new ApiError(res.status, res.statusText);
+  }
+  return res;
+}
+
 // --- API client ---
 
 export const api = {
@@ -144,6 +175,42 @@ export const api = {
 
     delete: (projectId: string, name: string) =>
       del(`/projects/${projectId}/skills/${name}`),
+  },
+
+  references: {
+    list: (projectId: string) =>
+      get<ReferenceEntry[]>(`/projects/${projectId}/references`),
+
+    upload: (projectId: string, files: File[], targetFolder?: string) => {
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append('files', file);
+      }
+      if (targetFolder) {
+        formData.append('targetFolder', targetFolder);
+      }
+      return postFormData<ReferenceEntry[]>(
+        `/projects/${projectId}/references/upload`,
+        formData,
+      );
+    },
+
+    getFileUrl: (projectId: string, refPath: string) =>
+      `${API_BASE}/projects/${projectId}/references/file/${encodeURIComponent(refPath)}`,
+
+    getTextContent: async (projectId: string, refPath: string): Promise<string> => {
+      const res = await getRaw(`/projects/${projectId}/references/file/${encodeURIComponent(refPath)}`);
+      return res.text();
+    },
+
+    delete: (projectId: string, refPath: string) =>
+      del(`/projects/${projectId}/references/file/${encodeURIComponent(refPath)}`),
+
+    createFolder: (projectId: string, path: string) =>
+      post<{ ok: boolean }>(`/projects/${projectId}/references/folder`, { path }),
+
+    rename: (projectId: string, oldPath: string, newPath: string) =>
+      put<{ ok: boolean }>(`/projects/${projectId}/references/rename`, { oldPath, newPath }),
   },
 
   flows: {

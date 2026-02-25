@@ -6,6 +6,7 @@ import projectsRouter from './routes/projects.js';
 import skillsRouter from './routes/skills.js';
 import flowsRouter from './routes/flows.js';
 import runsRouter from './routes/runs.js';
+import referencesRouter from './routes/references.js';
 
 export function createApp(): Express {
   const app = express();
@@ -19,6 +20,7 @@ export function createApp(): Express {
   app.use('/api', skillsRouter);
   app.use('/api', flowsRouter);
   app.use('/api', runsRouter);
+  app.use('/api', referencesRouter);
 
   return app;
 }
