@@ -361,10 +361,24 @@ html, body, #root {
   cursor: pointer;
 }
 
-/* Action column (remove button) */
+/* Action column (remove button — legacy single-action) */
 .skill-widget-action-col {
   width: 28px;
   text-align: center;
+}
+
+/* Wider actions column for rows with Fields + remove */
+.skill-widget-actions-col {
+  width: auto;
+  white-space: nowrap;
+  text-align: right;
+  padding-right: 8px !important;
+}
+
+.skill-widget-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .skill-widget-remove {
@@ -380,9 +394,14 @@ html, body, #root {
   transition: opacity 0.15s, color 0.15s;
 }
 
+.skill-widget-remove-visible {
+  opacity: 0.4;
+}
+
 tr:hover .skill-widget-remove,
 .skill-widget-decision-row:hover > .skill-widget-remove,
-.skill-widget-guardrail-rule:hover > .skill-widget-remove {
+.skill-widget-guardrail-rule:hover > .skill-widget-remove,
+.skill-widget-field-row:hover > .skill-widget-remove {
   opacity: 1;
 }
 
@@ -627,4 +646,110 @@ tr:hover .skill-widget-remove,
 .skill-widget-add-dont:hover {
   background: rgba(239, 68, 68, 0.06);
   color: #dc2626;
+}
+
+/* ── OutputTableWidget: expand/collapse + field editing ──────────── */
+.skill-widget-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: none;
+  background: rgba(59, 130, 246, 0.06);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.skill-widget-expand-btn:hover {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--color-node-agent);
+}
+.skill-widget-expand-btn-active {
+  color: var(--color-node-agent);
+  background: rgba(59, 130, 246, 0.10);
+}
+
+.skill-widget-expand-label {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.skill-widget-field-count {
+  font-size: 9px;
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--color-node-agent);
+  border-radius: 6px;
+  padding: 0 4px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 14px;
+}
+
+.skill-widget-fields-cell {
+  padding: 0 !important;
+  border-top: none !important;
+}
+
+.skill-widget-fields-area {
+  background: rgba(59, 130, 246, 0.03);
+  border-top: 1px solid rgba(59, 130, 246, 0.10);
+  padding: 8px 12px;
+}
+
+.skill-widget-fields-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.skill-widget-fields-add {
+  border: none;
+  background: transparent;
+  color: var(--color-node-agent);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.skill-widget-fields-add:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.skill-widget-fields-empty {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.skill-widget-field-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.skill-widget-field-key {
+  flex: 0 0 120px;
+  max-width: 120px;
+}
+
+.skill-widget-field-desc {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  min-height: 26px;
+  font-family: inherit;
+  line-height: 1.4;
 }

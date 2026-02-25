@@ -1,6 +1,7 @@
-import { mkdir, readFile, writeFile, readdir, rm, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, writeFile, readdir, rm, stat, rename } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { lookup } from 'mime-types';
 import type { FlowDefinition } from '@forgeflow/types';
 
 export interface ProjectMeta {
@@ -34,6 +35,17 @@ export interface SkillState {
   files: SkillFile[];
 }
 
+export type ReferenceFileType = 'folder' | 'pdf' | 'md' | 'json' | 'txt' | 'image' | 'other';
+
+export interface ReferenceEntry {
+  name: string;
+  type: ReferenceFileType;
+  path: string;
+  size?: number;
+  modifiedAt?: string;
+  children?: ReferenceEntry[];
+}
+
 /**
  * Filesystem-backed project store.
  *
@@ -41,6 +53,7 @@ export interface SkillState {
  *   {basePath}/{projectId}/
  *   ├── project.json    ← ProjectMeta
  *   ├── FLOW.json       ← FlowDefinition
+ *   ├── references/     ← Project-level reference files
  *   └── skills/         ← Skill directories
  *       └── {skillName}/
  *           ├── SKILL.md
@@ -59,6 +72,10 @@ export class ProjectStore {
 
   private skillsDir(projectId: string): string {
     return join(this.projectDir(projectId), 'skills');
+  }
+
+  private refsDir(projectId: string): string {
+    return join(this.projectDir(projectId), 'references');
   }
 
   async ensureBaseDir(): Promise<void> {
@@ -139,6 +156,7 @@ export class ProjectStore {
     const dir = this.projectDir(id);
     await mkdir(dir, { recursive: true });
     await mkdir(join(dir, 'skills'), { recursive: true });
+    await mkdir(join(dir, 'references'), { recursive: true });
 
     const meta: ProjectMeta = {
       id,
@@ -376,6 +394,132 @@ Describe this skill's purpose and how it should be used.
     try {
       const { rename } = await import('node:fs/promises');
       await rename(oldDir, newDir);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // --- References ---
+
+  private getFileType(filename: string): ReferenceFileType {
+    const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+    if (ext === 'pdf') return 'pdf';
+    if (ext === 'md' || ext === 'markdown') return 'md';
+    if (ext === 'json') return 'json';
+    if (ext === 'txt') return 'txt';
+    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)) return 'image';
+    return 'other';
+  }
+
+  private isPathSafe(basePath: string, relativePath: string): boolean {
+    const resolved = resolve(basePath, relativePath);
+    return resolved.startsWith(basePath);
+  }
+
+  async listReferences(projectId: string): Promise<ReferenceEntry[]> {
+    const dir = this.refsDir(projectId);
+    try {
+      await stat(dir);
+    } catch {
+      return [];
+    }
+    return this.walkReferencesDir(dir, '');
+  }
+
+  private async walkReferencesDir(dir: string, prefix: string): Promise<ReferenceEntry[]> {
+    const entries = await readdir(dir, { withFileTypes: true });
+    const results: ReferenceEntry[] = [];
+
+    // Folders first, then files, both alphabetical
+    const folders = entries.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
+    const files = entries.filter((e) => e.isFile()).sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const folder of folders) {
+      const relPath = prefix ? `${prefix}/${folder.name}` : folder.name;
+      const children = await this.walkReferencesDir(join(dir, folder.name), relPath);
+      results.push({
+        name: folder.name,
+        type: 'folder',
+        path: relPath,
+        children,
+      });
+    }
+
+    for (const file of files) {
+      const relPath = prefix ? `${prefix}/${file.name}` : file.name;
+      const fileStat = await stat(join(dir, file.name));
+      results.push({
+        name: file.name,
+        type: this.getFileType(file.name),
+        path: relPath,
+        size: fileStat.size,
+        modifiedAt: fileStat.mtime.toISOString(),
+      });
+    }
+
+    return results;
+  }
+
+  async uploadReference(projectId: string, relativePath: string, buffer: Buffer): Promise<boolean> {
+    const baseDir = this.refsDir(projectId);
+    if (!this.isPathSafe(baseDir, relativePath)) return false;
+
+    const fullPath = join(baseDir, relativePath);
+    const parentDir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+    await mkdir(parentDir, { recursive: true });
+    await writeFile(fullPath, buffer);
+    return true;
+  }
+
+  async readReference(projectId: string, relativePath: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    const baseDir = this.refsDir(projectId);
+    if (!this.isPathSafe(baseDir, relativePath)) return null;
+
+    const fullPath = join(baseDir, relativePath);
+    try {
+      const buffer = await readFile(fullPath);
+      const mimeType = lookup(relativePath) || 'application/octet-stream';
+      return { buffer, mimeType };
+    } catch {
+      return null;
+    }
+  }
+
+  async deleteReference(projectId: string, relativePath: string): Promise<boolean> {
+    const baseDir = this.refsDir(projectId);
+    if (!this.isPathSafe(baseDir, relativePath)) return false;
+
+    const fullPath = join(baseDir, relativePath);
+    try {
+      await rm(fullPath, { recursive: true, force: true });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async renameReference(projectId: string, oldPath: string, newPath: string): Promise<boolean> {
+    const baseDir = this.refsDir(projectId);
+    if (!this.isPathSafe(baseDir, oldPath) || !this.isPathSafe(baseDir, newPath)) return false;
+
+    try {
+      const newFullPath = join(baseDir, newPath);
+      const newParentDir = newFullPath.substring(0, newFullPath.lastIndexOf('/'));
+      await mkdir(newParentDir, { recursive: true });
+      await rename(join(baseDir, oldPath), newFullPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async createReferenceFolder(projectId: string, folderPath: string): Promise<boolean> {
+    const baseDir = this.refsDir(projectId);
+    if (!this.isPathSafe(baseDir, folderPath)) return false;
+
+    try {
+      await mkdir(join(baseDir, folderPath), { recursive: true });
       return true;
     } catch {
       return false;

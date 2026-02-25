@@ -14,21 +14,27 @@
     "build": "tsup src/index.ts --format esm --dts",
     "dev": "tsx src/index.ts"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
-    "@forgeflow/types": "workspace:*",
-    "@forgeflow/parser": "workspace:*",
-    "@forgeflow/validator": "workspace:*",
     "@forgeflow/compiler": "workspace:*",
     "@forgeflow/engine": "workspace:*",
-    "@forgeflow/state-store": "workspace:*",
+    "@forgeflow/parser": "workspace:*",
     "@forgeflow/skill-resolver": "workspace:*",
+    "@forgeflow/state-store": "workspace:*",
+    "@forgeflow/types": "workspace:*",
+    "@forgeflow/validator": "workspace:*",
     "cors": "^2.8.5",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "mime-types": "^3.0.2",
+    "multer": "^2.0.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/mime-types": "^3.0.1",
+    "@types/multer": "^2.0.0",
     "tsx": "^4.19.0"
   }
 }

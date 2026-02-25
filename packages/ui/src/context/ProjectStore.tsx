@@ -9,9 +9,9 @@ import {
 } from 'react';
 import type { FlowDefinition } from '@forgeflow/types';
 import { api } from '../lib/api-client';
-import type { ProjectSummary, SkillSummary, SkillState } from '../lib/api-client';
+import type { ProjectSummary, SkillSummary, SkillState, ReferenceEntry } from '../lib/api-client';
 
-export type { ProjectSummary, SkillSummary };
+export type { ProjectSummary, SkillSummary, ReferenceEntry };
 
 // Re-export SkillState for consumers that imported it from here
 export type { SkillState } from '../lib/api-client';
@@ -25,7 +25,16 @@ interface ProjectStoreValue {
   skillsLoading: boolean;
   skillData: Record<string, SkillState>;
 
+  references: ReferenceEntry[];
+  referencesLoading: boolean;
+
   flows: Record<string, FlowDefinition>;
+
+  loadReferences: (projectId: string) => Promise<void>;
+  uploadReferences: (projectId: string, files: File[], targetFolder?: string) => Promise<void>;
+  deleteReference: (projectId: string, refPath: string) => Promise<void>;
+  createReferenceFolder: (projectId: string, path: string) => Promise<void>;
+  renameReference: (projectId: string, oldPath: string, newPath: string) => Promise<void>;
 
   createProject: (name: string, description: string) => Promise<string>;
   deleteProject: (id: string) => Promise<void>;
@@ -48,6 +57,8 @@ export function ProjectStoreProvider({ children }: { children: ReactNode }) {
   const [flows, setFlows] = useState<Record<string, FlowDefinition>>({});
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [skillData, setSkillData] = useState<Record<string, SkillState>>({});
+  const [references, setReferences] = useState<ReferenceEntry[]>([]);
+  const [referencesLoading, setReferencesLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +120,56 @@ export function ProjectStoreProvider({ children }: { children: ReactNode }) {
       return null;
     }
   }, []);
+
+  // --- References ---
+
+  const loadReferences = useCallback(async (projectId: string) => {
+    try {
+      setReferencesLoading(true);
+      const list = await api.references.list(projectId);
+      setReferences(list);
+    } catch (err) {
+      console.error('Failed to load references:', err);
+    } finally {
+      setReferencesLoading(false);
+    }
+  }, []);
+
+  const uploadReferences = useCallback(async (projectId: string, files: File[], targetFolder?: string) => {
+    try {
+      const updatedTree = await api.references.upload(projectId, files, targetFolder);
+      setReferences(updatedTree);
+    } catch (err) {
+      console.error('Failed to upload references:', err);
+    }
+  }, []);
+
+  const deleteReference = useCallback(async (projectId: string, refPath: string) => {
+    try {
+      await api.references.delete(projectId, refPath);
+      await loadReferences(projectId);
+    } catch (err) {
+      console.error('Failed to delete reference:', err);
+    }
+  }, [loadReferences]);
+
+  const createReferenceFolder = useCallback(async (projectId: string, path: string) => {
+    try {
+      await api.references.createFolder(projectId, path);
+      await loadReferences(projectId);
+    } catch (err) {
+      console.error('Failed to create folder:', err);
+    }
+  }, [loadReferences]);
+
+  const renameReference = useCallback(async (projectId: string, oldPath: string, newPath: string) => {
+    try {
+      await api.references.rename(projectId, oldPath, newPath);
+      await loadReferences(projectId);
+    } catch (err) {
+      console.error('Failed to rename reference:', err);
+    }
+  }, [loadReferences]);
 
   const createProject = useCallback(async (name: string, description: string) => {
     const meta = await api.projects.create(name, description);
@@ -180,7 +241,14 @@ export function ProjectStoreProvider({ children }: { children: ReactNode }) {
       skills,
       skillsLoading,
       skillData,
+      references,
+      referencesLoading,
       flows,
+      loadReferences,
+      uploadReferences,
+      deleteReference,
+      createReferenceFolder,
+      renameReference,
       createProject,
       deleteProject,
       getFlowById,
@@ -194,7 +262,7 @@ export function ProjectStoreProvider({ children }: { children: ReactNode }) {
       deleteSkill,
       refreshProjects,
     }),
-    [projects, loading, error, skills, skillsLoading, skillData, flows, createProject, deleteProject, getFlowById, updateFlow, saveFlow, loadProject, loadSkills, loadSkill, saveSkill, createSkill, deleteSkill, refreshProjects],
+    [projects, loading, error, skills, skillsLoading, skillData, references, referencesLoading, flows, loadReferences, uploadReferences, deleteReference, createReferenceFolder, renameReference, createProject, deleteProject, getFlowById, updateFlow, saveFlow, loadProject, loadSkills, loadSkill, saveSkill, createSkill, deleteSkill, refreshProjects],
   );
 
   return (

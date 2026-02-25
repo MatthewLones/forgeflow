@@ -9,6 +9,7 @@ import {
 } from '@codemirror/autocomplete';
 import { chipDecorationPlugin, CHIP_PATTERNS } from './chip-decoration';
 import { createSlashAutocomplete } from './slash-autocomplete';
+import { blockDecorationPlugin } from '../../shared/block-widgets';
 
 /**
  * Custom backspace handler that deletes an entire chip if the cursor is
@@ -53,6 +54,7 @@ interface SlashCommandEditorProps {
   onChange: (content: string) => void;
   skills: string[];
   agents: string[];
+  artifacts: string[];
   onCreateAgent?: (name: string) => void;
 }
 
@@ -70,6 +72,7 @@ export function SlashCommandEditor({
   onChange,
   skills,
   agents,
+  artifacts,
   onCreateAgent,
 }: SlashCommandEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -141,6 +144,10 @@ export function SlashCommandEditor({
         backgroundColor: 'rgba(239, 68, 68, 0.12)',
         color: '#dc2626',
       },
+      '.cm-chip-artifact': {
+        backgroundColor: 'rgba(139, 92, 246, 0.12)',
+        color: '#7c3aed',
+      },
       // Autocomplete dropdown
       '.cm-tooltip-autocomplete': {
         border: '1px solid var(--color-border)',
@@ -172,6 +179,7 @@ export function SlashCommandEditor({
     const slashComplete = createSlashAutocomplete({
       skills,
       agents,
+      artifacts,
       onCreateAgent: (name) => onCreateAgentRef.current?.(name),
     });
 
@@ -193,6 +201,7 @@ export function SlashCommandEditor({
           defaultKeymap: false,
         }),
         chipDecorationPlugin,
+        blockDecorationPlugin,
         theme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {

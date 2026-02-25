@@ -1,85 +1,20 @@
 import { useMemo, useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { marked } from 'marked';
-import { isElectron, getElectronAPI } from '../../lib/electron';
+import { Document, Page, pdfjs } from 'react-pdf';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
+import { api } from '../../lib/api-client';
+
+// Configure pdf.js worker
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
 
 interface ReferenceViewerProps {
   refPath: string;
 }
-
-/** Mock content — in production this would load from the project store / filesystem */
-const MOCK_CONTENT: Record<string, { content: string; type: string }> = {
-  'contract.pdf': {
-    content: '',
-    type: 'pdf',
-  },
-  'standards-height.md': {
-    content: `# ADU Height Standards
-
-## Maximum Height Limits
-
-- **Detached ADU:** 16 feet maximum
-- **Attached ADU:** Cannot exceed height of primary dwelling
-- **Two-story ADU:** Requires special permit if > 16 feet
-
-## Setback Requirements
-
-| Zone | Front | Side | Rear |
-|------|-------|------|------|
-| R-1  | 20 ft | 5 ft | 4 ft |
-| R-2  | 15 ft | 5 ft | 4 ft |
-| R-3  | 10 ft | 3 ft | 4 ft |
-
-## Notes
-
-ADUs within 1/2 mile of public transit may have relaxed height limits up to 18 feet per AB 68.
-`,
-    type: 'md',
-  },
-  'compliance-rules.json': {
-    content: JSON.stringify({
-      version: '2.1',
-      jurisdiction: 'Los Angeles County',
-      rules: [
-        {
-          id: 'height-001',
-          name: 'Maximum Height',
-          condition: 'detached_adu',
-          maxFeet: 16,
-          exceptions: ['transit_proximity', 'lot_size_over_5000sqft'],
-        },
-        {
-          id: 'setback-001',
-          name: 'Rear Setback',
-          condition: 'all_zones',
-          minFeet: 4,
-          exceptions: ['existing_garage_conversion'],
-        },
-      ],
-    }, null, 2),
-    type: 'json',
-  },
-  'regulations/height-limits.pdf': {
-    content: '',
-    type: 'pdf',
-  },
-  'regulations/setback-rules.md': {
-    content: `# Setback Rules
-
-## General Requirements
-
-All ADUs must maintain minimum setbacks from property lines.
-
-### Side Setbacks
-- Minimum 4 feet for structures under 16 feet
-- Minimum 5 feet for structures 16 feet and over
-
-### Rear Setbacks
-- Minimum 4 feet from rear property line
-- No setback required for garage conversions
-`,
-    type: 'md',
-  },
-};
 
 function getFileType(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase() ?? '';
@@ -87,99 +22,161 @@ function getFileType(path: string): string {
   if (ext === 'md' || ext === 'markdown') return 'md';
   if (ext === 'json') return 'json';
   if (ext === 'txt') return 'txt';
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) return 'image';
   return 'other';
 }
 
 export function ReferenceViewer({ refPath }: ReferenceViewerProps) {
+  const { id: projectId } = useParams<{ id: string }>();
   const fileType = getFileType(refPath);
-  const mock = MOCK_CONTENT[refPath];
   const fileName = refPath.split('/').pop() ?? refPath;
 
-  if (fileType === 'pdf') {
-    return <PdfViewer fileName={fileName} filePath={refPath} />;
-  }
-
-  if (fileType === 'md') {
-    return <MarkdownViewer content={mock?.content ?? `*No content for ${refPath}*`} />;
-  }
-
-  if (fileType === 'json') {
-    return <JsonViewer content={mock?.content ?? '{}'} />;
-  }
-
-  return <TextViewer content={mock?.content ?? `No content for ${refPath}`} />;
-}
-
-function PdfViewer({ fileName, filePath }: { fileName: string; filePath?: string }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!filePath || !isElectron()) return;
-
-    let revoked = false;
-    const api = getElectronAPI()!;
-    api.fs.readFile(filePath).then((buffer) => {
-      if (revoked) return;
-      const blob = new Blob([buffer], { type: 'application/pdf' });
-      setBlobUrl(URL.createObjectURL(blob));
-    }).catch((err: unknown) => {
-      if (revoked) return;
-      setError(err instanceof Error ? err.message : 'Failed to load PDF');
-    });
-
-    return () => {
-      revoked = true;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-    };
-    // Only re-run when filePath changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath]);
-
-  // Electron with loaded PDF — render inline
-  if (blobUrl) {
+  if (!projectId) {
     return (
-      <div className="h-full w-full">
-        <embed src={blobUrl} type="application/pdf" className="w-full h-full" />
+      <div className="h-full flex items-center justify-center text-xs text-[var(--color-text-muted)]">
+        No project context
       </div>
     );
   }
 
-  // Electron but file failed to load
+  if (fileType === 'pdf') {
+    return <PdfViewer projectId={projectId} refPath={refPath} />;
+  }
+  if (fileType === 'image') {
+    return <ImageViewer projectId={projectId} refPath={refPath} fileName={fileName} />;
+  }
+
+  return <TextBasedViewer projectId={projectId} refPath={refPath} fileType={fileType} />;
+}
+
+/* ── PDF Viewer (react-pdf) ─────────────────────────────── */
+
+function PdfViewer({ projectId, refPath }: { projectId: string; refPath: string }) {
+  const [numPages, setNumPages] = useState<number>(0);
+  const [error, setError] = useState<string | null>(null);
+  const fileUrl = api.references.getFileUrl(projectId, refPath);
+
   if (error) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-4 text-[var(--color-text-muted)]">
         <div className="w-16 h-20 rounded-lg border-2 border-red-300 flex items-center justify-center">
           <span className="text-2xl font-bold text-red-400">PDF</span>
         </div>
-        <div className="text-sm font-medium text-[var(--color-text-secondary)]">{fileName}</div>
         <div className="text-xs text-center max-w-xs text-red-500">{error}</div>
       </div>
     );
   }
 
-  // Browser fallback — no Electron available
-  if (!isElectron()) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center gap-4 text-[var(--color-text-muted)]">
-        <div className="w-16 h-20 rounded-lg border-2 border-[var(--color-border)] flex items-center justify-center">
-          <span className="text-2xl font-bold text-red-400">PDF</span>
+  return (
+    <div className="h-full overflow-auto p-4 flex flex-col items-center">
+      <Document
+        file={fileUrl}
+        onLoadSuccess={({ numPages: n }) => setNumPages(n)}
+        onLoadError={(err) => setError(err?.message ?? 'Failed to load PDF')}
+        loading={
+          <div className="flex items-center justify-center py-12">
+            <div className="flex items-center gap-3 text-sm text-[var(--color-text-muted)]">
+              <div className="w-4 h-4 border-2 border-[var(--color-node-agent)] border-t-transparent rounded-full animate-spin" />
+              Loading PDF...
+            </div>
+          </div>
+        }
+      >
+        {Array.from({ length: numPages }, (_, i) => (
+          <Page
+            key={i + 1}
+            pageNumber={i + 1}
+            width={700}
+            className="mb-4 shadow-md"
+            renderTextLayer
+            renderAnnotationLayer
+          />
+        ))}
+      </Document>
+      {numPages > 0 && (
+        <div className="text-[10px] text-[var(--color-text-muted)] py-2">
+          {numPages} page{numPages !== 1 ? 's' : ''}
         </div>
-        <div className="text-sm font-medium text-[var(--color-text-secondary)]">{fileName}</div>
-        <div className="text-xs text-center max-w-xs">
-          PDF viewing is available in the desktop app.
+      )}
+    </div>
+  );
+}
+
+/* ── Image Viewer ───────────────────────────────────────── */
+
+function ImageViewer({ projectId, refPath, fileName }: { projectId: string; refPath: string; fileName: string }) {
+  const fileUrl = api.references.getFileUrl(projectId, refPath);
+  const [error, setError] = useState(false);
+
+  if (error) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-2 text-[var(--color-text-muted)]">
+        <span className="text-sm">Failed to load image</span>
+        <span className="text-xs font-mono">{fileName}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex items-center justify-center overflow-auto p-4 bg-[var(--color-canvas-bg)]">
+      <img
+        src={fileUrl}
+        alt={fileName}
+        className="max-w-full max-h-full object-contain"
+        onError={() => setError(true)}
+      />
+    </div>
+  );
+}
+
+/* ── Text-based Viewer (md, json, txt, other) ───────────── */
+
+function TextBasedViewer({ projectId, refPath, fileType }: { projectId: string; refPath: string; fileType: string }) {
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setContent(null);
+
+    api.references.getTextContent(projectId, refPath)
+      .then((text) => { if (!cancelled) setContent(text); })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load file'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [projectId, refPath]);
+
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="flex items-center gap-3 text-sm text-[var(--color-text-muted)]">
+          <div className="w-4 h-4 border-2 border-[var(--color-node-agent)] border-t-transparent rounded-full animate-spin" />
+          Loading...
         </div>
       </div>
     );
   }
 
-  // Electron but still loading
-  return (
-    <div className="h-full flex items-center justify-center">
-      <div className="text-xs text-[var(--color-text-muted)]">Loading PDF...</div>
-    </div>
-  );
+  if (error) {
+    return (
+      <div className="h-full flex items-center justify-center text-xs text-red-500">
+        {error}
+      </div>
+    );
+  }
+
+  const text = content ?? '';
+
+  if (fileType === 'md') return <MarkdownViewer content={text} />;
+  if (fileType === 'json') return <JsonViewer content={text} />;
+  return <TextViewer content={text} />;
 }
+
+/* ── Markdown Viewer ────────────────────────────────────── */
 
 function MarkdownViewer({ content }: { content: string }) {
   const html = useMemo(() => {
@@ -211,6 +208,8 @@ function MarkdownViewer({ content }: { content: string }) {
     </div>
   );
 }
+
+/* ── JSON Viewer ────────────────────────────────────────── */
 
 function JsonViewer({ content }: { content: string }) {
   const parsed = useMemo(() => {
@@ -297,6 +296,8 @@ function JsonNode({ value, name, depth }: { value: unknown; name: string | null;
     </div>
   );
 }
+
+/* ── Text Viewer ────────────────────────────────────────── */
 
 function TextViewer({ content }: { content: string }) {
   return (

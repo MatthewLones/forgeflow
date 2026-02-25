@@ -1,8 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
-import type { FlowNode, NodeConfig, InterruptConfig } from '@forgeflow/types';
+import type { FlowNode, NodeConfig, ArtifactSchema } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
 import { TagList } from '../inspector/fields/TagList';
-import { InterruptEditor } from '../inspector/fields/InterruptEditor';
 
 interface ConfigBottomPanelProps {
   node: FlowNode;
@@ -80,20 +79,28 @@ export function ConfigBottomPanel({ node }: ConfigBottomPanelProps) {
 
       {/* Tab bar */}
       <div className="h-7 flex items-center gap-0 px-2 bg-[var(--color-canvas-bg)] border-b border-[var(--color-border)]">
-        {visibleTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => handleTabClick(tab.id)}
-            className={`px-3 py-1 text-[11px] font-medium transition-colors rounded-t ${
-              isOpen && activeTab === tab.id
-                ? 'text-[var(--color-node-agent)] bg-white border-b-2 border-b-[var(--color-node-agent)]'
-                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {visibleTabs.map((tab) => {
+          const badge = getTabBadge(tab.id, node);
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => handleTabClick(tab.id)}
+              className={`px-3 py-1 text-[11px] font-medium transition-colors rounded-t flex items-center gap-1 ${
+                isOpen && activeTab === tab.id
+                  ? 'text-[var(--color-node-agent)] bg-white border-b-2 border-b-[var(--color-node-agent)]'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+              }`}
+            >
+              {tab.label}
+              {badge > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 text-[10px] rounded-full bg-[var(--color-node-agent)]/10 text-[var(--color-node-agent)]">
+                  {badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Content */}
@@ -108,16 +115,31 @@ export function ConfigBottomPanel({ node }: ConfigBottomPanelProps) {
   );
 }
 
+function getTabBadge(tabId: string, node: FlowNode): number {
+  switch (tabId) {
+    case 'io':
+      return (node.config.outputs?.length ?? 0) + (node.config.inputs?.length ?? 0);
+    case 'skills':
+      return node.config.skills?.length ?? 0;
+    case 'interrupts':
+      return node.config.interrupts?.length ?? 0;
+    case 'children':
+      return node.children.length;
+    default:
+      return 0;
+  }
+}
+
 function ConfigTabContent({ node, activeTab }: { node: FlowNode; activeTab: string }) {
   switch (activeTab) {
     case 'io':
-      return <IOContent nodeId={node.id} config={node.config} />;
+      return <IOContent config={node.config} />;
     case 'budget':
       return <BudgetContent nodeId={node.id} config={node.config} />;
     case 'skills':
-      return <SkillsContent nodeId={node.id} config={node.config} />;
+      return <SkillsContent config={node.config} />;
     case 'interrupts':
-      return <InterruptsContent nodeId={node.id} interrupts={node.config.interrupts ?? []} />;
+      return <InterruptsContent config={node.config} />;
     case 'children':
       return <ChildrenContent node={node} />;
     case 'presentation':
@@ -127,22 +149,71 @@ function ConfigTabContent({ node, activeTab }: { node: FlowNode; activeTab: stri
   }
 }
 
-function IOContent({ nodeId, config }: { nodeId: string; config: NodeConfig }) {
-  const { updateNodeConfig } = useFlow();
+const FORMAT_LABELS: Record<string, string> = {
+  json: 'Structured',
+  markdown: 'Markdown',
+  text: 'Text',
+  csv: 'CSV',
+  pdf: 'PDF',
+  image: 'Image',
+  binary: 'Binary',
+};
+
+function IOContent({ config }: { config: NodeConfig }) {
+  const outputs = config.outputs ?? [];
+  const inputs = config.inputs ?? [];
+
+  if (outputs.length === 0 && inputs.length === 0) {
+    return (
+      <div className="text-xs text-[var(--color-text-muted)] italic">
+        Use <span className="font-mono">/output</span> or <span className="font-mono">@artifact-name</span> in the instructions editor
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
-      <TagList
-        label="Input Files"
-        tags={config.inputs}
-        onChange={(inputs) => updateNodeConfig(nodeId, { inputs })}
-        placeholder="e.g. document.pdf"
-      />
-      <TagList
-        label="Output Files"
-        tags={config.outputs}
-        onChange={(outputs) => updateNodeConfig(nodeId, { outputs })}
-        placeholder="e.g. analysis.json"
-      />
+      {outputs.length > 0 && (
+        <div>
+          <div className="text-[10px] font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-1">Outputs</div>
+          <div className="space-y-1">
+            {outputs.map((out, i) => {
+              const schema = typeof out === 'string' ? { name: out, format: 'text', description: '' } : out as ArtifactSchema;
+              return (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="font-mono text-[var(--color-text-primary)]">{schema.name || '(unnamed)'}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-50 text-emerald-700">
+                    {FORMAT_LABELS[schema.format] || schema.format}
+                  </span>
+                  {schema.description && (
+                    <span className="text-[var(--color-text-muted)] truncate">{schema.description}</span>
+                  )}
+                  {(schema as ArtifactSchema).fields?.length ? (
+                    <span className="text-[10px] text-[var(--color-text-muted)]">
+                      {(schema as ArtifactSchema).fields!.length} fields
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {inputs.length > 0 && (
+        <div>
+          <div className="text-[10px] font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-1">Inputs</div>
+          <div className="flex flex-wrap gap-1.5">
+            {inputs.map((inp, i) => {
+              const name = typeof inp === 'string' ? inp : (inp as ArtifactSchema).name;
+              return (
+                <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-purple-50 text-purple-700">
+                  @{name}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -200,25 +271,48 @@ function BudgetContent({ nodeId, config }: { nodeId: string; config: NodeConfig 
   );
 }
 
-function SkillsContent({ nodeId, config }: { nodeId: string; config: NodeConfig }) {
-  const { updateNodeConfig } = useFlow();
+function SkillsContent({ config }: { config: NodeConfig }) {
+  const skills = config.skills ?? [];
+
+  if (skills.length === 0) {
+    return (
+      <div className="text-xs text-[var(--color-text-muted)] italic">
+        Use <span className="font-mono">/skill:name</span> in the instructions editor
+      </div>
+    );
+  }
+
   return (
-    <TagList
-      label="Skills"
-      tags={config.skills}
-      onChange={(skills) => updateNodeConfig(nodeId, { skills })}
-      placeholder="e.g. contract-law-basics"
-    />
+    <div className="flex flex-wrap gap-1.5">
+      {skills.map((s, i) => (
+        <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-emerald-50 text-emerald-700">
+          /skill:{s}
+        </span>
+      ))}
+    </div>
   );
 }
 
-function InterruptsContent({ nodeId, interrupts }: { nodeId: string; interrupts: InterruptConfig[] }) {
-  const { updateNodeConfig } = useFlow();
-  const handleChange = useCallback(
-    (updated: InterruptConfig[]) => updateNodeConfig(nodeId, { interrupts: updated }),
-    [nodeId, updateNodeConfig],
+function InterruptsContent({ config }: { config: NodeConfig }) {
+  const interrupts = config.interrupts ?? [];
+
+  if (interrupts.length === 0) {
+    return (
+      <div className="text-xs text-[var(--color-text-muted)] italic">
+        Use <span className="font-mono">/interrupt:type</span> in the instructions editor
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {interrupts.map((int, i) => (
+        <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-red-50 text-red-700">
+          /interrupt:{int.type}
+        </span>
+      ))}
+    </div>
   );
-  return <InterruptEditor interrupts={interrupts} onChange={handleChange} />;
 }
 
 function ChildrenContent({ node }: { node: FlowNode }) {

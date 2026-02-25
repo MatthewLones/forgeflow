@@ -1,8 +1,9 @@
-import { useCallback, useMemo } from 'react';
-import type { FlowNode, NodeType } from '@forgeflow/types';
+import { useCallback, useMemo, useRef } from 'react';
+import type { FlowNode, NodeType, ArtifactSchema } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
 import { useProjectStore } from '../../context/ProjectStore';
 import { useLayout } from '../../context/LayoutContext';
+import { extractConfigFromInstructions } from '../../lib/sync-blocks-to-config';
 import { SlashCommandEditor } from './slash-commands/SlashCommandEditor';
 import { ConfigBottomPanel } from './ConfigBottomPanel';
 
@@ -45,10 +46,27 @@ function collectAgentNames(nodes: FlowNode[]): string[] {
   return names;
 }
 
+/** Collect all artifact names (output file names) from node configs across the flow */
+function collectArtifactNames(nodes: FlowNode[]): string[] {
+  const names = new Set<string>();
+  function walk(list: FlowNode[]) {
+    for (const node of list) {
+      for (const out of node.config.outputs ?? []) {
+        const name = typeof out === 'string' ? out : (out as ArtifactSchema).name;
+        if (name) names.add(name);
+      }
+      walk(node.children);
+    }
+  }
+  walk(nodes);
+  return [...names];
+}
+
 export function AgentEditor({ nodeId }: AgentEditorProps) {
-  const { state, updateNode, removeNode, createAgentByName } = useFlow();
+  const { state, updateNode, updateNodeConfig, removeNode, createAgentByName } = useFlow();
   const { skills: availableSkills } = useProjectStore();
   const { updateTabLabel } = useLayout();
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const node = useMemo(
     () => findNode(state.flow.nodes, nodeId),
@@ -65,11 +83,28 @@ export function AgentEditor({ nodeId }: AgentEditorProps) {
     [state.flow.nodes, nodeId],
   );
 
+  const artifactNames = useMemo(
+    () => collectArtifactNames(state.flow.nodes),
+    [state.flow.nodes],
+  );
+
   const handleCreateAgent = useCallback(
     (name: string) => {
       createAgentByName(name, nodeId);
     },
     [createAgentByName, nodeId],
+  );
+
+  const handleInstructionsChange = useCallback(
+    (text: string) => {
+      updateNode(nodeId, { instructions: text });
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = setTimeout(() => {
+        const configUpdate = extractConfigFromInstructions(text);
+        if (configUpdate) updateNodeConfig(nodeId, configUpdate);
+      }, 500);
+    },
+    [nodeId, updateNode, updateNodeConfig],
   );
 
   const handleNameChange = useCallback(
@@ -133,9 +168,10 @@ export function AgentEditor({ nodeId }: AgentEditorProps) {
         <SlashCommandEditor
           key={nodeId}
           content={node.instructions}
-          onChange={(text) => updateNode(nodeId, { instructions: text })}
+          onChange={handleInstructionsChange}
           skills={skillNames}
           agents={agentNames}
+          artifacts={artifactNames}
           onCreateAgent={handleCreateAgent}
         />
       </div>
