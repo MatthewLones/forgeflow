@@ -23,6 +23,7 @@ import {
 import { AgentNode } from '../canvas/nodes/AgentNode';
 import { CheckpointNode } from '../canvas/nodes/CheckpointNode';
 import { FlowEdge } from '../canvas/edges/FlowEdge';
+import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 
 const nodeTypes: NodeTypes = {
   agent: AgentNode,
@@ -91,6 +92,7 @@ export function DagMiniView(props: { height?: number }) {
   const { activeTabId, selectAgent } = useLayout();
   const { run } = useRun();
   const [fullscreen, setFullscreen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuEntry[] } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Close fullscreen on Escape
@@ -174,6 +176,24 @@ export function DagMiniView(props: { height?: number }) {
       }
     },
     [dagDrillIn, state.flow.nodes],
+  );
+
+  const handleNodeContextMenu: NodeMouseHandler = useCallback(
+    (event, node) => {
+      event.preventDefault();
+      const flowNode = findNode(state.flow.nodes, node.id);
+      const items: ContextMenuEntry[] = [
+        { label: 'Open', onClick: () => { selectAgent(node.id, flowNode?.name); selectNode(node.id); } },
+      ];
+      if (flowNode && flowNode.children.length > 0) {
+        items.push({ label: 'Drill In', onClick: () => dagDrillIn(node.id) });
+      }
+      if (dagBreadcrumb.length > 0) {
+        items.push({ label: 'Drill Out', onClick: dagDrillOut });
+      }
+      setContextMenu({ x: (event as unknown as React.MouseEvent).clientX, y: (event as unknown as React.MouseEvent).clientY, items });
+    },
+    [selectAgent, selectNode, dagDrillIn, dagDrillOut, dagBreadcrumb, state.flow.nodes],
   );
 
   const breadcrumbNames = useMemo(() => {
@@ -260,6 +280,7 @@ export function DagMiniView(props: { height?: number }) {
         edgeTypes={edgeTypes}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
+        onNodeContextMenu={handleNodeContextMenu}
         fitView
         fitViewOptions={{ padding: fullscreen ? 0.4 : 0.3 }}
         panOnDrag
@@ -276,6 +297,16 @@ export function DagMiniView(props: { height?: number }) {
         <Background variant={BackgroundVariant.Dots} gap={16} size={0.5} />
         <FitViewOnResize />
       </ReactFlow>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

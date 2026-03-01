@@ -25,7 +25,7 @@ export function WorkspaceToolbar({ projectId, onToggleAI, aiPanelOpen, saveStatu
   const { state } = useFlow();
   const { flow } = state;
   const { dagCollapsed, toggleDag } = useDag();
-  const { openTab } = useLayout();
+  const { openTab, selectRunHistory } = useLayout();
   const { run, startRun, resetRun } = useRun();
   const navigate = useNavigate();
   const [validating, setValidating] = useState(false);
@@ -108,6 +108,7 @@ export function WorkspaceToolbar({ projectId, onToggleAI, aiPanelOpen, saveStatu
         <ToolbarButton label={validating ? 'Validating...' : 'Validate'} onClick={handleValidate} disabled={validating} />
         <ToolbarButton label={compiling ? 'Compiling...' : 'Compile'} onClick={handleCompile} disabled={compiling} />
         <RunButton status={run.status} onClick={handleRun} disabled={isRunning} />
+        <ToolbarButton label="History" onClick={() => selectRunHistory(projectId)} />
 
         {onToggleAI && (
           <button

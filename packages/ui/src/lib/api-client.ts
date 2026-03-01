@@ -267,5 +267,23 @@ export const api = {
     streamProgress: (runId: string): EventSource => {
       return new EventSource(`${API_BASE}/runs/${runId}/progress`);
     },
+
+    /** List runs for a project */
+    listByProject: (projectId: string) =>
+      get<import('@forgeflow/types').RunState[]>(`/projects/${projectId}/runs`),
+
+    /** List output artifacts for a run */
+    listOutputs: (runId: string) =>
+      get<Array<{ name: string; size: number }>>(`/runs/${runId}/outputs`),
+
+    /** Get URL for an output file (for download links) */
+    getOutputFileUrl: (runId: string, fileName: string) =>
+      `${API_BASE}/runs/${runId}/outputs/${encodeURIComponent(fileName)}`,
+
+    /** Fetch output file as text */
+    getOutputText: async (runId: string, fileName: string): Promise<string> => {
+      const res = await getRaw(`/runs/${runId}/outputs/${encodeURIComponent(fileName)}`);
+      return res.text();
+    },
   },
 };

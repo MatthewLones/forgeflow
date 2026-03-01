@@ -552,7 +552,7 @@ const FORMAT_BADGE_COLORS: Record<string, string> = {
 export function AgentExplorer() {
   const { state, addNode, addChild, removeNode, updateNode, selectNode } = useFlow();
   const { activeTabId, selectAgent, selectSkill, selectReference, selectArtifact } = useLayout();
-  const { skills, references, uploadReferences, deleteReference, createReferenceFolder, renameReference, createSkill, deleteSkill } = useProjectStore();
+  const { skills, references, uploadReferences, deleteReference, createReferenceFolder, renameReference, createSkill, renameSkill, deleteSkill } = useProjectStore();
 
   const [agentsExpanded, setAgentsExpanded] = useState(true);
   const [skillsExpanded, setSkillsExpanded] = useState(true);
@@ -626,6 +626,12 @@ export function AgentExplorer() {
       e.preventDefault();
       const items: ContextMenuEntry[] = [
         { label: 'Open', onClick: () => selectSkill(skillName) },
+        { label: 'Rename', onClick: () => {
+          const newName = window.prompt('New name:', skillName);
+          if (newName?.trim() && newName !== skillName) {
+            renameSkill(state.flow.id, skillName, newName.trim());
+          }
+        }},
         { separator: true },
         { label: 'New Skill', onClick: () => handleAddSkill() },
         { separator: true },
@@ -633,7 +639,7 @@ export function AgentExplorer() {
       ];
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [selectSkill, handleAddSkill, handleDeleteSkill],
+    [selectSkill, handleAddSkill, handleDeleteSkill, renameSkill, state.flow.id],
   );
 
   const handleOpenReference = useCallback(

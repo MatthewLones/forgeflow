@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { StateFile, RunState, CheckpointState } from '@forgeflow/types';
 import type { StateStore } from './interface.js';
@@ -94,6 +94,32 @@ export class LocalStateStore implements StateStore {
     for (const file of files) {
       await writeFile(join(dir, file.name), file.content);
     }
+  }
+
+  async listArtifacts(runId: string): Promise<Array<{ name: string; size: number }>> {
+    const dir = this.artifactsDir(runId);
+    let entries: string[];
+    try {
+      entries = await readdir(dir);
+    } catch {
+      return [];
+    }
+    const results: Array<{ name: string; size: number }> = [];
+    for (const name of entries) {
+      try {
+        const s = await stat(join(dir, name));
+        if (s.isFile()) {
+          results.push({ name, size: s.size });
+        }
+      } catch {
+        // skip inaccessible files
+      }
+    }
+    return results;
+  }
+
+  async readArtifact(runId: string, fileName: string): Promise<Buffer | null> {
+    return this.tryReadFile(join(this.artifactsDir(runId), fileName));
   }
 
   private async tryReadFile(path: string): Promise<Buffer | null> {

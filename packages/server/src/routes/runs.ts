@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { lookup } from 'mime-types';
 import { runManager } from '../services/run-manager.js';
 import { ProjectStore } from '../services/project-store.js';
 import type { RunnerType } from '../services/run-manager.js';
@@ -118,6 +119,45 @@ router.post('/runs/:runId/resume', async (req, res) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to resume run';
     res.status(500).json({ error: message });
+  }
+});
+
+// GET /api/projects/:id/runs — list runs for a project
+router.get('/projects/:id/runs', async (req, res) => {
+  try {
+    const runs = await runManager.listRuns(req.params.id);
+    res.json(runs);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list runs' });
+  }
+});
+
+// GET /api/runs/:runId/outputs — list output artifacts for a run
+router.get('/runs/:runId/outputs', async (req, res) => {
+  try {
+    const artifacts = await runManager.listArtifacts(req.params.runId);
+    res.json(artifacts);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list outputs' });
+  }
+});
+
+// GET /api/runs/:runId/outputs/:fileName — serve an output file
+router.get('/runs/:runId/outputs/:fileName', async (req, res) => {
+  try {
+    const fileName = req.params.fileName;
+    const content = await runManager.readArtifact(req.params.runId, fileName);
+    if (!content) {
+      res.status(404).json({ error: 'Output file not found' });
+      return;
+    }
+
+    const mimeType = lookup(fileName) || 'application/octet-stream';
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Length', content.length);
+    res.send(content);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read output file' });
   }
 });
 

@@ -1,8 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import type { EditorTab } from '../../context/LayoutContext';
-import type { ProgressEvent } from '@forgeflow/types';
+import { useLayout } from '../../context/LayoutContext';
+import type { ProgressEvent, CheckpointState } from '@forgeflow/types';
 import { useRun } from '../../context/RunContext';
+import { useParams } from 'react-router-dom';
+import { InterruptBanner } from './InterruptBanner';
+import { CheckpointBanner } from './CheckpointBanner';
 
 /* ── Status config ─────────────────────────────────────── */
 
@@ -18,7 +22,8 @@ const STATUS_CONFIG = {
 /* ── Main panel ────────────────────────────────────────── */
 
 export function RunPanel(_props: IDockviewPanelProps<EditorTab>) {
-  const { run } = useRun();
+  const { run, answerInterrupt } = useRun();
+  const { id: projectId } = useParams<{ id: string }>();
 
   if (run.status === 'idle') {
     return (
@@ -28,10 +33,21 @@ export function RunPanel(_props: IDockviewPanelProps<EditorTab>) {
     );
   }
 
+  // Find the latest checkpoint event for the checkpoint banner
+  const lastCheckpoint = run.status === 'awaiting_input'
+    ? [...run.events].reverse().find((e): e is ProgressEvent & { type: 'checkpoint' } => e.type === 'checkpoint')
+    : null;
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <RunHeader />
-      <EventList events={run.events} />
+      {run.pendingInterrupt && (
+        <InterruptBanner interrupt={run.pendingInterrupt} onSubmit={answerInterrupt} />
+      )}
+      {lastCheckpoint && !run.pendingInterrupt && projectId && (
+        <CheckpointBanner projectId={projectId} checkpoint={lastCheckpoint.checkpoint} />
+      )}
+      <EventList events={run.events} runId={run.runId} />
     </div>
   );
 }
@@ -51,6 +67,12 @@ function RunHeader() {
           {config.label}
         </span>
       </div>
+
+      {run.reconnecting && (
+        <span className="text-[10px] font-medium text-amber-500 animate-pulse">
+          Reconnecting...
+        </span>
+      )}
 
       {run.runId && (
         <span className="text-[10px] font-mono text-[var(--color-text-muted)]">
@@ -81,14 +103,19 @@ function RunHeader() {
 
 /* ── Event list ────────────────────────────────────────── */
 
-function EventList({ events }: { events: ProgressEvent[] }) {
+function EventList({ events, runId }: { events: ProgressEvent[]; runId: string | null }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { selectOutput } = useLayout();
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [events.length]);
+
+  const handleFileClick = useCallback((fileName: string) => {
+    if (runId) selectOutput(runId, fileName);
+  }, [runId, selectOutput]);
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto">
@@ -98,7 +125,7 @@ function EventList({ events }: { events: ProgressEvent[] }) {
         </div>
       )}
       {events.map((event, i) => (
-        <EventItem key={i} event={event} />
+        <EventItem key={i} event={event} onFileClick={handleFileClick} />
       ))}
     </div>
   );
@@ -112,6 +139,7 @@ interface EventDisplay {
   message: string;
   detail?: string;
   indent?: boolean;
+  clickableFile?: string; // file name that can be clicked to open
 }
 
 function getEventDisplay(event: ProgressEvent): EventDisplay {
@@ -190,6 +218,7 @@ function getEventDisplay(event: ProgressEvent): EventDisplay {
         message: `${event.fileName}`,
         detail: `${formatFileSize(event.fileSize)}`,
         indent: true,
+        clickableFile: event.fileName,
       };
     case 'message':
       return {
@@ -222,7 +251,7 @@ function getEventDisplay(event: ProgressEvent): EventDisplay {
   }
 }
 
-function EventItem({ event }: { event: ProgressEvent }) {
+function EventItem({ event, onFileClick }: { event: ProgressEvent; onFileClick: (fileName: string) => void }) {
   const display = getEventDisplay(event);
 
   return (
@@ -231,7 +260,17 @@ function EventItem({ event }: { event: ProgressEvent }) {
         {display.icon}
       </span>
       <div className="flex-1 min-w-0">
-        <span className="text-xs text-[var(--color-text-primary)]">{display.message}</span>
+        {display.clickableFile ? (
+          <button
+            type="button"
+            onClick={() => onFileClick(display.clickableFile!)}
+            className="text-xs text-[var(--color-node-agent)] hover:underline cursor-pointer"
+          >
+            {display.message}
+          </button>
+        ) : (
+          <span className="text-xs text-[var(--color-text-primary)]">{display.message}</span>
+        )}
         {display.detail && (
           <span className="text-[10px] text-[var(--color-text-muted)] ml-2">
             {display.detail}

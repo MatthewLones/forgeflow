@@ -28,4 +28,10 @@ export interface StateStore {
 
   /** Save user-uploaded input files */
   saveUserUploads(runId: string, files: StateFile[]): Promise<void>;
+
+  /** List artifact files for a run */
+  listArtifacts(runId: string): Promise<Array<{ name: string; size: number }>>;
+
+  /** Read a single artifact file */
+  readArtifact(runId: string, fileName: string): Promise<Buffer | null>;
 }

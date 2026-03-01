@@ -15,7 +15,7 @@ import type { CompilePreviewResult } from '../lib/api-client';
 
 export interface EditorTab {
   id: string;
-  type: 'agent' | 'skill' | 'reference' | 'artifact' | 'validation' | 'compile' | 'run';
+  type: 'agent' | 'skill' | 'reference' | 'artifact' | 'validation' | 'compile' | 'run' | 'output' | 'run-history';
   label: string;
   nodeId?: string;
   skillName?: string;
@@ -23,6 +23,9 @@ export interface EditorTab {
   artifactName?: string;
   validationResult?: ValidationResult;
   compileResult?: CompilePreviewResult;
+  runId?: string;
+  outputFileName?: string;
+  projectId?: string;
 }
 
 /* ── Component map ────────────────────────────────────────── */
@@ -35,6 +38,8 @@ const COMPONENT_MAP: Record<EditorTab['type'], string> = {
   validation: 'validation-panel',
   compile: 'compile-panel',
   run: 'run-panel',
+  output: 'output-viewer',
+  'run-history': 'run-history-panel',
 };
 
 export type WorkspaceSelection =
@@ -67,6 +72,10 @@ interface LayoutContextValue {
   selectReference: (refPath: string, label?: string) => void;
   /** Convenience: open an artifact tab */
   selectArtifact: (artifactName: string) => void;
+  /** Convenience: open a run output file tab */
+  selectOutput: (runId: string, fileName: string) => void;
+  /** Convenience: open run history tab */
+  selectRunHistory: (projectId: string) => void;
 
   /** Current active panel's selection info */
   selection: WorkspaceSelection;
@@ -173,6 +182,14 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
     openTab({ id: `artifact:${artifactName}`, type: 'artifact', label: artifactName, artifactName });
   }, [openTab]);
 
+  const selectOutput = useCallback((runId: string, fileName: string) => {
+    openTab({ id: `output:${runId}:${fileName}`, type: 'output', label: fileName, runId, outputFileName: fileName });
+  }, [openTab]);
+
+  const selectRunHistory = useCallback((projectId: string) => {
+    openTab({ id: 'run-history', type: 'run-history', label: 'Run History', projectId });
+  }, [openTab]);
+
   const value = useMemo<LayoutContextValue>(
     () => ({
       setApi,
@@ -184,10 +201,12 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
       selectSkill,
       selectReference,
       selectArtifact,
+      selectOutput,
+      selectRunHistory,
       selection,
       activeTabId,
     }),
-    [setApi, openTab, closeTab, updateTabLabel, selectAgent, selectSkill, selectReference, selectArtifact, selection, activeTabId],
+    [setApi, openTab, closeTab, updateTabLabel, selectAgent, selectSkill, selectReference, selectArtifact, selectOutput, selectRunHistory, selection, activeTabId],
   );
 
   return (

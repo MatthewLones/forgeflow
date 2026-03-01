@@ -21,6 +21,8 @@ import { useParams } from 'react-router-dom';
 import { ValidationPanel } from './ValidationPanel';
 import { CompilePreviewPanel } from './CompilePreviewPanel';
 import { RunPanel } from './RunPanel';
+import { OutputViewer } from './OutputViewer';
+import { RunHistoryPanel } from './RunHistoryPanel';
 
 /* ── Panel components ─────────────────────────────────────── */
 
@@ -319,6 +321,8 @@ const components = {
   'validation-panel': ValidationPanel,
   'compile-panel': CompilePreviewPanel,
   'run-panel': RunPanel,
+  'output-viewer': OutputViewer,
+  'run-history-panel': RunHistoryPanel,
   'empty': EmptyPanel,
 };
 
@@ -332,6 +336,8 @@ const TYPE_DOT_COLORS: Record<string, string> = {
   validation: 'bg-emerald-500',
   compile: 'bg-indigo-500',
   run: 'bg-blue-500',
+  output: 'bg-gray-500',
+  'run-history': 'bg-blue-400',
 };
 
 function ForgeFlowTab(props: IDockviewPanelHeaderProps<EditorTab>) {

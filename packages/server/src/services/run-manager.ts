@@ -262,12 +262,39 @@ export class RunManager {
   }
 
   async getRunState(runId: string): Promise<RunState | null> {
-    // Check active run first
-    const run = this.runs.get(runId);
-    if (run?.result) {
-      return this.stateStore.loadRunState(runId);
-    }
     return this.stateStore.loadRunState(runId);
+  }
+
+  async listRuns(projectId?: string): Promise<RunState[]> {
+    const { readdir } = await import('node:fs/promises');
+    let dirs: string[];
+    try {
+      dirs = await readdir(this.runsBasePath);
+    } catch {
+      return [];
+    }
+
+    const results: RunState[] = [];
+    for (const dir of dirs) {
+      const state = await this.stateStore.loadRunState(dir);
+      if (state) {
+        if (!projectId || state.flowId === projectId) {
+          results.push(state);
+        }
+      }
+    }
+
+    // Sort by startedAt descending (most recent first)
+    results.sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
+    return results;
+  }
+
+  async listArtifacts(runId: string): Promise<Array<{ name: string; size: number }>> {
+    return this.stateStore.listArtifacts(runId);
+  }
+
+  async readArtifact(runId: string, fileName: string): Promise<Buffer | null> {
+    return this.stateStore.readArtifact(runId, fileName);
   }
 
   private broadcastEvent(runId: string, event: ProgressEvent): void {
