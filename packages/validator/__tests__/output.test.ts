@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkOutputUniqueness } from '../src/passes/output.js';
+import { buildFlowGraph } from '../src/flow-graph.js';
 import type { FlowDefinition } from '@forgeflow/types';
 
 function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
@@ -24,7 +25,7 @@ describe('checkOutputUniqueness', () => {
         { id: 'b', type: 'agent', name: 'B', instructions: 'Do.', config: { inputs: [], outputs: ['y.json'], skills: [] }, children: [] },
       ],
     });
-    const errors = checkOutputUniqueness(flow).filter((d) => d.severity === 'error');
+    const errors = checkOutputUniqueness(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
   });
 
@@ -35,14 +36,12 @@ describe('checkOutputUniqueness', () => {
         { id: 'b', type: 'agent', name: 'B', instructions: 'Do.', config: { inputs: [], outputs: ['same.json'], skills: [] }, children: [] },
       ],
     });
-    const errors = checkOutputUniqueness(flow).filter((d) => d.severity === 'error');
+    const errors = checkOutputUniqueness(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(1);
     expect(errors[0].code).toBe('DUPLICATE_OUTPUT');
   });
 
   it('allows parent and child to share output (same node tree)', () => {
-    // Parent declares the aggregated outputs; child produces one of them
-    // This is the normal pattern: parent lists all outputs, child writes its portion
     const flow = makeFlow({
       nodes: [
         {
@@ -57,11 +56,7 @@ describe('checkOutputUniqueness', () => {
         },
       ],
     });
-    // Parent and child with same output — this is the intended pattern
-    // The output collector should not flag this as duplicate since parent/child share responsibility
-    const errors = checkOutputUniqueness(flow).filter((d) => d.severity === 'error');
-    // This is actually a design question — for now we allow parent+child to share an output
-    // since it's the documented pattern (parent declares, child writes)
+    const errors = checkOutputUniqueness(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
   });
 });

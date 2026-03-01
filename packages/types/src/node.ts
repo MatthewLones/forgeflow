@@ -62,11 +62,14 @@ export interface InterruptConfig {
   timeoutMs?: number;
 }
 
+/** An input or output entry: either a plain filename or a full artifact schema */
+export type ArtifactRef = string | ArtifactSchema;
+
 export interface NodeConfig {
   /** Files this node reads (relative to workspace) */
-  inputs: string[];
+  inputs: ArtifactRef[];
   /** Files this node produces (relative to output/) */
-  outputs: string[];
+  outputs: ArtifactRef[];
   /** Skill names to load for this node */
   skills: string[];
   /** Per-node budget (optional if using flow-level budget) */

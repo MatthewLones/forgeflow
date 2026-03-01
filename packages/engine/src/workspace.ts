@@ -1,6 +1,7 @@
 import { mkdir, writeFile, readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FlowNode, StateFile } from '@forgeflow/types';
+import { artifactName } from '@forgeflow/types';
 import type { ResolvedSkill } from '@forgeflow/skill-resolver';
 
 /**
@@ -117,8 +118,8 @@ export function getExpectedOutputs(node: FlowNode): string[] {
 }
 
 function collectExpectedOutputsRecursive(node: FlowNode, outputs: Set<string>): void {
-  for (const file of node.config.outputs) {
-    outputs.add(file);
+  for (const ref of node.config.outputs) {
+    outputs.add(artifactName(ref));
   }
   for (const child of node.children) {
     collectExpectedOutputsRecursive(child, outputs);

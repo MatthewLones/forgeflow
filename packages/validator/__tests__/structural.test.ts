@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkStructural } from '../src/passes/structural.js';
+import { buildFlowGraph } from '../src/flow-graph.js';
 import type { FlowDefinition } from '@forgeflow/types';
 
 function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
@@ -35,7 +36,7 @@ function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
 
 describe('checkStructural', () => {
   it('passes a valid linear flow', () => {
-    const diagnostics = checkStructural(makeFlow());
+    const diagnostics = checkStructural(buildFlowGraph(makeFlow()));
     const errors = diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
   });
@@ -53,7 +54,7 @@ describe('checkStructural', () => {
         { from: 'c', to: 'a' },
       ],
     });
-    const errors = checkStructural(flow).filter((d) => d.severity === 'error');
+    const errors = checkStructural(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'CYCLE_DETECTED')).toBe(true);
   });
 
@@ -65,7 +66,7 @@ describe('checkStructural', () => {
       ],
       edges: [],
     });
-    const errors = checkStructural(flow).filter((d) => d.severity === 'error');
+    const errors = checkStructural(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'DUPLICATE_NODE_ID')).toBe(true);
   });
 
@@ -85,7 +86,7 @@ describe('checkStructural', () => {
       ],
       edges: [],
     });
-    const errors = checkStructural(flow).filter((d) => d.severity === 'error');
+    const errors = checkStructural(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'DUPLICATE_NODE_ID')).toBe(true);
   });
 
@@ -93,7 +94,7 @@ describe('checkStructural', () => {
     const flow = makeFlow({
       edges: [{ from: 'node_a', to: 'nonexistent' }],
     });
-    const errors = checkStructural(flow).filter((d) => d.severity === 'error');
+    const errors = checkStructural(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'INVALID_EDGE_REF')).toBe(true);
   });
 
@@ -106,7 +107,7 @@ describe('checkStructural', () => {
       ],
       edges: [{ from: 'a', to: 'b' }], // c is orphan
     });
-    const errors = checkStructural(flow).filter((d) => d.severity === 'error');
+    const errors = checkStructural(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'ORPHAN_NODE')).toBe(true);
   });
 
@@ -119,7 +120,7 @@ describe('checkStructural', () => {
       ],
       edges: [{ from: 'b', to: 'c' }], // a is dead-end (no outgoing) AND orphan; b starts but a doesn't connect
     });
-    const errors = checkStructural(flow).filter((d) => d.severity === 'error');
+    const errors = checkStructural(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'DEAD_END_NODE' || e.code === 'ORPHAN_NODE')).toBe(true);
   });
 
@@ -144,7 +145,7 @@ describe('checkStructural', () => {
       ],
       edges: [],
     });
-    const errors = checkStructural(flow).filter((d) => d.severity === 'error');
+    const errors = checkStructural(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'NON_AGENT_HAS_CHILDREN')).toBe(true);
   });
 
@@ -162,7 +163,7 @@ describe('checkStructural', () => {
       ],
       edges: [],
     });
-    const errors = checkStructural(flow).filter((d) => d.severity === 'error');
+    const errors = checkStructural(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'CHECKPOINT_NO_PRESENTATION')).toBe(true);
   });
 
@@ -180,7 +181,7 @@ describe('checkStructural', () => {
       ],
       edges: [],
     });
-    const errors = checkStructural(flow).filter((d) => d.severity === 'error');
+    const errors = checkStructural(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'EMPTY_INSTRUCTIONS')).toBe(true);
   });
 
@@ -198,7 +199,7 @@ describe('checkStructural', () => {
       ],
       edges: [],
     });
-    const errors = checkStructural(flow).filter((d) => d.severity === 'error');
+    const errors = checkStructural(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'INVALID_NODE_ID')).toBe(true);
   });
 });

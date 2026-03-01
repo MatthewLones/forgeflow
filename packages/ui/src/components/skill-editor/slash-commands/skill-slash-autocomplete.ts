@@ -25,6 +25,7 @@ const INTERRUPT_TYPES = [
 export interface SkillSlashOptions {
   skills: string[];
   files: string[];
+  artifacts: string[];
   currentSkill: string;
   onCreateSkill?: (name: string) => void;
 }
@@ -37,10 +38,35 @@ export interface SkillSlashOptions {
  * - `@`  → file reference (inserts `@path/to/file.md`)
  * - `/`  → block commands (inserts fenced code block template)
  */
-export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills: [], files: [], currentSkill: '' }) {
+export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills: [], files: [], artifacts: [], currentSkill: '' }) {
   const { onCreateSkill } = opts;
 
   return function skillSlashAutocomplete(context: CompletionContext): CompletionResult | null {
+    // 0. Check for \ (artifact output declaration)
+    const backslash = context.matchBefore(/\\[\w._-]*/);
+    if (backslash) {
+      const charBefore = backslash.from > 0
+        ? context.state.doc.sliceString(backslash.from - 1, backslash.from)
+        : '';
+      if (charBefore && !/[\s\n]/.test(charBefore)) {
+        // Not after whitespace — skip
+      } else {
+        const query = backslash.text.slice(1).toLowerCase();
+        const options: Array<{ label: string; type: string; detail: string; apply: string }> = opts.artifacts
+          .filter((a) => a.toLowerCase().includes(query))
+          .map((a) => ({
+            label: a,
+            type: 'property' as const,
+            apply: `\\${a}`,
+            detail: 'output artifact',
+          }));
+
+        if (options.length > 0) {
+          return { from: backslash.from, options, filter: false };
+        }
+      }
+    }
+
     // 1. Check for // first (sub-skill reference) — HIGHEST PRIORITY
     const doubleSlash = context.matchBefore(/\/\/[\w-]*/);
     if (doubleSlash) {
@@ -73,18 +99,32 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
       if (charBefore && !/[\s\n]/.test(charBefore)) return null;
 
       const query = atSign.text.slice(1).toLowerCase();
-      const options = opts.files
-        .filter((f) => f !== 'SKILL.md' && f.toLowerCase().includes(query))
-        .map((f) => {
-          const fileName = f.includes('/') ? f.split('/').pop()! : f;
-          const dir = f.includes('/') ? f.split('/').slice(0, -1).join('/') : '';
-          return {
-            label: fileName,
-            type: 'property' as const,
-            apply: `@${f}`,
-            detail: dir || 'file',
-          };
+      const options: Array<{ label: string; type: string; detail: string; apply: string }> = [];
+
+      // File references (@path/to/file.md)
+      for (const f of opts.files) {
+        if (f === 'SKILL.md') continue;
+        if (!f.toLowerCase().includes(query)) continue;
+        const fileName = f.includes('/') ? f.split('/').pop()! : f;
+        const dir = f.includes('/') ? f.split('/').slice(0, -1).join('/') : '';
+        options.push({
+          label: fileName,
+          type: 'property' as const,
+          apply: `@${f}`,
+          detail: dir || 'file',
         });
+      }
+
+      // Artifact references (@artifact_name)
+      for (const a of opts.artifacts) {
+        if (!a.toLowerCase().includes(query)) continue;
+        options.push({
+          label: a,
+          type: 'variable' as const,
+          apply: `@${a}`,
+          detail: 'artifact',
+        });
+      }
 
       if (options.length === 0) return null;
 

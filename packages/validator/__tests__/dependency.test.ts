@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkDependencies } from '../src/passes/dependency.js';
+import { buildFlowGraph } from '../src/flow-graph.js';
 import type { FlowDefinition } from '@forgeflow/types';
 
 function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
@@ -25,7 +26,7 @@ describe('checkDependencies', () => {
       ],
       edges: [{ from: 'a', to: 'b' }],
     });
-    const diagnostics = checkDependencies(flow, ['doc.pdf']);
+    const diagnostics = checkDependencies(buildFlowGraph(flow), ['doc.pdf']);
     const errors = diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
   });
@@ -37,7 +38,7 @@ describe('checkDependencies', () => {
       ],
       edges: [],
     });
-    const diagnostics = checkDependencies(flow, []);
+    const diagnostics = checkDependencies(buildFlowGraph(flow), []);
     const errors = diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(1);
     expect(errors[0].code).toBe('UNRESOLVED_INPUT');
@@ -50,7 +51,7 @@ describe('checkDependencies', () => {
       ],
       edges: [],
     });
-    const diagnostics = checkDependencies(flow, ['document.pdf']);
+    const diagnostics = checkDependencies(buildFlowGraph(flow), ['document.pdf']);
     const errors = diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
   });
@@ -63,7 +64,7 @@ describe('checkDependencies', () => {
       ],
       edges: [{ from: 'a', to: 'b' }],
     });
-    const diagnostics = checkDependencies(flow, []);
+    const diagnostics = checkDependencies(buildFlowGraph(flow), []);
     const errors = diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(1);
     expect(errors[0].suggestion).toContain('risk_matrix.json');
@@ -85,7 +86,7 @@ describe('checkDependencies', () => {
       ],
       edges: [],
     });
-    const diagnostics = checkDependencies(flow, ['data.json']);
+    const diagnostics = checkDependencies(buildFlowGraph(flow), ['data.json']);
     const errors = diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
   });
@@ -107,7 +108,7 @@ describe('checkDependencies', () => {
       ],
       edges: [],
     });
-    const diagnostics = checkDependencies(flow, ['data.json']);
+    const diagnostics = checkDependencies(buildFlowGraph(flow), ['data.json']);
     const errors = diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(1);
     expect(errors[0].code).toBe('CHILD_DEPENDS_ON_SIBLING');
@@ -125,7 +126,7 @@ describe('checkDependencies', () => {
         { from: 'b', to: 'c' },
       ],
     });
-    const diagnostics = checkDependencies(flow, ['doc.pdf']);
+    const diagnostics = checkDependencies(buildFlowGraph(flow), ['doc.pdf']);
     const errors = diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
   });

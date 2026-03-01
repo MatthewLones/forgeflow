@@ -10,6 +10,8 @@ import { RangeSetBuilder } from '@codemirror/state';
 const subSkillDeco = Decoration.mark({ class: 'cm-chip cm-chip-subskill' });
 const fileRefDeco = Decoration.mark({ class: 'cm-chip cm-chip-fileref' });
 const interruptDeco = Decoration.mark({ class: 'cm-chip cm-chip-interrupt' });
+const artifactOutputDeco = Decoration.mark({ class: 'cm-chip cm-chip-artifact-output' });
+const artifactDeco = Decoration.mark({ class: 'cm-chip cm-chip-artifact' });
 
 const skillRefDeco = Decoration.mark({ class: 'cm-chip cm-chip-subskill' });
 
@@ -18,6 +20,8 @@ const PATTERNS = [
   { regex: /(?<!\/)\/skill:([\w-]+)/g, deco: skillRefDeco },
   { regex: /@([\w./-]+\.\w+)/g, deco: fileRefDeco },
   { regex: /\/interrupt:(approval|qa|selection|review|escalation)\b/g, deco: interruptDeco },
+  { regex: /\\([\w._-]+)/g, deco: artifactOutputDeco },
+  { regex: /@([\w._-]+)/g, deco: artifactDeco },
 ];
 
 /** Exported for the atomic-backspace handler */

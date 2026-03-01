@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type {
   FlowDefinition,
-  FlowNode,
   StateFile,
   RunState,
   RunResult,
@@ -9,9 +8,8 @@ import type {
   ProgressEvent,
   ExecutionPlan,
 } from '@forgeflow/types';
-import { validateFlow } from '@forgeflow/validator';
-import { compilePhasePrompt, compileChildPromptFiles } from '@forgeflow/compiler';
-import type { CompileContext } from '@forgeflow/compiler';
+import { validateFlow, buildFlowGraph } from '@forgeflow/validator';
+import { compilePhase, compileChildPrompts } from '@forgeflow/compiler';
 import type { StateStore } from '@forgeflow/state-store';
 import { resolveSkills } from '@forgeflow/skill-resolver';
 import type { ResolvedSkill } from '@forgeflow/skill-resolver';
@@ -217,7 +215,7 @@ export class FlowOrchestrator {
    */
   private async executePhases(ctx: ExecuteContext): Promise<RunResult> {
     const emit = this.options?.onProgress ?? (() => {});
-    const outputMap = buildOutputMap(ctx.flow.nodes);
+    const graph = buildFlowGraph(ctx.flow);
     const nodeMap = new Map(ctx.flow.nodes.map((n) => [n.id, n]));
     let totalCost = { ...ctx.initialCost };
     const allOutputFiles = [...ctx.initialOutputFiles];
@@ -225,6 +223,7 @@ export class FlowOrchestrator {
     for (let i = ctx.startingPhaseIndex; i < ctx.executionPlan.phases.length; i++) {
       const phase = ctx.executionPlan.phases[i];
       const node = nodeMap.get(phase.nodeId)!;
+      const sym = graph.symbols.get(phase.nodeId)!;
 
       ctx.runState.currentPhaseId = phase.nodeId;
       ctx.runState.updatedAt = new Date().toISOString();
@@ -236,8 +235,8 @@ export class FlowOrchestrator {
           runId: ctx.runId,
           checkpointNodeId: node.id,
           status: 'waiting',
-          presentFiles: node.config.inputs,
-          waitingForFile: node.config.outputs[0] ?? '',
+          presentFiles: sym.declaredInputs,
+          waitingForFile: sym.declaredOutputs[0] ?? '',
           completedPhases: [...ctx.runState.completedPhases],
           costSoFar: { ...totalCost },
           presentation: node.config.presentation!,
@@ -263,25 +262,13 @@ export class FlowOrchestrator {
       // --- Agent/Merge node: execute in workspace ---
       emit({ type: 'phase_started', nodeId: node.id, nodeName: node.name, phaseNumber: i });
 
-      // Build compile context
-      const inputSources = new Map<string, string>();
-      for (const input of node.config.inputs) {
-        inputSources.set(input, outputMap.get(input) ?? 'user_upload');
-      }
-
-      const compileContext: CompileContext = {
-        flowName: ctx.flow.name,
-        globalSkills: ctx.flow.skills,
-        inputSources,
-        flowBudget: ctx.flow.budget,
-      };
-
-      const prompt = compilePhasePrompt(node, compileContext);
+      // Compile prompt via FlowGraph
+      const { markdown: prompt } = compilePhase(node.id, graph);
       const childPrompts = node.children.length > 0
-        ? compileChildPromptFiles(node, compileContext)
+        ? compileChildPrompts(node.id, graph).markdowns
         : undefined;
 
-      const inputFiles = await this.stateStore.loadPhaseInputs(ctx.runId, node.config.inputs);
+      const inputFiles = await this.stateStore.loadPhaseInputs(ctx.runId, sym.declaredInputs);
 
       // Resolve skills
       const allSkillNames = [...new Set([...ctx.flow.skills, ...node.config.skills])];
@@ -307,7 +294,7 @@ export class FlowOrchestrator {
       };
 
       let interruptWatcher: InterruptWatcher | undefined;
-      if (this.options?.interruptHandler && nodeHasInterrupts(node)) {
+      if (this.options?.interruptHandler && sym.interruptCapable) {
         interruptWatcher = new InterruptWatcher();
         await interruptWatcher.start({
           workspacePath,
@@ -453,25 +440,4 @@ export class FlowOrchestrator {
       outputFiles: [...allOutputFiles],
     };
   }
-}
-
-/**
- * Build a map of output file → producing node ID.
- */
-function buildOutputMap(nodes: FlowNode[]): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const node of nodes) {
-    for (const file of node.config.outputs) {
-      map.set(file, node.id);
-    }
-  }
-  return map;
-}
-
-/**
- * Check if a node or any of its children have interrupt configs.
- */
-function nodeHasInterrupts(node: FlowNode): boolean {
-  if (node.config.interrupts && node.config.interrupts.length > 0) return true;
-  return node.children.some(nodeHasInterrupts);
 }

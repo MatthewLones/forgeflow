@@ -12,12 +12,13 @@ export const CheckpointNode = memo(function CheckpointNode({ data, selected }: N
   return (
     <div
       className={`
-        min-w-[220px] rounded-lg bg-white shadow-sm border-2 transition-colors
+        min-w-[220px] rounded-lg shadow-sm border-2 transition-all
         ${selected ? 'border-[var(--color-border-selected)] shadow-md' : 'border-[var(--color-border)]'}
       `}
+      style={{ background: 'linear-gradient(180deg, var(--color-node-checkpoint-bg) 0%, #ffffff 100%)' }}
     >
       {/* Header bar */}
-      <div className="flex items-center gap-2 px-3 py-2 rounded-t-md bg-[var(--color-node-checkpoint-bg)] border-b border-[var(--color-border)]">
+      <div className="flex items-center gap-2 px-3 py-2 rounded-t-md border-b border-[var(--color-border)]/40">
         <div className="w-2.5 h-2.5 rounded-sm bg-[var(--color-node-checkpoint)]" />
         <span className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
           {node.name}

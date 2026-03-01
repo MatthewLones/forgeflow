@@ -88,7 +88,8 @@ function SkillEditorPanel(props: IDockviewPanelProps<EditorTab>) {
 function SkillEditorContent({ skillName, projectId }: { skillName: string; projectId: string }) {
   const { state, selectedFile, selectFile, updateFile } = useSkill();
   const { skills, createSkill, renameSkill, deleteSkill } = useProjectStore();
-  const { selectSkill, updateTabLabel } = useLayout();
+  const { selectSkill, selectArtifact, updateTabLabel } = useLayout();
+  const { state: flowState } = useFlow();
 
   // Local state for editable skill name
   const [editName, setEditName] = useState(skillName);
@@ -138,9 +139,15 @@ function SkillEditorContent({ skillName, projectId }: { skillName: string; proje
     }
   }, [skillName, projectId, deleteSkill]);
 
-  // Derive skill names and file paths for slash command autocomplete
+  // Derive skill names, file paths, and artifact names for slash command autocomplete
   const skillNames = useMemo(() => skills.map((s) => s.name), [skills]);
   const filePaths = useMemo(() => state.files.map((f) => f.path), [state.files]);
+  const artifactNames = useMemo(() => Object.keys(flowState.flow.artifacts ?? {}), [flowState.flow.artifacts]);
+
+  const handleClickArtifact = useCallback(
+    (name: string) => selectArtifact(name),
+    [selectArtifact],
+  );
 
   const skillMd = state.files.find((f) => f.path === 'SKILL.md');
   const references = state.files.filter((f) => f.path.startsWith('references/'));
@@ -236,10 +243,12 @@ function SkillEditorContent({ skillName, projectId }: { skillName: string; proje
             onChange={handleChange}
             skills={skillNames}
             files={filePaths}
+            artifacts={artifactNames}
             currentSkill={skillName}
             onCreateSkill={handleCreateSkill}
             onClickSkill={handleClickSkill}
             onClickFile={handleClickFile}
+            onClickArtifact={handleClickArtifact}
           />
         ) : (
           <div className="h-full flex items-center justify-center text-sm text-[var(--color-text-muted)]">

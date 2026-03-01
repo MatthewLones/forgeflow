@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkInterrupts } from '../src/passes/interrupt.js';
+import { buildFlowGraph } from '../src/flow-graph.js';
 import type { FlowDefinition } from '@forgeflow/types';
 
 function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
@@ -36,7 +37,7 @@ describe('checkInterrupts', () => {
         },
       ],
     });
-    const errors = checkInterrupts(flow).filter((d) => d.severity === 'error');
+    const errors = checkInterrupts(buildFlowGraph(flow)).filter((d) => d.severity === 'error');
     expect(errors.some((e) => e.code === 'CHECKPOINT_HAS_INTERRUPTS')).toBe(true);
   });
 
@@ -58,7 +59,7 @@ describe('checkInterrupts', () => {
         },
       ],
     });
-    const diagnostics = checkInterrupts(flow);
+    const diagnostics = checkInterrupts(buildFlowGraph(flow));
     const errors = diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
   });
@@ -90,7 +91,7 @@ describe('checkInterrupts', () => {
         },
       ],
     });
-    const warnings = checkInterrupts(flow).filter((d) => d.severity === 'warning');
+    const warnings = checkInterrupts(buildFlowGraph(flow)).filter((d) => d.severity === 'warning');
     expect(warnings.some((w) => w.code === 'DEEP_INTERRUPT_NO_PARENT_HANDLING')).toBe(true);
   });
 });

@@ -6,6 +6,7 @@ export type {
   ArtifactField,
   ArtifactFormat,
   ArtifactSchema,
+  ArtifactRef,
   NodeBudget,
   CheckpointPresentation,
   InterruptConfig,
@@ -56,3 +57,31 @@ export type {
   ProgressEvent,
   RunResult,
 } from './engine.js';
+
+export type {
+  FlowSymbol,
+  ArtifactEntry,
+  FlowGraph,
+} from './flow-graph.js';
+
+export type {
+  RuleId,
+  RuleCategory,
+  RuleDescriptor,
+  ValidateOptions,
+  ValidationRule,
+  RuleRunResult,
+  ValidationPipelineResult,
+} from './validation.js';
+
+export type {
+  InputFileEntry,
+  OutputFileEntry,
+  SkillEntry,
+  ChildReference,
+  InterruptSection,
+  CheckpointIR,
+  AgentPhaseIR,
+  PhaseIR,
+  ChildPromptIR,
+} from './compile-ir.js';

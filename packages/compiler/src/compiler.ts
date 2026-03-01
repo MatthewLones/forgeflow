@@ -1,4 +1,19 @@
-import type { FlowNode, FlowBudget } from '@forgeflow/types';
+import type {
+  FlowNode,
+  FlowBudget,
+  FlowGraph,
+  PhaseIR,
+  AgentPhaseIR,
+  CheckpointIR,
+  ChildPromptIR,
+  InputFileEntry,
+  OutputFileEntry,
+  SkillEntry,
+  ChildReference,
+} from '@forgeflow/types';
+import { artifactName } from '@forgeflow/types';
+import { generateMarkdown } from './generate.js';
+import { resolvePhaseIR, resolveChildPromptIRs } from './resolve.js';
 
 export interface CompileContext {
   /** Flow name for the prompt header */
@@ -9,6 +24,69 @@ export interface CompileContext {
   inputSources: Map<string, string>;
   /** Flow-level budget (fallback when node has no budget) */
   flowBudget: FlowBudget;
+}
+
+const DEFAULT_RULES = [
+  'Write all output files to the output/ directory',
+  'Read input files from the input/ directory',
+  'Verify each output file exists before finishing',
+  'Stay within budget constraints',
+];
+
+/**
+ * Derive a CompileContext from a FlowGraph for a specific node.
+ * Eliminates the need for callers to manually build inputSources maps.
+ */
+export function createCompileContext(graph: FlowGraph, nodeId: string): CompileContext {
+  const sym = graph.symbols.get(nodeId);
+  if (!sym) throw new Error(`Node "${nodeId}" not found in FlowGraph`);
+
+  const inputSources = new Map<string, string>();
+  for (const file of sym.declaredInputs) {
+    const artifact = graph.artifacts.get(file);
+    inputSources.set(file, artifact?.producerId ?? 'user_upload');
+  }
+
+  return {
+    flowName: graph.flow.name,
+    globalSkills: graph.flow.skills,
+    inputSources,
+    flowBudget: graph.flow.budget,
+  };
+}
+
+/**
+ * Compile a phase prompt using FlowGraph.
+ * Returns both the structured IR and the rendered markdown.
+ * This is the preferred API for new code.
+ */
+export function compilePhase(
+  nodeId: string,
+  graph: FlowGraph,
+): { ir: PhaseIR; markdown: string } {
+  const sym = graph.symbols.get(nodeId);
+  if (!sym) throw new Error(`Node "${nodeId}" not found in FlowGraph`);
+  const ir = resolvePhaseIR(sym.node, graph);
+  return { ir, markdown: generateMarkdown(ir) };
+}
+
+/**
+ * Compile all child prompt files for a node using FlowGraph.
+ * Returns both the structured IRs and the rendered markdowns.
+ * This is the preferred API for new code.
+ */
+export function compileChildPrompts(
+  nodeId: string,
+  graph: FlowGraph,
+): { irs: ChildPromptIR; markdowns: Map<string, string> } {
+  const sym = graph.symbols.get(nodeId);
+  if (!sym) throw new Error(`Node "${nodeId}" not found in FlowGraph`);
+  const irs = resolveChildPromptIRs(sym.node, graph);
+  const markdowns = new Map<string, string>();
+  for (const [filename, ir] of irs.children) {
+    markdowns.set(filename, generateMarkdown(ir));
+  }
+  return { irs, markdowns };
 }
 
 /**
@@ -28,300 +106,142 @@ RULES:
 
 /**
  * Compile a per-phase markdown prompt for a single FlowNode.
- * This is a pure function — no side effects, easy to test.
+ * Internally builds a PhaseIR then generates markdown.
+ *
+ * @deprecated Use compilePhase(nodeId, graph) for the FlowGraph-based API.
  */
 export function compilePhasePrompt(node: FlowNode, context: CompileContext): string {
-  if (node.type === 'checkpoint') {
-    return compileCheckpointPrompt(node, context);
-  }
-
-  const sections: string[] = [];
-
-  // Header
-  sections.push(`# Phase: ${node.name}`);
-  sections.push('');
-  sections.push(`You are executing one phase of the "${context.flowName}" workflow.`);
-
-  // Task
-  sections.push('');
-  sections.push('## Your Task');
-  sections.push(node.instructions);
-
-  // Input Files
-  if (node.config.inputs.length > 0) {
-    sections.push('');
-    sections.push('## Input Files');
-    for (const file of node.config.inputs) {
-      const source = context.inputSources.get(file) ?? 'unknown';
-      const sourceLabel = source === 'user_upload' ? 'user upload' : `from ${source}`;
-      sections.push(`- input/${file} (${sourceLabel})`);
-    }
-  }
-
-  // Output Files
-  if (node.config.outputs.length > 0) {
-    sections.push('');
-    sections.push('## Output Files (you MUST produce these)');
-    for (const file of node.config.outputs) {
-      sections.push(`- output/${file}`);
-    }
-  }
-
-  // Skills
-  const allSkills = mergeSkills(context.globalSkills, node.config.skills);
-  if (allSkills.length > 0) {
-    sections.push('');
-    sections.push('## Skills Available');
-    for (const skill of allSkills) {
-      sections.push(`- ${skill} (in skills/${skill}/)`);
-    }
-  }
-
-  // Budget
-  const budget = node.config.budget ?? {
-    maxTurns: context.flowBudget.maxTurns,
-    maxBudgetUsd: context.flowBudget.maxBudgetUsd,
-  };
-  sections.push('');
-  sections.push('## Budget');
-  sections.push(`- Max turns: ${budget.maxTurns}`);
-  sections.push(`- Max cost: $${budget.maxBudgetUsd.toFixed(2)}`);
-
-  // Rules
-  sections.push('');
-  sections.push('## Rules');
-  sections.push('- Write all output files to the output/ directory');
-  sections.push('- Read input files from the input/ directory');
-  sections.push('- Verify each output file exists before finishing');
-  sections.push('- Stay within budget constraints');
-
-  // Subagents (children) — reference to prompt files
-  if (node.children.length > 0) {
-    sections.push('');
-    compileChildrenReferenceSection(sections, node.children);
-  }
-
-  // Interrupt Protocol (only if node or children have interrupts)
-  if (hasInterrupts(node)) {
-    sections.push('');
-    sections.push('## Interrupt Protocol');
-    sections.push('');
-    sections.push('If you need human input during execution:');
-    sections.push('');
-    sections.push('1. Write your interrupt to output/__INTERRUPT__{your_id}.json');
-    sections.push('   Follow the interrupt schema (type, title, context, questions/items/etc.)');
-    sections.push('');
-    sections.push('2. After writing the interrupt file, poll for the answer:');
-    sections.push('   - Check for output/__ANSWER__{your_id}.json every 5 seconds');
-    sections.push('   - When the file appears, read it and continue your work');
-    sections.push('');
-    sections.push('3. While polling, do NOT proceed with work that depends on the answer.');
-    sections.push('   You MAY continue work on independent tasks if applicable.');
-  }
-
-  return sections.join('\n');
+  const ir = resolvePhaseIRFromContext(node, context, false);
+  return generateMarkdown(ir);
 }
 
 /**
  * Compile self-contained prompt files for all descendants of a node.
  * Returns Map<filename, content> where filename is `{childId}.md`.
- * Each child gets its own prompt file; if the child has children, its prompt
- * references their prompt files (not inline), keeping each file O(n) for
- * its direct children instead of O(n^depth).
+ *
+ * @deprecated Use compileChildPrompts(nodeId, graph) for the FlowGraph-based API.
  */
 export function compileChildPromptFiles(
   node: FlowNode,
   context: CompileContext,
 ): Map<string, string> {
   const prompts = new Map<string, string>();
-  collectChildPrompts(node.children, context, prompts);
+  collectChildPromptsViaIR(node.children, context, prompts);
   return prompts;
 }
 
-function collectChildPrompts(
+// --- Legacy CompileContext → IR adapter ---
+
+function collectChildPromptsViaIR(
   children: FlowNode[],
   context: CompileContext,
   prompts: Map<string, string>,
 ): void {
   for (const child of children) {
-    prompts.set(`${child.id}.md`, compileChildPromptFile(child, context));
+    const ir = resolvePhaseIRFromContext(child, context, true);
+    prompts.set(`${child.id}.md`, generateMarkdown(ir));
     if (child.children.length > 0) {
-      collectChildPrompts(child.children, context, prompts);
+      collectChildPromptsViaIR(child.children, context, prompts);
     }
   }
 }
 
-/**
- * Generate a self-contained prompt file for a single child agent.
- */
-function compileChildPromptFile(child: FlowNode, context: CompileContext): string {
-  const sections: string[] = [];
-
-  sections.push(`# Subagent: ${child.name}`);
-  sections.push('');
-  sections.push('## Your Task');
-  sections.push(child.instructions);
-
-  if (child.config.inputs.length > 0) {
-    sections.push('');
-    sections.push('## Input Files');
-    for (const file of child.config.inputs) {
-      sections.push(`- input/${file}`);
-    }
+function resolvePhaseIRFromContext(
+  node: FlowNode,
+  context: CompileContext,
+  isChild: boolean,
+): PhaseIR {
+  if (node.type === 'checkpoint') {
+    return resolveCheckpointIRFromContext(node, context);
   }
 
-  if (child.config.outputs.length > 0) {
-    sections.push('');
-    sections.push('## Output Files (you MUST produce these)');
-    for (const file of child.config.outputs) {
-      sections.push(`- output/${file}`);
-    }
-  }
+  const allSkillNames = [...new Set([...context.globalSkills, ...node.config.skills])];
 
-  const childSkills = mergeSkills(context.globalSkills, child.config.skills);
-  if (childSkills.length > 0) {
-    sections.push('');
-    sections.push('## Skills Available');
-    for (const skill of childSkills) {
-      sections.push(`- ${skill} (in skills/${skill}/)`);
-    }
-  }
+  const inputs: InputFileEntry[] = node.config.inputs.map((ref) => {
+    const file = artifactName(ref);
+    const source = context.inputSources.get(file) ?? 'unknown';
+    return {
+      file,
+      source,
+      sourceLabel: source === 'user_upload' ? 'user upload' : `from ${source}`,
+    };
+  });
 
-  if (child.config.budget) {
-    sections.push('');
-    sections.push('## Budget');
-    sections.push(`- Max turns: ${child.config.budget.maxTurns}`);
-    sections.push(`- Max cost: $${child.config.budget.maxBudgetUsd.toFixed(2)}`);
-  }
+  const outputs: OutputFileEntry[] = node.config.outputs.map((ref) => ({
+    file: artifactName(ref),
+  }));
 
-  sections.push('');
-  sections.push('## Rules');
-  sections.push('- Write all output files to the output/ directory');
-  sections.push('- Read input files from the input/ directory');
-  sections.push('- Verify each output file exists before finishing');
-  sections.push('- Stay within budget constraints');
+  const skills: SkillEntry[] = allSkillNames.map((name) => ({
+    name,
+    path: `skills/${name}/`,
+  }));
 
-  if (child.children.length > 0) {
-    sections.push('');
-    compileChildrenReferenceSection(sections, child.children);
-  }
+  const budget = isChild
+    ? node.config.budget
+    : (node.config.budget ?? {
+        maxTurns: context.flowBudget.maxTurns,
+        maxBudgetUsd: context.flowBudget.maxBudgetUsd,
+      });
 
-  if (hasInterrupts(child)) {
-    sections.push('');
-    sections.push('## Interrupt Protocol');
-    sections.push('');
-    sections.push('If you need human input during execution:');
-    sections.push('');
-    sections.push('1. Write your interrupt to output/__INTERRUPT__{your_id}.json');
-    sections.push('   Follow the interrupt schema (type, title, context, questions/items/etc.)');
-    sections.push('');
-    sections.push('2. After writing the interrupt file, poll for the answer:');
-    sections.push('   - Check for output/__ANSWER__{your_id}.json every 5 seconds');
-    sections.push('   - When the file appears, read it and continue your work');
-    sections.push('');
-    sections.push('3. While polling, do NOT proceed with work that depends on the answer.');
-    sections.push('   You MAY continue work on independent tasks if applicable.');
-  }
+  const children: ChildReference[] = node.children.map((child, i) => ({
+    index: i + 1,
+    id: child.id,
+    name: child.name,
+    promptFile: `prompts/${child.id}.md`,
+    outputs: child.config.outputs.map(artifactName),
+  }));
 
-  return sections.join('\n');
+  const ir: AgentPhaseIR = {
+    kind: 'agent',
+    nodeId: node.id,
+    name: node.name,
+    isChild,
+    flowName: context.flowName,
+    instructions: node.instructions,
+    inputs,
+    outputs,
+    skills,
+    budget,
+    rules: DEFAULT_RULES,
+    children,
+    interrupt: { enabled: hasInterrupts(node) },
+  };
+
+  return ir;
 }
 
-/**
- * Compile a children reference section for the parent prompt.
- * Instead of inlining all child instructions, outputs a metadata table
- * pointing to separate prompt files in prompts/.
- */
-function compileChildrenReferenceSection(
-  sections: string[],
-  children: FlowNode[],
-): void {
-  sections.push(`## Subagents — Launch All ${children.length} Concurrently`);
-  sections.push('');
-  sections.push('Each subagent\'s full instructions are in a separate prompt file:');
-  sections.push('');
-  sections.push('| # | Name | ID | Prompt File |');
-  sections.push('|---|------|----|-------------|');
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i];
-    sections.push(`| ${i + 1} | ${child.name} | ${child.id} | prompts/${child.id}.md |`);
-  }
+function resolveCheckpointIRFromContext(
+  node: FlowNode,
+  context: CompileContext,
+): CheckpointIR {
+  const filesToPresent: InputFileEntry[] = node.config.inputs.map((ref) => {
+    const file = artifactName(ref);
+    const source = context.inputSources.get(file) ?? 'unknown';
+    return {
+      file,
+      source,
+      sourceLabel: source === 'user_upload' ? 'user upload' : `from ${source}`,
+    };
+  });
 
-  sections.push('');
-  sections.push('**Progress tracking:** Before launching each subagent, write a marker file:');
-  sections.push('```');
-  for (const child of children) {
-    sections.push(
-      `echo '{"childId":"${child.id}","childName":"${child.name}","parentPath":[]}' > output/__CHILD_START__${child.id}.json`,
-    );
-  }
-  sections.push('```');
-  sections.push('After each subagent completes, write:');
-  sections.push('```');
-  for (const child of children) {
-    const outputs = child.config.outputs.map((f) => `"${f}"`).join(',');
-    sections.push(
-      `echo '{"childId":"${child.id}","childName":"${child.name}","outputFiles":[${outputs}]}' > output/__CHILD_DONE__${child.id}.json`,
-    );
-  }
-  sections.push('```');
+  const expectedInputs: OutputFileEntry[] = node.config.outputs.map((ref) => ({
+    file: artifactName(ref),
+  }));
 
-  sections.push('');
-  sections.push(
-    'Launch all subagents concurrently using the Task tool. Read each subagent\'s prompt file from the prompts/ directory and pass it as the task instructions.',
-  );
-  sections.push('After all complete, verify all output files exist.');
-}
-
-/**
- * Compile a checkpoint prompt — no agent run needed, just metadata.
- */
-function compileCheckpointPrompt(node: FlowNode, context: CompileContext): string {
-  const sections: string[] = [];
-
-  sections.push(`# Checkpoint: ${node.name}`);
-  sections.push('');
-  sections.push('This is a checkpoint node — execution pauses here for human input.');
-  sections.push('');
-  sections.push('## Instructions');
-  sections.push(node.instructions);
-
-  if (node.config.inputs.length > 0) {
-    sections.push('');
-    sections.push('## Files to Present');
-    for (const file of node.config.inputs) {
-      const source = context.inputSources.get(file) ?? 'unknown';
-      const sourceLabel = source === 'user_upload' ? 'user upload' : `from ${source}`;
-      sections.push(`- ${file} (${sourceLabel})`);
-    }
-  }
-
-  if (node.config.outputs.length > 0) {
-    sections.push('');
-    sections.push('## Expected User Input');
-    for (const file of node.config.outputs) {
-      sections.push(`- ${file}`);
-    }
-  }
-
-  if (node.config.presentation) {
-    sections.push('');
-    sections.push('## Presentation');
-    sections.push(`**Title:** ${node.config.presentation.title}`);
-    sections.push(`**Sections:** ${node.config.presentation.sections.join(', ')}`);
-  }
-
-  return sections.join('\n');
-}
-
-/**
- * Merge global skills with node-specific skills, deduplicated.
- */
-function mergeSkills(globalSkills: string[], nodeSkills: string[]): string[] {
-  return [...new Set([...globalSkills, ...nodeSkills])];
+  return {
+    kind: 'checkpoint',
+    nodeId: node.id,
+    name: node.name,
+    instructions: node.instructions,
+    filesToPresent,
+    expectedInputs,
+    presentation: node.config.presentation,
+  };
 }
 
 /**
  * Check if a node or any of its children have interrupt configs.
+ * Used only in the legacy CompileContext path.
  */
 function hasInterrupts(node: FlowNode): boolean {
   if (node.config.interrupts && node.config.interrupts.length > 0) return true;

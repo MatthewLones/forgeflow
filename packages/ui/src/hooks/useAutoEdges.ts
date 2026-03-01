@@ -5,7 +5,8 @@
  */
 
 import { useEffect, useRef } from 'react';
-import type { FlowNode, FlowEdge, ArtifactSchema } from '@forgeflow/types';
+import type { FlowNode, FlowEdge } from '@forgeflow/types';
+import { artifactName } from '@forgeflow/types';
 import { useFlow } from '../context/FlowContext';
 
 /** Map artifact name → top-level node ID that produces it */
@@ -14,8 +15,7 @@ function buildProducerMap(nodes: FlowNode[]): Map<string, string> {
 
   function walkOutputs(node: FlowNode, topLevelId: string) {
     for (const out of node.config.outputs ?? []) {
-      const name = typeof out === 'string' ? out : (out as ArtifactSchema).name;
-      if (name) map.set(name, topLevelId);
+      map.set(artifactName(out), topLevelId);
     }
     for (const child of node.children) {
       walkOutputs(child, topLevelId);
@@ -35,11 +35,9 @@ function buildConsumerMap(nodes: FlowNode[]): Map<string, Set<string>> {
 
   function walkInputs(node: FlowNode, topLevelId: string) {
     for (const inp of node.config.inputs ?? []) {
-      const name = typeof inp === 'string' ? inp : (inp as ArtifactSchema).name;
-      if (name) {
-        if (!map.has(name)) map.set(name, new Set());
-        map.get(name)!.add(topLevelId);
-      }
+      const name = artifactName(inp);
+      if (!map.has(name)) map.set(name, new Set());
+      map.get(name)!.add(topLevelId);
     }
     for (const child of node.children) {
       walkInputs(child, topLevelId);

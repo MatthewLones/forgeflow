@@ -1,92 +1,36 @@
-import type { FlowDefinition, ValidationResult, ExecutionPlan, FlowDiagnostic } from '@forgeflow/types';
-import { checkStructural } from './passes/structural.js';
-import { checkOutputUniqueness } from './passes/output.js';
-import { checkDependencies } from './passes/dependency.js';
-import { checkBudget } from './passes/budget.js';
-import { checkInterrupts } from './passes/interrupt.js';
-import { buildExecutionPlan } from './execution-plan.js';
+import type { FlowDefinition, ValidationResult, ValidateOptions } from '@forgeflow/types';
+import { buildFlowGraph } from './flow-graph.js';
+import { createDefaultRegistry } from './rule-registry.js';
+import { runValidationPipeline } from './rule-runner.js';
 
-export interface ValidateOptions {
-  /** Files the user will upload at runtime (first-node inputs). */
-  userUploadFiles?: string[];
-}
+// Re-export ValidateOptions from types (was previously defined here)
+export type { ValidateOptions } from '@forgeflow/types';
 
+/**
+ * Validate a flow definition.
+ *
+ * Backwards-compatible: same signature, same return type.
+ * Internally delegates to the pluggable pipeline.
+ */
 export function validateFlow(
   flow: FlowDefinition,
   options?: ValidateOptions,
 ): ValidationResult {
-  const errors: FlowDiagnostic[] = [];
-  const warnings: FlowDiagnostic[] = [];
-  const suggestions: FlowDiagnostic[] = [];
-
-  function collect(diagnostics: FlowDiagnostic[]) {
-    for (const d of diagnostics) {
-      if (d.severity === 'error') errors.push(d);
-      else if (d.severity === 'warning') warnings.push(d);
-      else suggestions.push(d);
-    }
-  }
-
-  // Pass 1: Structural checks (DAG, IDs, edges, node rules)
-  collect(checkStructural(flow));
-
-  // Pass 2: Output uniqueness (must run before dependency check)
-  collect(checkOutputUniqueness(flow));
-
-  // Pass 3: Dependency resolution (every input traces to a source)
-  // Only run if structural checks passed (need valid DAG for topological sort)
-  if (errors.length === 0) {
-    // If no user upload files specified, treat first node's inputs as implicitly available
-    const userUploads = options?.userUploadFiles ?? inferUserUploads(flow);
-    collect(checkDependencies(flow, userUploads));
-  }
-
-  // Pass 4: Budget checks
-  collect(checkBudget(flow));
-
-  // Pass 5: Interrupt validation
-  collect(checkInterrupts(flow));
-
-  // Build execution plan only if valid
-  let executionPlan: ExecutionPlan | null = null;
-  if (errors.length === 0) {
-    executionPlan = buildExecutionPlan(flow);
-  }
-
-  return { valid: errors.length === 0, errors, warnings, suggestions, executionPlan };
+  const graph = buildFlowGraph(flow);
+  const rules = createDefaultRegistry();
+  const { result } = runValidationPipeline(graph, rules, options);
+  return result;
 }
 
 /**
- * When no user upload files are specified, infer them from entry nodes only.
- * Entry nodes are those with no incoming edges — their unresolved inputs are user uploads.
- * Mid-flow nodes with unresolved inputs are real errors, not implicit uploads.
+ * Validate with full pipeline introspection.
+ * Returns per-rule results, the flow graph, and timing data.
  */
-function inferUserUploads(flow: FlowDefinition): string[] {
-  // Find entry nodes (no incoming edges)
-  const nodesWithIncoming = new Set(flow.edges.map((e) => e.to));
-  const entryNodes = flow.nodes.filter((n) => !nodesWithIncoming.has(n.id));
-
-  // Collect all outputs across all nodes
-  const allOutputs = new Set<string>();
-  function collectOutputs(nodes: import('@forgeflow/types').FlowNode[]) {
-    for (const node of nodes) {
-      for (const file of node.config.outputs) {
-        allOutputs.add(file);
-      }
-      collectOutputs(node.children);
-    }
-  }
-  collectOutputs(flow.nodes);
-
-  // Only entry node inputs that aren't produced by any node are user uploads
-  const userUploads: string[] = [];
-  for (const node of entryNodes) {
-    for (const file of node.config.inputs) {
-      if (!allOutputs.has(file) && !userUploads.includes(file)) {
-        userUploads.push(file);
-      }
-    }
-  }
-
-  return userUploads;
+export function validateFlowDetailed(
+  flow: FlowDefinition,
+  options?: ValidateOptions,
+) {
+  const graph = buildFlowGraph(flow);
+  const rules = createDefaultRegistry();
+  return runValidationPipeline(graph, rules, options);
 }

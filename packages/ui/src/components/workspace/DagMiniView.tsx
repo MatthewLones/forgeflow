@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useEffect, Fragment } from 'react';
+import { useState, useRef, useMemo, useCallback, useEffect, Fragment } from 'react';
 import {
   ReactFlow,
   Background,
@@ -62,10 +62,46 @@ function FitViewOnResize() {
   return null;
 }
 
+/** Expand icon (arrows pointing outward) */
+function ExpandIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9,1 13,1 13,5" />
+      <polyline points="5,13 1,13 1,9" />
+      <line x1="13" y1="1" x2="8" y2="6" />
+      <line x1="1" y1="13" x2="6" y2="8" />
+    </svg>
+  );
+}
+
+/** Collapse icon (arrows pointing inward) */
+function CollapseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4,10 1,13" />
+      <polyline points="10,4 13,1" />
+      <polyline points="10,1 10,4 13,4" />
+      <polyline points="4,13 4,10 1,10" />
+    </svg>
+  );
+}
+
 export function DagMiniView(props: { height?: number }) {
   const { state, selectNode } = useFlow();
-  const { dagBreadcrumb, dagDrillIn, dagDrillOut, dagDrillRoot } = useDag();
+  const { dagBreadcrumb, dagDrillIn, dagDrillOut, dagDrillForward, dagDrillRoot, canGoForward } = useDag();
   const { activeTabId, selectAgent } = useLayout();
+  const [fullscreen, setFullscreen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close fullscreen on Escape
+  useEffect(() => {
+    if (!fullscreen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreen(false);
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [fullscreen]);
 
   // Resolve which nodes/edges to display based on breadcrumb
   const displayData = useMemo(() => {
@@ -104,8 +140,17 @@ export function DagMiniView(props: { height?: number }) {
   );
 
   const rfEdges = useMemo(
-    () => flowEdgesToReactFlow(displayData.edges),
-    [displayData.edges],
+    () => {
+      const edges = flowEdgesToReactFlow(displayData.edges);
+      if (activeTabId) {
+        return edges.map((e) => ({
+          ...e,
+          data: { ...e.data, selectedNodeId: activeTabId },
+        }));
+      }
+      return edges;
+    },
+    [displayData.edges, activeTabId],
   );
 
   const handleNodeClick: NodeMouseHandler = useCallback(
@@ -134,10 +179,23 @@ export function DagMiniView(props: { height?: number }) {
     });
   }, [dagBreadcrumb, state.flow.nodes]);
 
+  // Fullscreen uses larger controls
+  const ctrlSize = fullscreen ? 'text-xs px-2.5 py-1' : 'text-[10px] px-1.5 py-0.5';
+  const crumbSize = fullscreen ? 'text-xs' : 'text-[10px]';
+
+  const containerClass = fullscreen
+    ? 'fixed inset-0 z-50 bg-[var(--color-canvas-bg)]'
+    : 'border-b border-[var(--color-border)] bg-[var(--color-canvas-bg)] relative';
+
+  const containerStyle = fullscreen
+    ? undefined
+    : { height: props.height ?? 128 };
+
   return (
-    <div className="border-b border-[var(--color-border)] bg-[var(--color-canvas-bg)] relative" style={{ height: props.height ?? 128 }}>
+    <div ref={containerRef} className={containerClass} style={containerStyle}>
+      {/* Breadcrumbs */}
       {dagBreadcrumb.length > 0 && (
-        <div className="absolute top-1 left-2 z-10 flex items-center gap-1 text-[10px] bg-white/80 backdrop-blur-sm rounded px-1.5 py-0.5">
+        <div className={`absolute top-2 left-3 z-10 flex items-center gap-1 ${crumbSize} bg-white/80 backdrop-blur-sm rounded-md px-2 py-1 shadow-sm`}>
           <button
             type="button"
             onClick={dagDrillRoot}
@@ -147,7 +205,7 @@ export function DagMiniView(props: { height?: number }) {
           </button>
           {breadcrumbNames.map((crumb, i) => (
             <Fragment key={crumb.id}>
-              <span className="text-[var(--color-text-muted)]">&gt;</span>
+              <span className="text-[var(--color-text-muted)]">/</span>
               {i === breadcrumbNames.length - 1 ? (
                 <span className="text-[var(--color-text-primary)] font-medium">{crumb.name}</span>
               ) : (
@@ -169,18 +227,29 @@ export function DagMiniView(props: { height?: number }) {
         </div>
       )}
 
-      {dagBreadcrumb.length > 0 && (
+      {/* Top-right controls */}
+      <div className="absolute top-2 right-3 z-10 flex items-center gap-1.5">
+        {dagBreadcrumb.length > 0 && (
+          <button
+            type="button"
+            onClick={dagDrillOut}
+            className={`${ctrlSize} text-[var(--color-text-muted)] hover:text-[var(--color-node-agent)] bg-white/80 backdrop-blur-sm rounded-md shadow-sm transition-colors`}
+          >
+            Back
+          </button>
+        )}
         <button
           type="button"
-          onClick={dagDrillOut}
-          className="absolute top-1 right-2 z-10 text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-node-agent)] bg-white/80 backdrop-blur-sm rounded px-1.5 py-0.5 transition-colors"
+          onClick={() => setFullscreen((f) => !f)}
+          title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}
+          className={`${ctrlSize} text-[var(--color-text-muted)] hover:text-[var(--color-node-agent)] bg-white/80 backdrop-blur-sm rounded-md shadow-sm transition-colors flex items-center gap-1`}
         >
-          Back
+          {fullscreen ? <CollapseIcon /> : <ExpandIcon />}
         </button>
-      )}
+      </div>
 
       <ReactFlow
-        key={dagBreadcrumb.join('/')}
+        key={`${dagBreadcrumb.join('/')}:${fullscreen}`}
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
@@ -188,16 +257,16 @@ export function DagMiniView(props: { height?: number }) {
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
+        fitViewOptions={{ padding: fullscreen ? 0.4 : 0.3 }}
         panOnDrag
         zoomOnScroll
         zoomOnDoubleClick={false}
         zoomOnPinch
-        nodesDraggable={false}
+        nodesDraggable={fullscreen}
         nodesConnectable={false}
         elementsSelectable
         minZoom={0.1}
-        maxZoom={1}
+        maxZoom={fullscreen ? 2 : 1}
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={0.5} />

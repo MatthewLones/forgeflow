@@ -1,14 +1,17 @@
-import type { FlowDefinition, FlowNode, FlowDiagnostic } from '@forgeflow/types';
+import type { FlowGraph, FlowDiagnostic } from '@forgeflow/types';
 import { createDiagnostic } from '../diagnostics.js';
 
-export function checkBudget(flow: FlowDefinition): FlowDiagnostic[] {
+export function checkBudget(graph: FlowGraph): FlowDiagnostic[] {
   const diagnostics: FlowDiagnostic[] = [];
+  const flow = graph.flow;
 
   let totalNodeTurns = 0;
   let totalNodeUsd = 0;
   let nodesWithBudget = 0;
 
-  function checkNode(node: FlowNode) {
+  for (const [nodeId, sym] of graph.symbols) {
+    const node = sym.node;
+
     if (node.config.budget) {
       totalNodeTurns += node.config.budget.maxTurns;
       totalNodeUsd += node.config.budget.maxBudgetUsd;
@@ -18,21 +21,22 @@ export function checkBudget(flow: FlowDefinition): FlowDiagnostic[] {
         createDiagnostic(
           'NO_NODE_BUDGET',
           'suggestion',
-          `Node "${node.id}" has no budget. Flow-level budget will apply.`,
-          { nodeId: node.id, field: 'config.budget' },
+          `Node "${nodeId}" has no budget. Flow-level budget will apply.`,
+          { nodeId, field: 'config.budget' },
           `Consider adding a per-node budget for cost predictability. Flow budget: $${flow.budget.maxBudgetUsd.toFixed(2)}, ${flow.budget.maxTurns} turns.`,
         ),
       );
     }
 
     // Check children budget sum vs parent budget
-    if (node.children.length > 0 && node.config.budget) {
+    if (sym.childIds.length > 0 && node.config.budget) {
       let childTurns = 0;
       let childUsd = 0;
-      for (const child of node.children) {
-        if (child.config.budget) {
-          childTurns += child.config.budget.maxTurns;
-          childUsd += child.config.budget.maxBudgetUsd;
+      for (const childId of sym.childIds) {
+        const childSym = graph.symbols.get(childId);
+        if (childSym?.node.config.budget) {
+          childTurns += childSym.node.config.budget.maxTurns;
+          childUsd += childSym.node.config.budget.maxBudgetUsd;
         }
       }
       if (childTurns > node.config.budget.maxTurns) {
@@ -40,8 +44,8 @@ export function checkBudget(flow: FlowDefinition): FlowDiagnostic[] {
           createDiagnostic(
             'CHILDREN_BUDGET_EXCEEDS_PARENT',
             'warning',
-            `Children of "${node.id}" have a combined budget of ${childTurns} turns, which exceeds the parent's ${node.config.budget.maxTurns} turns.`,
-            { nodeId: node.id, field: 'config.budget' },
+            `Children of "${nodeId}" have a combined budget of ${childTurns} turns, which exceeds the parent's ${node.config.budget.maxTurns} turns.`,
+            { nodeId, field: 'config.budget' },
             'Increase the parent budget or reduce children budgets.',
           ),
         );
@@ -51,17 +55,13 @@ export function checkBudget(flow: FlowDefinition): FlowDiagnostic[] {
           createDiagnostic(
             'CHILDREN_BUDGET_EXCEEDS_PARENT',
             'warning',
-            `Children of "${node.id}" have a combined budget of $${childUsd.toFixed(2)}, which exceeds the parent's $${node.config.budget.maxBudgetUsd.toFixed(2)}.`,
-            { nodeId: node.id, field: 'config.budget' },
+            `Children of "${nodeId}" have a combined budget of $${childUsd.toFixed(2)}, which exceeds the parent's $${node.config.budget.maxBudgetUsd.toFixed(2)}.`,
+            { nodeId, field: 'config.budget' },
             'Increase the parent budget or reduce children budgets.',
           ),
         );
       }
     }
-  }
-
-  for (const node of flow.nodes) {
-    checkNode(node);
   }
 
   // Sum of node budgets vs flow budget

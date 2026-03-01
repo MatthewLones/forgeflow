@@ -18,9 +18,26 @@ const interruptConfigSchema = z.object({
   timeoutMs: z.number().int().positive().optional(),
 });
 
+const artifactFieldSchema = z.object({
+  key: z.string().min(1),
+  type: z.enum(['string', 'number', 'boolean', 'array', 'object']),
+  description: z.string(),
+  required: z.boolean().optional(),
+});
+
+const artifactSchemaSchema = z.object({
+  name: z.string().min(1),
+  format: z.enum(['json', 'markdown', 'text', 'csv', 'pdf', 'image', 'binary']),
+  description: z.string(),
+  fields: z.array(artifactFieldSchema).optional(),
+});
+
+/** An input/output entry: plain filename string or full ArtifactSchema */
+const artifactRefSchema = z.union([z.string(), artifactSchemaSchema]);
+
 const nodeConfigSchema = z.object({
-  inputs: z.array(z.string()),
-  outputs: z.array(z.string()),
+  inputs: z.array(artifactRefSchema),
+  outputs: z.array(artifactRefSchema),
   skills: z.array(z.string()),
   budget: nodeBudgetSchema.optional(),
   estimatedDuration: z.string().optional(),
@@ -38,20 +55,6 @@ const flowNodeSchema: z.ZodType<unknown> = z.lazy(() =>
     children: z.array(flowNodeSchema),
   }),
 );
-
-const artifactFieldSchema = z.object({
-  key: z.string().min(1),
-  type: z.enum(['string', 'number', 'boolean', 'array', 'object']),
-  description: z.string(),
-  required: z.boolean().optional(),
-});
-
-const artifactSchemaSchema = z.object({
-  name: z.string().min(1),
-  format: z.enum(['json', 'markdown', 'text', 'csv', 'pdf', 'image', 'binary']),
-  description: z.string(),
-  fields: z.array(artifactFieldSchema).optional(),
-});
 
 const flowEdgeSchema = z.object({
   from: z.string().min(1),

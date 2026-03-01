@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { compilePhasePrompt, compileChildPromptFiles, FORGEFLOW_PHASE_SYSTEM_PROMPT } from '../src/compiler.js';
+import { compilePhasePrompt, compileChildPromptFiles, createCompileContext, FORGEFLOW_PHASE_SYSTEM_PROMPT } from '../src/compiler.js';
 import type { CompileContext } from '../src/compiler.js';
-import type { FlowNode } from '@forgeflow/types';
+import type { FlowNode, FlowDefinition } from '@forgeflow/types';
+import { buildFlowGraph } from '../../validator/src/flow-graph.js';
 
 function makeContext(overrides: Partial<CompileContext> = {}): CompileContext {
   return {
@@ -431,5 +432,59 @@ describe('compileChildPromptFiles', () => {
     const node = makeNode();
     const files = compileChildPromptFiles(node, makeContext());
     expect(files.size).toBe(0);
+  });
+});
+
+function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
+  return {
+    id: 'test_flow',
+    name: 'Test Flow',
+    version: '1.0.0',
+    description: 'Test flow',
+    nodes: [],
+    edges: [],
+    skills: [],
+    budget: { maxTurns: 100, maxBudgetUsd: 10, timeoutMs: 300000 },
+    ...overrides,
+  };
+}
+
+describe('createCompileContext', () => {
+  it('derives context from FlowGraph for a node with inputs', () => {
+    const flow = makeFlow({
+      nodes: [
+        makeNode({ id: 'a', config: { inputs: [], outputs: ['data.json'], skills: [] } }),
+        makeNode({ id: 'b', config: { inputs: ['data.json'], outputs: ['result.json'], skills: [] } }),
+      ],
+      edges: [{ from: 'a', to: 'b' }],
+      skills: ['global-skill'],
+    });
+    const graph = buildFlowGraph(flow);
+    const ctx = createCompileContext(graph, 'b');
+
+    expect(ctx.flowName).toBe('Test Flow');
+    expect(ctx.globalSkills).toEqual(['global-skill']);
+    expect(ctx.inputSources.get('data.json')).toBe('a');
+    expect(ctx.flowBudget.maxTurns).toBe(100);
+  });
+
+  it('marks inputs as user_upload when not produced by any node', () => {
+    const flow = makeFlow({
+      nodes: [
+        makeNode({ id: 'a', config: { inputs: ['upload.pdf'], outputs: ['result.json'], skills: [] } }),
+      ],
+    });
+    const graph = buildFlowGraph(flow);
+    const ctx = createCompileContext(graph, 'a');
+
+    expect(ctx.inputSources.get('upload.pdf')).toBe('user_upload');
+  });
+
+  it('throws for unknown nodeId', () => {
+    const flow = makeFlow({
+      nodes: [makeNode({ id: 'a' })],
+    });
+    const graph = buildFlowGraph(flow);
+    expect(() => createCompileContext(graph, 'nonexistent')).toThrow('not found');
   });
 });

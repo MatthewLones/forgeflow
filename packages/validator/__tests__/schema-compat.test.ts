@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkSchemaCompat } from '../src/passes/schema-compat.js';
+import { buildFlowGraph } from '../src/flow-graph.js';
 import type { FlowDefinition, ArtifactSchema } from '@forgeflow/types';
 
 function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
@@ -25,7 +26,7 @@ describe('checkSchemaCompat', () => {
       ],
       edges: [{ from: 'a', to: 'b' }],
     });
-    const diagnostics = checkSchemaCompat(flow);
+    const diagnostics = checkSchemaCompat(buildFlowGraph(flow));
     expect(diagnostics).toHaveLength(0);
   });
 
@@ -45,7 +46,7 @@ describe('checkSchemaCompat', () => {
       ],
       edges: [{ from: 'a', to: 'b' }],
     });
-    const diagnostics = checkSchemaCompat(flow);
+    const diagnostics = checkSchemaCompat(buildFlowGraph(flow));
     expect(diagnostics).toHaveLength(0);
   });
 
@@ -59,7 +60,7 @@ describe('checkSchemaCompat', () => {
       ],
       edges: [{ from: 'a', to: 'b' }],
     });
-    const diagnostics = checkSchemaCompat(flow);
+    const diagnostics = checkSchemaCompat(buildFlowGraph(flow));
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].code).toBe('SCHEMA_FORMAT_MISMATCH');
     expect(diagnostics[0].severity).toBe('warning');
@@ -84,7 +85,7 @@ describe('checkSchemaCompat', () => {
       ],
       edges: [{ from: 'a', to: 'b' }],
     });
-    const diagnostics = checkSchemaCompat(flow);
+    const diagnostics = checkSchemaCompat(buildFlowGraph(flow));
     const missingField = diagnostics.filter((d) => d.code === 'SCHEMA_MISSING_FIELD');
     expect(missingField).toHaveLength(1);
     expect(missingField[0].message).toContain('title');
@@ -109,7 +110,7 @@ describe('checkSchemaCompat', () => {
       ],
       edges: [{ from: 'a', to: 'b' }],
     });
-    const diagnostics = checkSchemaCompat(flow);
+    const diagnostics = checkSchemaCompat(buildFlowGraph(flow));
     expect(diagnostics).toHaveLength(0);
   });
 
@@ -129,7 +130,7 @@ describe('checkSchemaCompat', () => {
       ],
       edges: [],
     });
-    const diagnostics = checkSchemaCompat(flow);
+    const diagnostics = checkSchemaCompat(buildFlowGraph(flow));
     expect(diagnostics.some((d) => d.code === 'SCHEMA_FORMAT_MISMATCH')).toBe(true);
   });
 });

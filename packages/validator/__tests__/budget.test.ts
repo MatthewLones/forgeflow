@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkBudget } from '../src/passes/budget.js';
+import { buildFlowGraph } from '../src/flow-graph.js';
 import type { FlowDefinition } from '@forgeflow/types';
 
 function makeFlow(overrides: Partial<FlowDefinition> = {}): FlowDefinition {
@@ -24,7 +25,7 @@ describe('checkBudget', () => {
         { id: 'b', type: 'agent', name: 'B', instructions: 'Do.', config: { inputs: [], outputs: [], skills: [], budget: { maxTurns: 60, maxBudgetUsd: 5 } }, children: [] },
       ],
     });
-    const diagnostics = checkBudget(flow);
+    const diagnostics = checkBudget(buildFlowGraph(flow));
     const warnings = diagnostics.filter((d) => d.severity === 'warning');
     expect(warnings.some((w) => w.code === 'BUDGET_SUM_EXCEEDS_FLOW')).toBe(true);
   });
@@ -35,7 +36,7 @@ describe('checkBudget', () => {
         { id: 'a', type: 'agent', name: 'A', instructions: 'Do.', config: { inputs: [], outputs: [], skills: [] }, children: [] },
       ],
     });
-    const diagnostics = checkBudget(flow);
+    const diagnostics = checkBudget(buildFlowGraph(flow));
     const suggestions = diagnostics.filter((d) => d.severity === 'suggestion');
     expect(suggestions.some((s) => s.code === 'NO_NODE_BUDGET')).toBe(true);
   });
@@ -56,7 +57,7 @@ describe('checkBudget', () => {
         },
       ],
     });
-    const diagnostics = checkBudget(flow);
+    const diagnostics = checkBudget(buildFlowGraph(flow));
     const warnings = diagnostics.filter((d) => d.severity === 'warning');
     expect(warnings.some((w) => w.code === 'CHILDREN_BUDGET_EXCEEDS_PARENT')).toBe(true);
   });
@@ -68,7 +69,7 @@ describe('checkBudget', () => {
         { id: 'b', type: 'agent', name: 'B', instructions: 'Do.', config: { inputs: [], outputs: [], skills: [], budget: { maxTurns: 40, maxBudgetUsd: 4 } }, children: [] },
       ],
     });
-    const diagnostics = checkBudget(flow);
+    const diagnostics = checkBudget(buildFlowGraph(flow));
     const errors = diagnostics.filter((d) => d.severity === 'error');
     const warnings = diagnostics.filter((d) => d.severity === 'warning');
     expect(errors).toHaveLength(0);
