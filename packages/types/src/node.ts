@@ -1,4 +1,4 @@
-export type NodeType = 'agent' | 'checkpoint' | 'merge';
+export type NodeType = 'agent' | 'checkpoint';
 
 export type InterruptType = 'approval' | 'qa' | 'selection' | 'review' | 'escalation';
 
@@ -85,7 +85,7 @@ export interface NodeConfig {
 export interface FlowNode {
   /** Unique identifier (snake_case: [a-z][a-z0-9_]*) */
   id: string;
-  /** "agent", "checkpoint", or "merge" */
+  /** "agent" or "checkpoint" */
   type: NodeType;
   /** Display name on canvas */
   name: string;

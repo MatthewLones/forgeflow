@@ -364,4 +364,79 @@ describe('buildFlowGraph', () => {
     expect(graph.userUploadFiles).toEqual(['doc.pdf']);
     expect(graph.symbols.size).toBe(1);
   });
+
+  it('computes childTopoOrder for independent children', () => {
+    const flow = makeFlow({
+      nodes: [
+        makeNode({
+          id: 'parent',
+          config: { inputs: ['data.json'], outputs: ['a.json', 'b.json'], skills: [] },
+          children: [
+            makeNode({ id: 'child_a', config: { inputs: ['data.json'], outputs: ['a.json'], skills: [] } }),
+            makeNode({ id: 'child_b', config: { inputs: ['data.json'], outputs: ['b.json'], skills: [] } }),
+          ],
+        }),
+      ],
+    });
+
+    const graph = buildFlowGraph(flow);
+    const sym = graph.symbols.get('parent')!;
+
+    // Independent children: topo order = declaration order
+    expect(sym.childTopoOrder).toEqual(['child_a', 'child_b']);
+    expect(sym.childCycle).toBe(false);
+  });
+
+  it('computes childTopoOrder for dependent children', () => {
+    const flow = makeFlow({
+      nodes: [
+        makeNode({
+          id: 'parent',
+          config: { inputs: ['data.json'], outputs: ['a.json', 'b.json'], skills: [] },
+          children: [
+            // Declared in reverse order but child_b depends on child_a
+            makeNode({ id: 'child_b', config: { inputs: ['a.json'], outputs: ['b.json'], skills: [] } }),
+            makeNode({ id: 'child_a', config: { inputs: ['data.json'], outputs: ['a.json'], skills: [] } }),
+          ],
+        }),
+      ],
+    });
+
+    const graph = buildFlowGraph(flow);
+    const sym = graph.symbols.get('parent')!;
+
+    // child_a must come before child_b because child_b depends on a.json
+    expect(sym.childTopoOrder.indexOf('child_a')).toBeLessThan(sym.childTopoOrder.indexOf('child_b'));
+    expect(sym.childCycle).toBe(false);
+  });
+
+  it('detects cycles among children', () => {
+    const flow = makeFlow({
+      nodes: [
+        makeNode({
+          id: 'parent',
+          config: { inputs: ['data.json'], outputs: ['a.json', 'b.json'], skills: [] },
+          children: [
+            makeNode({ id: 'child_a', config: { inputs: ['b.json'], outputs: ['a.json'], skills: [] } }),
+            makeNode({ id: 'child_b', config: { inputs: ['a.json'], outputs: ['b.json'], skills: [] } }),
+          ],
+        }),
+      ],
+    });
+
+    const graph = buildFlowGraph(flow);
+    const sym = graph.symbols.get('parent')!;
+
+    expect(sym.childCycle).toBe(true);
+  });
+
+  it('sets empty childTopoOrder for nodes with no children', () => {
+    const flow = makeFlow({
+      nodes: [makeNode({ id: 'solo' })],
+    });
+
+    const graph = buildFlowGraph(flow);
+    expect(graph.symbols.get('solo')!.childTopoOrder).toEqual([]);
+    expect(graph.symbols.get('solo')!.childCycle).toBe(false);
+  });
 });

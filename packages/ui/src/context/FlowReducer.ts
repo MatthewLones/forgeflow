@@ -40,7 +40,7 @@ export function createDefaultNode(type: NodeType, id: string): FlowNode {
   const base: FlowNode = {
     id,
     type,
-    name: type === 'agent' ? 'New Agent' : type === 'checkpoint' ? 'New Checkpoint' : 'New Merge',
+    name: type === 'agent' ? 'New Agent' : 'New Checkpoint',
     instructions: '',
     config: {
       inputs: [],

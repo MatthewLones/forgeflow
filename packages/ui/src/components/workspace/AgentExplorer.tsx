@@ -54,19 +54,16 @@ function topologicalOrder(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
 const TYPE_COLORS: Record<NodeType, string> = {
   agent: 'bg-[var(--color-node-agent)]',
   checkpoint: 'bg-[var(--color-node-checkpoint)]',
-  merge: 'bg-[var(--color-node-merge)]',
 };
 
 const TYPE_BORDER_COLORS: Record<NodeType, string> = {
   agent: 'border-l-[var(--color-node-agent)]',
   checkpoint: 'border-l-[var(--color-node-checkpoint)]',
-  merge: 'border-l-[var(--color-node-merge)]',
 };
 
 const TYPE_GLYPHS: Record<NodeType, string> = {
   agent: 'A',
   checkpoint: 'C',
-  merge: 'M',
 };
 
 /* ── Section Header ──────────────────────────────────────── */
@@ -415,7 +412,7 @@ function SkillTreeItem({ skill, allSkills, depth, activeTabId, visited, onSelect
         onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, skill.name); }}
         className={`w-full flex items-center gap-1.5 py-1 text-left text-xs transition-colors relative cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-node-agent)] focus-visible:ring-inset ${
           isActive
-            ? 'bg-[var(--color-node-merge)]/8 text-[var(--color-text-primary)] border-l-2 border-l-[var(--color-node-merge)]'
+            ? 'bg-[var(--color-node-agent)]/8 text-[var(--color-text-primary)] border-l-2 border-l-[var(--color-node-agent)]'
             : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] border-l-2 border-l-transparent'
         }`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
@@ -448,7 +445,7 @@ function SkillTreeItem({ skill, allSkills, depth, activeTabId, visited, onSelect
 
         {/* Skill glyph */}
         <span className={`w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold shrink-0 ${
-          isActive ? 'text-white bg-[var(--color-node-merge)]' : 'text-[var(--color-text-muted)] bg-[var(--color-canvas-bg)]'
+          isActive ? 'text-white bg-[var(--color-node-agent)]' : 'text-[var(--color-text-muted)] bg-[var(--color-canvas-bg)]'
         }`}>
           S
         </span>
@@ -742,7 +739,6 @@ export function AgentExplorer() {
         items = [
           { label: 'New Agent', onClick: () => addNode('agent', { x: 0, y: 0 }) },
           { label: 'New Checkpoint', onClick: () => addNode('checkpoint', { x: 0, y: 0 }) },
-          { label: 'New Merge', onClick: () => addNode('merge', { x: 0, y: 0 }) },
         ];
       } else if (section === 'skills') {
         items = [
@@ -910,7 +906,7 @@ export function AgentExplorer() {
                 <div className="ml-6 text-[10px] text-[var(--color-text-muted)] space-y-0.5 mt-0.5">
                   {artifact.producers.length > 0 ? (
                     <div>
-                      <span className="text-[var(--color-node-merge)]">{'\u2192 '}</span>
+                      <span className="text-[var(--color-node-agent)]">{'\u2192 '}</span>
                       produced by: {artifact.producers.join(', ')}
                     </div>
                   ) : (

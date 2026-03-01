@@ -6,7 +6,8 @@ import { createDiagnostic, findClosestMatch } from '../diagnostics.js';
  * - User upload (provided in userUploadFiles), OR
  * - Output of a prior node (by topological order)
  *
- * For children: inputs must come from the parent's inputs (children run in parallel).
+ * For children: inputs must come from the parent's available files
+ * or from a sibling in an earlier wave (topological order among siblings).
  */
 export function checkDependencies(
   graph: FlowGraph,
@@ -21,9 +22,22 @@ export function checkDependencies(
   for (const nodeId of graph.topoOrder) {
     const sym = graph.symbols.get(nodeId)!;
 
+    // Collect outputs produced by this node's own descendants.
+    // A parent can declare inputs that its children produce — children execute
+    // within the parent's phase, so their outputs are available for aggregation.
+    const descendantOutputs = new Set<string>();
+    for (const descId of sym.descendantIds) {
+      const descSym = graph.symbols.get(descId);
+      if (descSym) {
+        for (const output of descSym.declaredOutputs) {
+          descendantOutputs.add(output);
+        }
+      }
+    }
+
     // Check top-level node inputs
     for (const inputFile of sym.declaredInputs) {
-      if (!availableFiles.has(inputFile)) {
+      if (!availableFiles.has(inputFile) && !descendantOutputs.has(inputFile)) {
         const closest = findClosestMatch(inputFile, allOutputFiles);
         const closestProducer = closest ? graph.artifacts.get(closest)?.producerId : undefined;
         const suggestion = closest && closestProducer
@@ -43,49 +57,51 @@ export function checkDependencies(
       }
     }
 
-    // Check children inputs — children can only read from parent's inputs
+    // Check children inputs using wave-aware ordering.
+    // Children are topologically sorted by sibling I/O dependencies.
+    // A child can read from: parent's available files, OR earlier-wave sibling outputs.
     if (sym.childIds.length > 0) {
-      const parentAvailable = new Set([
+      // Detect cycles among children
+      if (sym.childCycle) {
+        diagnostics.push(
+          createDiagnostic(
+            'CHILD_CYCLE',
+            'error',
+            `Children of node "${nodeId}" have circular dependencies among each other.`,
+            { nodeId, field: 'children' },
+            'Restructure child dependencies to avoid cycles.',
+          ),
+        );
+      }
+
+      // Walk children in topo order — each child's outputs become available to later children
+      const childAvailable = new Set([
         ...availableFiles,
         ...sym.declaredInputs,
       ]);
 
-      for (const childId of sym.childIds) {
+      for (const childId of sym.childTopoOrder) {
         const childSym = graph.symbols.get(childId)!;
         for (const inputFile of childSym.declaredInputs) {
-          if (!parentAvailable.has(inputFile)) {
-            // Check if it's a sibling's output (not allowed — children run in parallel)
-            const isSiblingOutput = sym.childIds.some((siblingId) => {
-              if (siblingId === childId) return false;
-              const siblingSym = graph.symbols.get(siblingId);
-              return siblingSym ? siblingSym.declaredOutputs.includes(inputFile) : false;
-            });
-
-            if (isSiblingOutput) {
-              diagnostics.push(
-                createDiagnostic(
-                  'CHILD_DEPENDS_ON_SIBLING',
-                  'error',
-                  `Child node "${childId}" depends on "${inputFile}" which is output by a sibling. Children run in parallel and cannot depend on each other's outputs.`,
-                  { nodeId: childId, field: 'config.inputs' },
-                  'Move this dependency to the parent node, or restructure the flow so this input comes from a prior phase.',
-                ),
-              );
-            } else {
-              const closest = findClosestMatch(inputFile, [...parentAvailable]);
-              diagnostics.push(
-                createDiagnostic(
-                  'UNRESOLVED_INPUT',
-                  'error',
-                  `Child node "${childId}" declares input "${inputFile}" which is not available from the parent node's inputs or prior phases.`,
-                  { nodeId: childId, field: 'config.inputs' },
-                  closest
-                    ? `Did you mean "${closest}"?`
-                    : 'Ensure this file is available as a parent input or from a prior phase.',
-                ),
-              );
-            }
+          if (!childAvailable.has(inputFile)) {
+            const closest = findClosestMatch(inputFile, [...childAvailable]);
+            diagnostics.push(
+              createDiagnostic(
+                'UNRESOLVED_INPUT',
+                'error',
+                `Child node "${childId}" declares input "${inputFile}" which is not available from the parent node's inputs, prior phases, or earlier-wave siblings.`,
+                { nodeId: childId, field: 'config.inputs' },
+                closest
+                  ? `Did you mean "${closest}"?`
+                  : 'Ensure this file is available as a parent input, from a prior phase, or from an earlier-wave sibling.',
+              ),
+            );
           }
+        }
+
+        // This child's outputs become available to later children in topo order
+        for (const output of childSym.declaredOutputs) {
+          childAvailable.add(output);
         }
       }
     }

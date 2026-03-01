@@ -48,7 +48,7 @@ const nodeConfigSchema = z.object({
 const flowNodeSchema: z.ZodType<unknown> = z.lazy(() =>
   z.object({
     id: z.string().regex(nodeIdPattern, 'Node ID must be snake_case: [a-z][a-z0-9_]*'),
-    type: z.enum(['agent', 'checkpoint', 'merge']),
+    type: z.enum(['agent', 'checkpoint']),
     name: z.string().min(1),
     instructions: z.string(),
     config: nodeConfigSchema,

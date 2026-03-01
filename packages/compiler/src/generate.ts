@@ -107,16 +107,55 @@ function generateChildrenReferenceSection(
   sections: string[],
   children: ChildReference[],
 ): void {
-  sections.push(`## Subagents — Launch All ${children.length} Concurrently`);
-  sections.push('');
-  sections.push('Each subagent\'s full instructions are in a separate prompt file:');
-  sections.push('');
-  sections.push('| # | Name | ID | Prompt File |');
-  sections.push('|---|------|----|-------------|');
-  for (const child of children) {
-    sections.push(`| ${child.index} | ${child.name} | ${child.id} | ${child.promptFile} |`);
+  // Group children by wave
+  const maxWave = Math.max(...children.map((c) => c.wave));
+  const isSingleWave = maxWave === 0;
+
+  if (isSingleWave) {
+    // All children are independent — use original concurrent format
+    sections.push(`## Subagents — Launch All ${children.length} Concurrently`);
+  } else {
+    sections.push(`## Subagents — ${maxWave + 1} Waves`);
   }
 
+  sections.push('');
+  sections.push('Each subagent\'s full instructions are in a separate prompt file.');
+
+  if (isSingleWave) {
+    // Single wave — flat table
+    sections.push('');
+    sections.push('| # | Name | ID | Prompt File |');
+    sections.push('|---|------|----|-------------|');
+    for (const child of children) {
+      sections.push(`| ${child.index} | ${child.name} | ${child.id} | ${child.promptFile} |`);
+    }
+  } else {
+    // Multiple waves — grouped tables
+    for (let wave = 0; wave <= maxWave; wave++) {
+      const waveChildren = children.filter((c) => c.wave === wave);
+      if (waveChildren.length === 0) continue;
+
+      sections.push('');
+      if (wave === 0) {
+        sections.push(`### Wave ${wave + 1} — Launch Concurrently`);
+      } else {
+        sections.push(`### Wave ${wave + 1} — Launch After Wave ${wave} Completes`);
+      }
+      sections.push('');
+      sections.push('| # | Name | ID | Prompt File |');
+      sections.push('|---|------|----|-------------|');
+      for (const child of waveChildren) {
+        sections.push(`| ${child.index} | ${child.name} | ${child.id} | ${child.promptFile} |`);
+      }
+
+      if (wave < maxWave) {
+        sections.push('');
+        sections.push(`**Wait for ALL Wave ${wave + 1} subagents to complete before proceeding to Wave ${wave + 2}.**`);
+      }
+    }
+  }
+
+  // Progress tracking markers (same for all waves)
   sections.push('');
   sections.push('**Progress tracking:** Before launching each subagent, write a marker file:');
   sections.push('```');
@@ -137,9 +176,16 @@ function generateChildrenReferenceSection(
   sections.push('```');
 
   sections.push('');
-  sections.push(
-    'Launch all subagents concurrently using the Task tool. Read each subagent\'s prompt file from the prompts/ directory and pass it as the task instructions.',
-  );
+  if (isSingleWave) {
+    sections.push(
+      'Launch all subagents concurrently using the Task tool. Read each subagent\'s prompt file from the prompts/ directory and pass it as the task instructions.',
+    );
+  } else {
+    sections.push(
+      'Launch each wave\'s subagents concurrently using the Task tool. Read each subagent\'s prompt file from the prompts/ directory and pass it as the task instructions.',
+    );
+    sections.push('**IMPORTANT:** Wait for each wave to fully complete before launching the next wave.');
+  }
   sections.push('After all complete, verify all output files exist.');
 }
 

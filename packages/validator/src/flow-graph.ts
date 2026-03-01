@@ -1,6 +1,7 @@
 import type {
   FlowDefinition,
   FlowNode,
+  FlowEdge,
   FlowGraph,
   FlowSymbol,
   ArtifactEntry,
@@ -77,6 +78,8 @@ export function buildFlowGraph(flow: FlowDefinition): FlowGraph {
         declaredInputs,
         outputSchemas,
         inputSchemas,
+        childTopoOrder: childIds, // default to declaration order; recomputed in Step 1b
+        childCycle: false,
       };
 
       symbols.set(node.id, symbol);
@@ -88,6 +91,33 @@ export function buildFlowGraph(flow: FlowDefinition): FlowGraph {
   }
 
   walkNodes(flow.nodes, 0, null);
+
+  // --- Step 1b: Build child dependency edges and topo-sort siblings ---
+  for (const [, sym] of symbols) {
+    if (sym.childIds.length === 0) continue;
+
+    // Build implicit edges: if child B's input matches child A's output → A must run before B
+    const childEdges: FlowEdge[] = [];
+    for (const childId of sym.childIds) {
+      const childSym = symbols.get(childId)!;
+      for (const inputFile of childSym.declaredInputs) {
+        for (const siblingId of sym.childIds) {
+          if (siblingId === childId) continue;
+          const siblingSym = symbols.get(siblingId)!;
+          if (siblingSym.declaredOutputs.includes(inputFile)) {
+            childEdges.push({ from: siblingId, to: childId });
+          }
+        }
+      }
+    }
+
+    if (childEdges.length > 0) {
+      const childTopo = topologicalSort(sym.childIds, childEdges);
+      (sym as { childTopoOrder: readonly string[] }).childTopoOrder = childTopo.sorted;
+      (sym as { childCycle: boolean }).childCycle = childTopo.hasCycle;
+    }
+    // If no edges, childTopoOrder stays as declaration order and childCycle stays false
+  }
 
   // --- Step 2: Topological sort on top-level nodes ---
   const topoResult = topologicalSort(

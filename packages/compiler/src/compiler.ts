@@ -189,6 +189,7 @@ function resolvePhaseIRFromContext(
     name: child.name,
     promptFile: `prompts/${child.id}.md`,
     outputs: child.config.outputs.map(artifactName),
+    wave: 0, // Legacy API: no FlowGraph, assume all concurrent
   }));
 
   const ir: AgentPhaseIR = {

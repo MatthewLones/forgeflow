@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { FlowProvider, useFlow } from '../context/FlowContext';
 import { DagProvider, useDag } from '../context/DagContext';
 import { LayoutProvider } from '../context/LayoutContext';
+import { RunProvider } from '../context/RunContext';
 import { useProjectStore } from '../context/ProjectStore';
 import { AgentExplorer } from '../components/workspace/AgentExplorer';
 import { WorkspaceToolbar } from '../components/workspace/WorkspaceToolbar';
@@ -85,7 +86,7 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
 
   return (
     <div className="h-screen flex flex-col">
-      <WorkspaceToolbar onToggleAI={() => setAiPanelOpen((v) => !v)} aiPanelOpen={aiPanelOpen} saveStatus={saveStatus} />
+      <WorkspaceToolbar projectId={projectId} onToggleAI={() => setAiPanelOpen((v) => !v)} aiPanelOpen={aiPanelOpen} saveStatus={saveStatus} />
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left sidebar — Agent Explorer */}
@@ -222,7 +223,9 @@ export function WorkspacePage() {
     <FlowProvider key={id} flow={flow} positions={positions}>
       <DagProvider>
         <LayoutProvider>
-          <WorkspaceContent projectId={id} />
+          <RunProvider>
+            <WorkspaceContent projectId={id} />
+          </RunProvider>
         </LayoutProvider>
       </DagProvider>
     </FlowProvider>

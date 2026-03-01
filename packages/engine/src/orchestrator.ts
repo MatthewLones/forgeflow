@@ -259,7 +259,7 @@ export class FlowOrchestrator {
         };
       }
 
-      // --- Agent/Merge node: execute in workspace ---
+      // --- Agent node: execute in workspace ---
       emit({ type: 'phase_started', nodeId: node.id, nodeName: node.name, phaseNumber: i });
 
       // Compile prompt via FlowGraph

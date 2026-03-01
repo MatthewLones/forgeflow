@@ -18,6 +18,9 @@ import { SkillSlashEditor } from '../skill-editor/SkillSlashEditor';
 import { ImportSuggestionsBar } from '../skill-editor/ImportSuggestionsBar';
 import { useSyncSkill } from '../../hooks/useSyncSkill';
 import { useParams } from 'react-router-dom';
+import { ValidationPanel } from './ValidationPanel';
+import { CompilePreviewPanel } from './CompilePreviewPanel';
+import { RunPanel } from './RunPanel';
 
 /* ── Panel components ─────────────────────────────────────── */
 
@@ -277,7 +280,7 @@ function FileChip({
       onClick={onClick}
       className={`px-2 py-0.5 text-[11px] rounded shrink-0 transition-colors ${
         isActive
-          ? 'bg-[var(--color-node-merge)]/12 text-[var(--color-node-merge)] font-medium'
+          ? 'bg-[var(--color-node-agent)]/12 text-[var(--color-node-agent)] font-medium'
           : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)]'
       }`}
     >
@@ -313,6 +316,9 @@ const components = {
   'skill-editor': SkillEditorPanel,
   'artifact-editor': ArtifactEditorPanel,
   'reference-viewer': ReferenceViewerPanel,
+  'validation-panel': ValidationPanel,
+  'compile-panel': CompilePreviewPanel,
+  'run-panel': RunPanel,
   'empty': EmptyPanel,
 };
 
@@ -320,9 +326,12 @@ const components = {
 
 const TYPE_DOT_COLORS: Record<string, string> = {
   agent: 'bg-[var(--color-node-agent)]',
-  skill: 'bg-[var(--color-node-merge)]',
+  skill: 'bg-amber-500',
   reference: 'bg-[var(--color-node-checkpoint)]',
   artifact: 'bg-purple-500',
+  validation: 'bg-emerald-500',
+  compile: 'bg-indigo-500',
+  run: 'bg-blue-500',
 };
 
 function ForgeFlowTab(props: IDockviewPanelHeaderProps<EditorTab>) {

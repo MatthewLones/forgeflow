@@ -50,8 +50,9 @@ export interface CompilePhase {
   nodeId: string;
   nodeName: string;
   nodeType: string;
+  ir?: unknown;
   prompt: string;
-  childPrompts: Record<string, string>;
+  childPrompts: Record<string, { ir?: unknown; markdown: string }>;
 }
 
 export interface CompilePreviewResult {

@@ -87,7 +87,7 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
     (type: NodeType, position: { x: number; y: number }) => {
       const existingIds = collectAllIds(state.flow.nodes);
       const id = generateNodeId(
-        type === 'agent' ? 'new_agent' : type === 'checkpoint' ? 'new_checkpoint' : 'new_merge',
+        type === 'agent' ? 'new_agent' : 'new_checkpoint',
         existingIds,
       );
       const node = createDefaultNode(type, id);

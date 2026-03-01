@@ -130,8 +130,8 @@ describe('generateMarkdown', () => {
   it('includes subagent reference table with progress markers', () => {
     const ir = makeAgentIR({
       children: [
-        { index: 1, id: 'child_a', name: 'Researcher A', promptFile: 'prompts/child_a.md', outputs: ['a.json'] },
-        { index: 2, id: 'child_b', name: 'Researcher B', promptFile: 'prompts/child_b.md', outputs: ['b.json'] },
+        { index: 1, id: 'child_a', name: 'Researcher A', promptFile: 'prompts/child_a.md', outputs: ['a.json'], wave: 0 },
+        { index: 2, id: 'child_b', name: 'Researcher B', promptFile: 'prompts/child_b.md', outputs: ['b.json'], wave: 0 },
       ],
     });
     const md = generateMarkdown(ir);
@@ -143,5 +143,25 @@ describe('generateMarkdown', () => {
     expect(md).toContain('__CHILD_DONE__child_a.json');
     expect(md).toContain('__CHILD_START__child_b.json');
     expect(md).toContain('__CHILD_DONE__child_b.json');
+  });
+
+  it('generates wave-structured prompt for multi-wave children', () => {
+    const ir = makeAgentIR({
+      children: [
+        { index: 1, id: 'analyzer', name: 'Analyzer', promptFile: 'prompts/analyzer.md', outputs: ['analysis.json'], wave: 0 },
+        { index: 2, id: 'validator', name: 'Validator', promptFile: 'prompts/validator.md', outputs: ['valid.json'], wave: 0 },
+        { index: 3, id: 'synthesizer', name: 'Synthesizer', promptFile: 'prompts/synthesizer.md', outputs: ['synthesis.json'], wave: 1 },
+      ],
+    });
+    const md = generateMarkdown(ir);
+
+    expect(md).toContain('## Subagents — 2 Waves');
+    expect(md).toContain('### Wave 1 — Launch Concurrently');
+    expect(md).toContain('### Wave 2 — Launch After Wave 1 Completes');
+    expect(md).toContain('Wait for ALL Wave 1 subagents to complete before proceeding to Wave 2.');
+    expect(md).toContain('| 1 | Analyzer | analyzer |');
+    expect(md).toContain('| 2 | Validator | validator |');
+    expect(md).toContain('| 3 | Synthesizer | synthesizer |');
+    expect(md).toContain('IMPORTANT:** Wait for each wave to fully complete');
   });
 });

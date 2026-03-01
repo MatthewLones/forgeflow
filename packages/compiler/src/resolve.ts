@@ -1,6 +1,7 @@
 import type {
   FlowNode,
   FlowGraph,
+  FlowSymbol,
   PhaseIR,
   AgentPhaseIR,
   CheckpointIR,
@@ -104,13 +105,20 @@ function resolveAgentIR(
         maxBudgetUsd: graph.flow.budget.maxBudgetUsd,
       });
 
-  // Children references
-  const children: ChildReference[] = node.children.map((child, i) => ({
+  // Children references — sorted by topo order with wave numbers
+  const childWaves = computeChildWaves(node.children, sym);
+  const sortedChildren = [...node.children].sort((a, b) => {
+    const aIdx = sym.childTopoOrder.indexOf(a.id);
+    const bIdx = sym.childTopoOrder.indexOf(b.id);
+    return aIdx - bIdx;
+  });
+  const children: ChildReference[] = sortedChildren.map((child, i) => ({
     index: i + 1,
     id: child.id,
     name: child.name,
     promptFile: `prompts/${child.id}.md`,
     outputs: child.config.outputs.map(artifactName),
+    wave: childWaves.get(child.id) ?? 0,
   }));
 
   return {
@@ -152,4 +160,39 @@ export function resolveChildPromptIRs(
 
   walk(node.children);
   return { children };
+}
+
+/**
+ * Compute wave numbers for children based on sibling I/O dependencies.
+ * Wave 0 = no sibling dependencies, wave N = depends on at least one wave N-1 child.
+ * Processes children in parent's childTopoOrder.
+ */
+function computeChildWaves(children: FlowNode[], parentSym: FlowSymbol): Map<string, number> {
+  const waves = new Map<string, number>();
+  if (children.length === 0) return waves;
+
+  // Build sibling output → producer map
+  const outputToChild = new Map<string, string>();
+  for (const child of children) {
+    for (const output of child.config.outputs.map(artifactName)) {
+      outputToChild.set(output, child.id);
+    }
+  }
+
+  // Process in topo order, computing wave as max(wave of sibling deps) + 1
+  for (const childId of parentSym.childTopoOrder) {
+    const child = children.find((c) => c.id === childId);
+    if (!child) continue;
+
+    let maxDepWave = -1;
+    for (const input of child.config.inputs.map(artifactName)) {
+      const producerId = outputToChild.get(input);
+      if (producerId && producerId !== childId) {
+        maxDepWave = Math.max(maxDepWave, waves.get(producerId) ?? 0);
+      }
+    }
+    waves.set(childId, maxDepWave + 1);
+  }
+
+  return waves;
 }

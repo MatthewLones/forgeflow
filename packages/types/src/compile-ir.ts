@@ -40,6 +40,8 @@ export interface ChildReference {
   promptFile: string;
   /** Expected output filenames */
   outputs: string[];
+  /** Wave number (0 = no sibling deps, 1+ = depends on earlier wave) */
+  wave: number;
 }
 
 /** Whether interrupt protocol should be included */
@@ -58,7 +60,7 @@ export interface CheckpointIR {
   presentation?: CheckpointPresentation;
 }
 
-/** IR for an agent or merge node */
+/** IR for an agent node */
 export interface AgentPhaseIR {
   kind: 'agent';
   nodeId: string;
@@ -79,7 +81,7 @@ export interface AgentPhaseIR {
   budget?: NodeBudget;
   /** Static rules text entries */
   rules: string[];
-  /** Children (subagents) to launch concurrently */
+  /** Children (subagents) grouped into waves by dependency order */
   children: ChildReference[];
   /** Interrupt protocol */
   interrupt: InterruptSection;

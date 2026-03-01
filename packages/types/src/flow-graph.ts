@@ -29,6 +29,10 @@ export interface FlowSymbol {
   outputSchemas: ReadonlyMap<string, ArtifactSchema>;
   /** Artifact schemas for inputs (keyed by filename) */
   inputSchemas: ReadonlyMap<string, ArtifactSchema>;
+  /** Topological ordering of direct children based on sibling I/O dependencies (empty if no children) */
+  childTopoOrder: readonly string[];
+  /** Whether direct children have circular dependencies among themselves */
+  childCycle: boolean;
 }
 
 /** Maps an artifact filename to its production/consumption metadata */

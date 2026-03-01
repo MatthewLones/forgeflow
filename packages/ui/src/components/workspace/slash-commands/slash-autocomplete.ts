@@ -162,16 +162,6 @@ export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAge
         }
       }
 
-      // /merge option
-      if ('merge'.includes(query)) {
-        options.push({
-          label: 'merge',
-          type: 'keyword',
-          apply: '/merge',
-          detail: 'merge point',
-        });
-      }
-
       // /interrupt options
       for (const int of INTERRUPT_TYPES) {
         const full = `interrupt:${int.name}`;
@@ -200,7 +190,7 @@ export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAge
       // Offer "Create skill" if query doesn't match a built-in command or existing skill
       if (query && !skills.some((s) => s.toLowerCase() === query)
           && !BLOCK_OPTIONS.some((o) => o.name === query)
-          && !query.startsWith('interrupt') && query !== 'merge') {
+          && !query.startsWith('interrupt')) {
         options.push({
           label: `Create "${query}"`,
           type: 'class',

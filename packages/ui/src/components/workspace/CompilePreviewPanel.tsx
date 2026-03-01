@@ -9,7 +9,6 @@ import { markdown } from '@codemirror/lang-markdown';
 const NODE_TYPE_GLYPH: Record<string, string> = {
   agent: 'A',
   checkpoint: 'C',
-  merge: 'M',
 };
 
 export function CompilePreviewPanel(props: IDockviewPanelProps<EditorTab>) {
@@ -57,7 +56,7 @@ function CompilePreviewContent({ phases }: { phases: CompilePhase[] }) {
 
   const childKeys = Object.keys(phase.childPrompts);
   const promptContent = selectedPromptKey
-    ? phase.childPrompts[selectedPromptKey] ?? ''
+    ? phase.childPrompts[selectedPromptKey]?.markdown ?? ''
     : phase.prompt;
 
   // Reset child prompt selection when switching phases
@@ -88,9 +87,7 @@ function CompilePreviewContent({ phases }: { phases: CompilePhase[] }) {
               className={`w-4 h-4 rounded text-[9px] font-bold flex items-center justify-center shrink-0 ${
                 p.nodeType === 'checkpoint'
                   ? 'bg-[var(--color-node-checkpoint)]/15 text-[var(--color-node-checkpoint)]'
-                  : p.nodeType === 'merge'
-                    ? 'bg-[var(--color-node-merge)]/15 text-[var(--color-node-merge)]'
-                    : 'bg-[var(--color-node-agent)]/15 text-[var(--color-node-agent)]'
+                  : 'bg-[var(--color-node-agent)]/15 text-[var(--color-node-agent)]'
               }`}
             >
               {NODE_TYPE_GLYPH[p.nodeType] ?? 'A'}

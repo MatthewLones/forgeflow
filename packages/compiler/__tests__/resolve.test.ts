@@ -233,6 +233,7 @@ describe('resolvePhaseIR', () => {
       name: 'Researcher A',
       promptFile: 'prompts/child_a.md',
       outputs: ['a.json'],
+      wave: 0,
     });
     expect(ir.children[1].index).toBe(2);
   });

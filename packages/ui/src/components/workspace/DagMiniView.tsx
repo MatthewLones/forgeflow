@@ -13,6 +13,7 @@ import type { FlowNode } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
 import { useDag } from '../../context/DagContext';
 import { useLayout } from '../../context/LayoutContext';
+import { useRun } from '../../context/RunContext';
 import {
   autoLayout,
   childrenLayout,
@@ -21,13 +22,11 @@ import {
 } from '../../lib/flow-to-reactflow';
 import { AgentNode } from '../canvas/nodes/AgentNode';
 import { CheckpointNode } from '../canvas/nodes/CheckpointNode';
-import { MergeNode } from '../canvas/nodes/MergeNode';
 import { FlowEdge } from '../canvas/edges/FlowEdge';
 
 const nodeTypes: NodeTypes = {
   agent: AgentNode,
   checkpoint: CheckpointNode,
-  merge: MergeNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -90,6 +89,7 @@ export function DagMiniView(props: { height?: number }) {
   const { state, selectNode } = useFlow();
   const { dagBreadcrumb, dagDrillIn, dagDrillOut, dagDrillForward, dagDrillRoot, canGoForward } = useDag();
   const { activeTabId, selectAgent } = useLayout();
+  const { run } = useRun();
   const [fullscreen, setFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -131,12 +131,16 @@ export function DagMiniView(props: { height?: number }) {
   const rfNodes = useMemo(
     () => {
       const nodes = flowNodesToReactFlow(displayData.nodes, positions);
-      if (activeTabId) {
-        return nodes.map((n) => ({ ...n, selected: n.id === activeTabId }));
-      }
-      return nodes;
+      return nodes.map((n) => ({
+        ...n,
+        selected: n.id === activeTabId,
+        data: {
+          ...n.data,
+          runStatus: run.nodeStatuses[n.id] ?? 'idle',
+        },
+      }));
     },
-    [displayData.nodes, positions, activeTabId],
+    [displayData.nodes, positions, activeTabId, run.nodeStatuses],
   );
 
   const rfEdges = useMemo(

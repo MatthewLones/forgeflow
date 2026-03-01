@@ -8,18 +8,34 @@ import {
   type ReactNode,
 } from 'react';
 import type { DockviewApi } from 'dockview-react';
+import type { ValidationResult } from '@forgeflow/types';
+import type { CompilePreviewResult } from '../lib/api-client';
 
 /* ── Tab types ────────────────────────────────────────────── */
 
 export interface EditorTab {
   id: string;
-  type: 'agent' | 'skill' | 'reference' | 'artifact';
+  type: 'agent' | 'skill' | 'reference' | 'artifact' | 'validation' | 'compile' | 'run';
   label: string;
   nodeId?: string;
   skillName?: string;
   refPath?: string;
   artifactName?: string;
+  validationResult?: ValidationResult;
+  compileResult?: CompilePreviewResult;
 }
+
+/* ── Component map ────────────────────────────────────────── */
+
+const COMPONENT_MAP: Record<EditorTab['type'], string> = {
+  agent: 'agent-editor',
+  skill: 'skill-editor',
+  artifact: 'artifact-editor',
+  reference: 'reference-viewer',
+  validation: 'validation-panel',
+  compile: 'compile-panel',
+  run: 'run-panel',
+};
 
 export type WorkspaceSelection =
   | { type: 'agent'; nodeId: string }
@@ -102,21 +118,16 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
     const api = apiRef.current;
     if (!api) return;
 
-    // Check if panel already exists — focus it
+    // Check if panel already exists — update params and focus it
     const existing = api.getPanel(tab.id);
     if (existing) {
+      existing.api.updateParameters(tab);
+      existing.api.setTitle(tab.label);
       existing.api.setActive();
       return;
     }
 
-    // Determine component type
-    const component = tab.type === 'agent'
-      ? 'agent-editor'
-      : tab.type === 'skill'
-        ? 'skill-editor'
-        : tab.type === 'artifact'
-          ? 'artifact-editor'
-          : 'reference-viewer';
+    const component = COMPONENT_MAP[tab.type] ?? 'reference-viewer';
 
     api.addPanel({
       id: tab.id,

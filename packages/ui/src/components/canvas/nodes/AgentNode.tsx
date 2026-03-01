@@ -7,21 +7,37 @@ type AgentNodeType = Node<FlowNodeData, 'agent'>;
 
 export const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentNodeType>) {
   const { node } = data;
+  const runStatus = data.runStatus ?? 'idle';
   const inputCount = node.config.inputs.length;
   const outputCount = node.config.outputs.length;
   const hasChildren = node.children.length > 0;
 
+  const borderClass = runStatus === 'running'
+    ? 'border-blue-500 shadow-blue-100 shadow-md'
+    : runStatus === 'completed'
+    ? 'border-emerald-500'
+    : runStatus === 'failed'
+    ? 'border-red-500'
+    : selected
+    ? 'border-[var(--color-border-selected)] shadow-md'
+    : 'border-[var(--color-border)]';
+
+  const dotClass = runStatus === 'running'
+    ? 'bg-blue-500 animate-pulse'
+    : runStatus === 'completed'
+    ? 'bg-emerald-500'
+    : runStatus === 'failed'
+    ? 'bg-red-500'
+    : 'bg-[var(--color-node-agent)]';
+
   return (
     <div
-      className={`
-        min-w-[220px] rounded-lg shadow-sm border-2 transition-all
-        ${selected ? 'border-[var(--color-border-selected)] shadow-md' : 'border-[var(--color-border)]'}
-      `}
+      className={`min-w-[220px] rounded-lg shadow-sm border-2 transition-all ${borderClass}`}
       style={{ background: 'linear-gradient(180deg, var(--color-node-agent-bg) 0%, #ffffff 100%)' }}
     >
       {/* Header bar */}
       <div className="flex items-center gap-2 px-3 py-2 rounded-t-md border-b border-[var(--color-border)]/40">
-        <div className="w-2.5 h-2.5 rounded-full bg-[var(--color-node-agent)]" />
+        <div className={`w-2.5 h-2.5 rounded-full ${dotClass}`} />
         <span className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
           {node.name}
         </span>

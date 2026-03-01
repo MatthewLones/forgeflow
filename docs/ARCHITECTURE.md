@@ -589,7 +589,7 @@ Project listing with grid cards showing name, description, node count, skill cou
 
 Tree-based navigator with three collapsible sections:
 
-**Agents** — All top-level nodes in topological order with recursive `AgentTreeItem` components. Type glyphs: "A" (agent), "C" (checkpoint), "M" (merge). Inline rename (double-click or F2). Expandable sub-agents. Context menu: Open, Rename, New Sub-Agent, Duplicate, Delete.
+**Agents** — All top-level nodes in topological order with recursive `AgentTreeItem` components. Type glyphs: "A" (agent), "C" (checkpoint). Inline rename (double-click or F2). Expandable sub-agents. Context menu: Open, Rename, New Sub-Agent, Duplicate, Delete.
 
 **Skills** — Available skills with sub-skill expansion. Circular reference protection. Context menu with Open action.
 

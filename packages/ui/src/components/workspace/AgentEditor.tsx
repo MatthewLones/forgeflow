@@ -15,13 +15,11 @@ interface AgentEditorProps {
 const TYPE_COLORS: Record<NodeType, string> = {
   agent: 'bg-[var(--color-node-agent)]',
   checkpoint: 'bg-[var(--color-node-checkpoint)]',
-  merge: 'bg-[var(--color-node-merge)]',
 };
 
 const TYPE_LABELS: Record<NodeType, string> = {
   agent: 'Agent',
   checkpoint: 'Checkpoint',
-  merge: 'Merge',
 };
 
 /** Find a node by ID in a recursive tree */

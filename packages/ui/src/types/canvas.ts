@@ -4,6 +4,7 @@ import type { Node } from '@xyflow/react';
 /** Data attached to each React Flow node */
 export type FlowNodeData = {
   node: FlowNode;
+  runStatus?: 'idle' | 'running' | 'completed' | 'failed' | 'waiting';
   [key: string]: unknown;
 };
 

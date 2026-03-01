@@ -9,7 +9,7 @@ A `FLOW.json` file defines a complete agent workflow as a directed acyclic graph
 ```typescript
 // --- Node Types ---
 
-type NodeType = "agent" | "checkpoint" | "merge";
+type NodeType = "agent" | "checkpoint";
 
 interface NodeBudget {
   maxTurns: number;          // Max API round-trips for this node
@@ -39,7 +39,7 @@ interface NodeConfig {
 
 interface FlowNode {
   id: string;                // Unique identifier (snake_case)
-  type: NodeType;            // "agent", "checkpoint", or "merge"
+  type: NodeType;            // "agent" or "checkpoint"
   name: string;              // Display name on canvas
   instructions: string;      // Free-text: what the agent should do
   config: NodeConfig;
@@ -78,14 +78,14 @@ interface FlowDefinition {
 ### Nodes
 - `id` must be unique across all nodes (including children at all depths)
 - `id` must match `[a-z][a-z0-9_]*` (snake_case)
-- `type` must be one of: `"agent"`, `"checkpoint"`, `"merge"`
-- `instructions` must be non-empty for `agent` and `checkpoint` nodes
+- `type` must be one of: `"agent"`, `"checkpoint"`
+- `instructions` must be non-empty for all nodes
 - `config.inputs` — each entry must either:
   - Exist in `input/` (user upload), OR
   - Be declared as an `output` of a prior node (by edge order)
 - `config.outputs` — each entry must be unique across the entire flow
 - `config.skills` — each entry must be a valid skill directory name
-- `children` — only `agent` nodes may have children; `checkpoint` and `merge` must have `children: []`
+- `children` — only `agent` nodes may have children; `checkpoint` nodes must have `children: []`
 
 ### Edges
 - `from` and `to` must reference valid top-level node IDs
@@ -221,26 +221,6 @@ An agent node runs Claude with the given instructions and skills. If it has chil
       "title": "Phase 1 Complete — Analysis",
       "sections": ["questions", "auto_fixable", "professional"]
     }
-  },
-  "children": []
-}
-```
-
-### Merge Node
-
-A merge node is implicit when a parent has children — the parent itself acts as the merge point. Explicit merge nodes are for complex cases where you need custom merge logic.
-
-```json
-{
-  "id": "merge_research",
-  "type": "merge",
-  "name": "Merge Research Results",
-  "instructions": "Read all research output files. Cross-reference findings. Produce a unified categorization.",
-  "config": {
-    "inputs": ["law_findings.json", "city_findings.json", "doc_observations.json"],
-    "outputs": ["categorized.json"],
-    "skills": [],
-    "budget": { "maxTurns": 40, "maxBudgetUsd": 5.00 }
   },
   "children": []
 }

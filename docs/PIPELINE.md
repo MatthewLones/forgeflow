@@ -90,7 +90,7 @@ interface FlowDefinition {
 
 interface FlowNode {
   id: string;
-  type: 'agent' | 'checkpoint' | 'merge';
+  type: 'agent' | 'checkpoint';
   name: string;
   instructions: string;        // free-text (the "source code" for this agent)
   config: NodeConfig;
@@ -99,6 +99,25 @@ interface FlowNode {
 ```
 
 Nodes are trees. Edges are between top-level nodes only. This is a critical design decision — the DAG is flat at the top level, but each node can contain an arbitrarily deep sub-tree of child agents.
+
+### Two Dependency Models
+
+The system uses **two different dependency models** depending on the nesting level:
+
+**Top-level nodes** have **explicit edges** declared by the user in `flow.edges`. These are what the user draws on the canvas. They define execution order and can encode ordering constraints that aren't artifact-based (e.g., "run B after A" even without shared files). The orchestrator executes top-level nodes sequentially in topological order.
+
+**Child nodes** have **implicit edges** derived from their I/O declarations. There is no `edges` array for children — they live inside a parent node, not in the top-level DAG. The system infers dependency edges by matching inputs to outputs among siblings: if child B declares an input that child A declares as an output, then A must run before B. This is computed automatically during semantic analysis (Step 1b of `buildFlowGraph()`).
+
+Both levels use the same `topologicalSort()` algorithm (Kahn's) for cycle detection and ordering. The difference is only in where the edges come from — explicit declaration vs I/O inference.
+
+| Aspect | Top-level nodes | Child nodes |
+|--------|----------------|-------------|
+| Edge source | Explicit `flow.edges` array | Implicit from I/O matching |
+| Defined by | User (drawn on canvas) | Computed automatically |
+| Cycle detection | `FlowGraph.hasCycle` | `FlowSymbol.childCycle` |
+| Execution order | `FlowGraph.topoOrder` | `FlowSymbol.childTopoOrder` |
+| Ordering | Sequential phases (orchestrator) | Grouped into waves (compiled prompt) |
+| Non-artifact ordering | Supported (edge without shared files) | Not supported (I/O only) |
 
 ---
 
@@ -125,6 +144,13 @@ FlowDefinition
     │       ├── declaredInputs / declaredOutputs (normalized filenames)
     │       ├── inputSchemas / outputSchemas (Maps for typed artifacts)
     │       └── interruptCapable (true if node OR any descendant has interrupts)
+    │
+    ├── 1b. Build child dependency edges and topo-sort siblings
+    │   └── For each parent with children:
+    │       ├── Infer edges: if child B's input matches child A's output → A → B
+    │       ├── topologicalSort(childIds, childEdges)
+    │       ├── Sets childTopoOrder on FlowSymbol (default: declaration order)
+    │       └── Sets childCycle = true if siblings have circular deps
     │
     ├── 2. Topological sort on top-level nodes (Kahn's algorithm)
     │   └── Sets topoIndex on each top-level FlowSymbol
@@ -195,6 +221,8 @@ interface FlowSymbol {
   declaredOutputs: string[];   // normalized filenames
   inputSchemas: ReadonlyMap<string, ArtifactSchema>;
   outputSchemas: ReadonlyMap<string, ArtifactSchema>;
+  childTopoOrder: readonly string[];  // children sorted by sibling dependencies
+  childCycle: boolean;                // true if children have circular deps
 }
 ```
 
@@ -260,7 +288,7 @@ Rules are organized by category. Each rule is a standalone module with a `check(
 
 | Rule ID | What it checks | Depends on |
 |---------|---------------|------------|
-| `dataflow/dependency-resolution` | Every input file traces to a producer or user upload; file is available before the consuming phase runs | `dag-acyclic`, `connectivity`, `output-uniqueness` |
+| `dataflow/dependency-resolution` | Every input file traces to a producer or user upload; file is available before the consuming phase runs; child sibling cycles detected (`CHILD_CYCLE`); children walk in topo order with outputs accumulating | `dag-acyclic`, `connectivity`, `output-uniqueness` |
 
 #### Resource Rules (1)
 
@@ -420,7 +448,7 @@ FlowNode + FlowGraph
     │       presentation
     │     }
     │
-    └── If agent/merge node:
+    └── If agent node:
         └── AgentPhaseIR {
             kind: 'agent',
             isChild: boolean,
@@ -469,6 +497,7 @@ interface ChildReference {
   name: string;            // display name
   promptFile: string;      // 'prompts/{id}.md'
   outputs: string[];       // what this child will produce
+  wave: number;            // 0 = no sibling deps, 1+ = depends on earlier wave
 }
 ```
 
@@ -543,13 +572,20 @@ You are executing one phase of the "{flowName}" workflow.   ← omitted for chil
 - Verify each output file exists before finishing
 - Stay within budget constraints
 
-## Subagents — Launch All {N} Concurrently    ← only if node has children
-| # | Name | ID | Prompt File |
+## Subagents — Launch All {N} Concurrently    ← if all children are wave 0
+| # | Name | ID | Prompt File |                 (no sibling dependencies)
 |---|------|----|-------------|
 | 1 | {name} | {id} | prompts/{id}.md |
 | 2 | {name} | {id} | prompts/{id}.md |
 
-Launch all subagents concurrently using the Task tool...
+## Subagents — {W} Waves                      ← if children have sibling deps
+### Wave 1 — Launch Concurrently               (multiple waves)
+| # | Name | ID | Prompt File |
+| 1 | {name} | {id} | prompts/{id}.md |
+### Wave 2 — Launch After Wave 1 Completes
+| 3 | {name} | {id} | prompts/{id}.md |
+
+Launch subagents using the Task tool...
 
 ### Progress Tracking                          ← child start/done markers
 echo '{}' > output/__CHILD_START__{id}.json
@@ -568,6 +604,23 @@ Poll for answer: output/__ANSWER__{id}.json (every 5s)
 | Flow context | "You are executing one phase of..." | Omitted |
 | Input source labels | `input/data.json (from parse_step)` | `input/data.json` (no attribution) |
 | Budget | Always present (node or flow fallback) | Only if child has explicit budget |
+
+### Wave-Ordered Subagent Launch
+
+When children have sibling dependencies (child B's input is child A's output), the compiler groups them into **waves** based on dependency depth:
+
+- **Wave 0**: Children with no sibling dependencies (can all run concurrently)
+- **Wave 1**: Children that depend on at least one wave-0 child's output
+- **Wave N**: Children that depend on at least one wave-(N-1) child's output
+
+Wave numbers are computed by `computeChildWaves()` in `resolve.ts`, which processes children in `childTopoOrder` and assigns each child `wave = max(wave of its sibling dependencies) + 1`.
+
+The code generator adapts the prompt format based on wave count:
+
+- **Single wave** (all wave 0): generates backward-compatible "Launch All N Concurrently" header
+- **Multiple waves**: generates wave-by-wave sections with explicit "Wait for ALL Wave N subagents to complete before proceeding to Wave N+1" instructions
+
+This is how the runtime enforces ordering — the parent agent (Claude) reads the compiled prompt and uses the Task tool to spawn children in the correct wave sequence. The engine doesn't manage child ordering; it's all encoded in the prompt.
 
 ### Checkpoint Prompt Structure
 
@@ -650,7 +703,7 @@ FlowDefinition + user uploads
             │   ├── Emit 'checkpoint' event
             │   └── Return { status: 'awaiting_input' }
             │
-            └── If agent/merge node:
+            └── If agent node:
                 ├── buildFlowGraph(flow)          ← built once, reused
                 ├── compilePhase(nodeId, graph)    ← IR → markdown
                 ├── compileChildPrompts(...)       ← if has children
