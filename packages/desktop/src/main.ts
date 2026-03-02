@@ -99,6 +99,35 @@ ipcMain.handle('app:getPath', (_event, name: string) => {
   return app.getPath(name as 'home' | 'appData' | 'userData' | 'temp' | 'documents' | 'downloads');
 });
 
+// ── .forge file open handling ─────────────────────────────────────────
+
+// Track .forge file path opened via OS file association (double-click in Finder/Explorer)
+let pendingForgeFile: string | null = null;
+
+function handleForgeFileOpen(filePath: string): void {
+  if (!filePath.endsWith('.forge')) return;
+
+  if (mainWindow) {
+    // Send to renderer for import
+    mainWindow.webContents.send('forge:open-file', filePath);
+  } else {
+    // Window not ready yet — queue it
+    pendingForgeFile = filePath;
+  }
+}
+
+// macOS: open-file event fires when user double-clicks a .forge file
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  handleForgeFileOpen(filePath);
+});
+
+// Windows/Linux: file path is passed as a CLI argument
+const fileArg = process.argv.find((arg) => arg.endsWith('.forge'));
+if (fileArg) {
+  pendingForgeFile = fileArg;
+}
+
 // ── App Lifecycle ─────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
@@ -108,6 +137,16 @@ app.whenReady().then(() => {
   console.log(`ForgeFlow server started on port ${port}`);
 
   createWindow();
+
+  // Send queued .forge file once the window is ready
+  if (pendingForgeFile && mainWindow) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      if (pendingForgeFile) {
+        mainWindow!.webContents.send('forge:open-file', pendingForgeFile);
+        pendingForgeFile = null;
+      }
+    });
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

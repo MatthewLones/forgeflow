@@ -18,6 +18,7 @@
     "dist"
   ],
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
     "@forgeflow/compiler": "workspace:*",
     "@forgeflow/engine": "workspace:*",
     "@forgeflow/parser": "workspace:*",
@@ -26,9 +27,11 @@
     "@forgeflow/types": "workspace:*",
     "@forgeflow/validator": "workspace:*",
     "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
     "express": "^5.1.0",
     "mime-types": "^3.0.2",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

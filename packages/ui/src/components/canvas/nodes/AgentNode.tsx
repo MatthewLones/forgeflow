@@ -13,7 +13,7 @@ export const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<A
   const hasChildren = node.children.length > 0;
 
   const borderClass = runStatus === 'running'
-    ? 'border-blue-500 shadow-blue-100 shadow-md'
+    ? 'border-blue-500 node-running-glow'
     : runStatus === 'completed'
     ? 'border-emerald-500'
     : runStatus === 'failed'

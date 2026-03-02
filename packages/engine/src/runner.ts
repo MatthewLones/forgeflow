@@ -17,6 +17,18 @@ export interface AgentRunner {
 }
 
 /**
+ * Simulated verbose event sequence for MockRunner.
+ */
+export interface MockVerboseSequence {
+  /** Tool calls to simulate (default: auto-generated from outputFiles) */
+  toolCalls?: Array<{ toolName: string; input: string; output: string; isError?: boolean }>;
+  /** Text blocks to simulate (default: intro + outro) */
+  textBlocks?: string[];
+  /** Delay between events in ms (default: 20) */
+  delayMs?: number;
+}
+
+/**
  * Defines what a MockRunner should do for a given phase.
  */
 export interface MockBehavior {
@@ -28,6 +40,8 @@ export interface MockBehavior {
   cost?: { turns: number; usd: number };
   /** Error message if success is false */
   error?: string;
+  /** Enable verbose event simulation (true = auto-generate, object = custom sequence) */
+  verbose?: MockVerboseSequence | boolean;
 }
 
 /**
@@ -49,6 +63,7 @@ export class MockRunner implements AgentRunner {
     budget: { maxTurns: number; maxBudgetUsd: number };
     onProgress?: (event: ProgressEvent) => void;
   }): Promise<PhaseResult> {
+    const emit = options.onProgress ?? (() => {});
     const behavior = this.behaviors.get(options.nodeId);
 
     if (!behavior) {
@@ -61,6 +76,49 @@ export class MockRunner implements AgentRunner {
     }
 
     const success = behavior.success ?? true;
+
+    // Emit verbose events if requested
+    if (behavior.verbose) {
+      let sequence = 0;
+      const delay = (typeof behavior.verbose === 'object' ? behavior.verbose.delayMs : undefined) ?? 20;
+      const wait = () => new Promise<void>(r => setTimeout(r, delay));
+
+      // Text blocks (intro)
+      const textBlocks = typeof behavior.verbose === 'object' && behavior.verbose.textBlocks
+        ? behavior.verbose.textBlocks
+        : ['Analyzing the task requirements...'];
+
+      for (const text of textBlocks) {
+        emit({ type: 'text_block', nodeId: options.nodeId, content: text, truncated: false, charCount: text.length, sequence: sequence++ });
+        emit({ type: 'message', content: text });
+        await wait();
+      }
+
+      // Tool calls
+      if (success) {
+        const toolCalls = typeof behavior.verbose === 'object' && behavior.verbose.toolCalls
+          ? behavior.verbose.toolCalls
+          : Object.entries(behavior.outputFiles).map(([name, content]) => ({
+              toolName: 'Write',
+              input: JSON.stringify({ file_path: `output/${name}` }),
+              output: `File written: output/${name} (${content.length} bytes)`,
+              isError: false as boolean | undefined,
+            }));
+
+        for (const tc of toolCalls) {
+          const toolUseId = `mock_${sequence}`;
+          emit({ type: 'tool_call', nodeId: options.nodeId, toolName: tc.toolName, toolUseId, inputSummary: tc.input, truncated: false, sequence: sequence++ });
+          await wait();
+          emit({ type: 'tool_result', nodeId: options.nodeId, toolName: tc.toolName, toolUseId, outputSummary: tc.output, truncated: false, isError: tc.isError ?? false, sequence: sequence++ });
+          await wait();
+        }
+
+        // Outro text block
+        const outro = 'Task complete. All output files written.';
+        emit({ type: 'text_block', nodeId: options.nodeId, content: outro, truncated: false, charCount: outro.length, sequence: sequence++ });
+        emit({ type: 'message', content: outro });
+      }
+    }
 
     if (success) {
       // Write output files to workspace/output/

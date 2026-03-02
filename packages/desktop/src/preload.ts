@@ -45,6 +45,13 @@ const api = {
     writeFile: (filePath: string, data: ArrayBuffer | string) =>
       ipcRenderer.invoke('fs:writeFile', filePath, data) as Promise<void>,
   },
+
+  /** Listen for .forge file opens (double-click in Finder/Explorer) */
+  onForgeFileOpen: (callback: (filePath: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, filePath: string) => callback(filePath);
+    ipcRenderer.on('forge:open-file', handler);
+    return () => { ipcRenderer.removeListener('forge:open-file', handler); };
+  },
 };
 
 export type ForgeFlowElectronAPI = typeof api;

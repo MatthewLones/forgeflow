@@ -1,9 +1,11 @@
 import { Router } from 'express';
-import { validateFlow, validateFlowDetailed } from '@forgeflow/validator';
+import { validateFlow, validateFlowDetailed, buildFlowGraph } from '@forgeflow/validator';
 import { compilePhase, compileChildPrompts } from '@forgeflow/compiler';
-import type { FlowDefinition } from '@forgeflow/types';
+import type { FlowDefinition, ArtifactSchema } from '@forgeflow/types';
+import { ProjectStore } from '../services/project-store.js';
 
 const router = Router();
+const store = new ProjectStore();
 
 // POST /api/validate — validate a flow definition
 router.post('/validate', (req, res) => {
@@ -70,6 +72,41 @@ router.post('/compile/preview', (req, res) => {
     res.json({ valid: true, phases });
   } catch (err) {
     res.status(500).json({ error: 'Compilation failed unexpectedly' });
+  }
+});
+
+// GET /api/projects/:id/required-inputs — determine what files the user must provide
+router.get('/projects/:id/required-inputs', async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const flow = await store.getFlow(projectId);
+    if (!flow) {
+      res.status(404).json({ error: 'Flow not found for project' });
+      return;
+    }
+
+    const graph = buildFlowGraph(flow);
+
+    const requiredInputs = graph.userUploadFiles.map((filename) => {
+      let schema: ArtifactSchema | null = null;
+      // Check flow.artifacts registry first
+      if (flow.artifacts?.[filename]) {
+        schema = flow.artifacts[filename];
+      } else {
+        // Fall back to entry node inputSchemas
+        for (const [, sym] of graph.symbols) {
+          if (sym.inputSchemas.has(filename)) {
+            schema = sym.inputSchemas.get(filename)!;
+            break;
+          }
+        }
+      }
+      return { name: filename, schema };
+    });
+
+    res.json({ requiredInputs });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to determine required inputs' });
   }
 });
 

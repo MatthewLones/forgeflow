@@ -1,8 +1,35 @@
 import { mkdir, readFile, writeFile, readdir, rm, stat, rename } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { gzip, gunzip } from 'node:zlib';
+import { promisify } from 'node:util';
 import { lookup } from 'mime-types';
 import type { FlowDefinition } from '@forgeflow/types';
+
+const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
+
+/** .forge file magic header: "FORGE" + version byte + reserved byte */
+const FORGE_MAGIC = Buffer.from([0x46, 0x4F, 0x52, 0x47, 0x45, 0x01, 0x00]);
+
+/** Binary file extensions that should be base64-encoded in the bundle */
+const BINARY_EXTENSIONS = new Set([
+  'pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico',
+  'zip', 'tar', 'gz', 'mp3', 'mp4', 'wav', 'ogg', 'woff', 'woff2',
+  'ttf', 'otf', 'eot', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+]);
+
+function isBinaryFile(filename: string): boolean {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  return BINARY_EXTENSIONS.has(ext);
+}
+
+interface ForgeBundle {
+  v: 1;
+  flow: FlowDefinition;
+  skills: Record<string, Record<string, string | { $b64: string }>>;
+  references: Record<string, string | { $b64: string }>;
+}
 
 export interface ProjectMeta {
   id: string;
@@ -526,6 +553,195 @@ Describe this skill's purpose and how it should be used.
     }
   }
 
+  // --- Export / Import (.forge bundles) ---
+
+  /**
+   * Export a project as a .forge bundle (gzip-compressed JSON with magic header).
+   * Returns the raw Buffer ready to send as a download.
+   */
+  async exportProject(projectId: string): Promise<Buffer | null> {
+    const flow = await this.getFlow(projectId);
+    if (!flow) return null;
+
+    // Collect skills
+    const skills: ForgeBundle['skills'] = {};
+    const skillNames = await this.listSkills(projectId);
+    for (const { name } of skillNames) {
+      const skillState = await this.getSkill(projectId, name);
+      if (!skillState) continue;
+      const files: Record<string, string | { $b64: string }> = {};
+      for (const file of skillState.files) {
+        files[file.path] = file.content;
+      }
+      // Also check for binary files in skill references
+      const skillRefDir = join(this.skillsDir(projectId), name, 'references');
+      try {
+        await this.collectBinaryFiles(skillRefDir, 'references', files);
+      } catch {
+        // No binary refs
+      }
+      skills[name] = files;
+    }
+
+    // Collect project-level references
+    const references: ForgeBundle['references'] = {};
+    await this.collectAllFiles(this.refsDir(projectId), '', references);
+
+    const bundle: ForgeBundle = { v: 1, flow, skills, references };
+
+    // Minified JSON → gzip (maximum compression level 9)
+    const json = JSON.stringify(bundle);
+    const compressed = await gzipAsync(Buffer.from(json), { level: 9 });
+    return Buffer.concat([FORGE_MAGIC, compressed]);
+  }
+
+  /**
+   * Import a .forge bundle, creating a new project.
+   * Returns the new project's metadata, or throws on invalid bundle.
+   */
+  async importProject(buffer: Buffer): Promise<ProjectMeta> {
+    // Validate magic header
+    if (buffer.length < FORGE_MAGIC.length || !buffer.subarray(0, FORGE_MAGIC.length).equals(FORGE_MAGIC)) {
+      throw new Error('Invalid .forge file: missing magic header');
+    }
+
+    const version = buffer[5];
+    if (version !== 1) {
+      throw new Error(`Unsupported .forge version: ${version}`);
+    }
+
+    // Decompress
+    const compressed = buffer.subarray(FORGE_MAGIC.length);
+    const json = (await gunzipAsync(compressed)).toString('utf-8');
+    const bundle: ForgeBundle = JSON.parse(json);
+
+    if (!bundle.flow || !bundle.v) {
+      throw new Error('Invalid .forge file: missing flow data');
+    }
+
+    // Derive project ID from flow name (with dedup suffix if needed)
+    let baseId = bundle.flow.name
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, '_')
+      .replace(/^[^a-z]/, 'p');
+
+    let projectId = baseId;
+    let attempt = 0;
+    while (true) {
+      try {
+        await stat(this.projectDir(projectId));
+        // Directory exists, try with suffix
+        attempt++;
+        projectId = `${baseId}_${attempt}`;
+      } catch {
+        break; // Directory doesn't exist, use this ID
+      }
+    }
+
+    // Update flow ID to match new project ID
+    bundle.flow.id = projectId;
+
+    // Create project directory
+    const dir = this.projectDir(projectId);
+    await mkdir(dir, { recursive: true });
+    await mkdir(join(dir, 'skills'), { recursive: true });
+    await mkdir(join(dir, 'references'), { recursive: true });
+
+    // Write project metadata (derived from flow)
+    const meta: ProjectMeta = {
+      id: projectId,
+      name: bundle.flow.name,
+      description: bundle.flow.description ?? '',
+      version: bundle.flow.version ?? '0.1',
+      updatedAt: new Date().toISOString(),
+    };
+    await writeFile(join(dir, 'project.json'), JSON.stringify(meta, null, 2));
+
+    // Write flow
+    await writeFile(join(dir, 'FLOW.json'), JSON.stringify(bundle.flow, null, 2));
+
+    // Write skills
+    for (const [skillName, files] of Object.entries(bundle.skills ?? {})) {
+      const skillDir = join(this.skillsDir(projectId), skillName);
+      await mkdir(skillDir, { recursive: true });
+      for (const [filePath, content] of Object.entries(files)) {
+        const fullPath = join(skillDir, filePath);
+        const parentDir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+        await mkdir(parentDir, { recursive: true });
+        if (typeof content === 'string') {
+          await writeFile(fullPath, content);
+        } else if (content && typeof content === 'object' && '$b64' in content) {
+          await writeFile(fullPath, Buffer.from(content.$b64, 'base64'));
+        }
+      }
+    }
+
+    // Write project-level references
+    for (const [filePath, content] of Object.entries(bundle.references ?? {})) {
+      const fullPath = join(this.refsDir(projectId), filePath);
+      const parentDir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+      await mkdir(parentDir, { recursive: true });
+      if (typeof content === 'string') {
+        await writeFile(fullPath, content);
+      } else if (content && typeof content === 'object' && '$b64' in content) {
+        await writeFile(fullPath, Buffer.from(content.$b64, 'base64'));
+      }
+    }
+
+    return meta;
+  }
+
+  /** Recursively collect all files (text as string, binary as {$b64}) */
+  private async collectAllFiles(
+    dir: string,
+    prefix: string,
+    out: Record<string, string | { $b64: string }>,
+  ): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isFile()) {
+        if (isBinaryFile(entry.name)) {
+          const buf = await readFile(join(dir, entry.name));
+          out[relPath] = { $b64: buf.toString('base64') };
+        } else {
+          out[relPath] = await readFile(join(dir, entry.name), 'utf-8');
+        }
+      } else if (entry.isDirectory()) {
+        await this.collectAllFiles(join(dir, entry.name), relPath, out);
+      }
+    }
+  }
+
+  /** Collect only binary files that weren't already captured by readSkillFiles */
+  private async collectBinaryFiles(
+    dir: string,
+    prefix: string,
+    out: Record<string, string | { $b64: string }>,
+  ): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isFile() && isBinaryFile(entry.name) && !(relPath in out)) {
+        const buf = await readFile(join(dir, entry.name));
+        out[relPath] = { $b64: buf.toString('base64') };
+      } else if (entry.isDirectory()) {
+        await this.collectBinaryFiles(join(dir, entry.name), relPath, out);
+      }
+    }
+  }
+
   // --- Seed default data ---
 
   async seedIfEmpty(): Promise<void> {
@@ -543,7 +759,7 @@ Describe this skill's purpose and how it should be used.
       version: '1.0',
       description: 'VC analyst workflow: research a startup, assess risks across financial/legal/team dimensions, and produce an investment memo',
       skills: ['venture-analysis', 'startup-legal'],
-      budget: { maxTurns: 400, maxBudgetUsd: 40.0, timeoutMs: 1200000 },
+      budget: { maxTurns: 400, maxBudgetUsd: 50.0, timeoutMs: 1200000 },
       nodes: [
         {
           id: 'ingest_materials',
@@ -562,7 +778,7 @@ Describe this skill's purpose and how it should be used.
             'Output: \\company_profile',
           ].join('\n'),
           config: {
-            inputs: [],
+            inputs: ['startup_materials'],
             outputs: ['company_profile'],
             skills: [],
             budget: { maxTurns: 30, maxBudgetUsd: 3.0 },
@@ -709,15 +925,12 @@ Describe this skill's purpose and how it should be used.
             '',
             'The partner will review @risk_matrix and make a go/no-go decision with any conditions or questions that need to be addressed before proceeding.',
             '',
-            '/interrupt:approval',
-            '',
             'Output: \\partner_decisions',
           ].join('\n'),
           config: {
             inputs: ['risk_matrix'],
             outputs: ['partner_decisions'],
             skills: [],
-            interrupts: [{ type: 'approval' }],
             presentation: {
               title: 'Investment Risk Assessment Complete',
               sections: ['financial_risk', 'legal_risk', 'team_risk', 'market_risk'],
@@ -750,15 +963,43 @@ Describe this skill's purpose and how it should be used.
         },
       ],
       artifacts: {
-        company_profile: { name: 'company_profile', format: 'json', description: 'Company overview: founders, product, traction, funding history' },
-        market_analysis: { name: 'market_analysis', format: 'json', description: 'TAM/SAM/SOM sizing, competitive landscape, market dynamics' },
-        financial_findings: { name: 'financial_findings', format: 'json', description: 'Unit economics, burn rate, runway, and financial health assessment' },
-        legal_findings: { name: 'legal_findings', format: 'json', description: 'Cap table review, IP assignment status, regulatory exposure' },
-        team_assessment: { name: 'team_assessment', format: 'json', description: 'Team strength, key person risk, gaps, and hiring plan' },
-        risk_matrix: { name: 'risk_matrix', format: 'json', description: 'Aggregated risk scores (1-5) across financial, legal, team, and market dimensions' },
-        partner_decisions: { name: 'partner_decisions', format: 'json', description: 'Partner go/no-go decision with conditions' },
-        investment_memo: { name: 'investment_memo', format: 'markdown', description: 'Final investment recommendation with thesis, risks, and proposed terms' },
-        term_sheet_draft: { name: 'term_sheet_draft', format: 'markdown', description: 'Draft term sheet with valuation and key terms' },
+        startup_materials: { name: 'startup_materials', format: 'text' as const, description: 'Pitch deck text, financial statements, and/or company overview to analyze' },
+        company_profile: {
+          name: 'company_profile', format: 'json' as const, description: 'Company overview: founders, product, traction, funding history',
+          fields: [
+            { key: 'company_name', type: 'string' as const, description: 'Company legal name' },
+            { key: 'sector', type: 'string' as const, description: 'Industry sector' },
+            { key: 'stage', type: 'string' as const, description: 'Funding stage (seed, series-a, etc.)' },
+            { key: 'founded_year', type: 'number' as const, description: 'Year founded' },
+            { key: 'team', type: 'array' as const, description: 'Founding team members' },
+            { key: 'traction', type: 'object' as const, description: 'Traction metrics (MRR, users, etc.)' },
+          ],
+        },
+        market_analysis: {
+          name: 'market_analysis', format: 'json' as const, description: 'TAM/SAM/SOM sizing, competitive landscape, market dynamics',
+          fields: [
+            { key: 'tam', type: 'object' as const, description: 'Total Addressable Market sizing' },
+            { key: 'sam', type: 'object' as const, description: 'Serviceable Available Market' },
+            { key: 'competitors', type: 'array' as const, description: 'Competitive landscape entries' },
+            { key: 'growth_trends', type: 'string' as const, description: 'Market growth trend summary' },
+          ],
+        },
+        financial_findings: { name: 'financial_findings', format: 'json' as const, description: 'Unit economics, burn rate, runway, and financial health assessment' },
+        legal_findings: { name: 'legal_findings', format: 'json' as const, description: 'Cap table review, IP assignment status, regulatory exposure' },
+        team_assessment: { name: 'team_assessment', format: 'json' as const, description: 'Team strength, key person risk, gaps, and hiring plan' },
+        risk_matrix: {
+          name: 'risk_matrix', format: 'json' as const, description: 'Aggregated risk scores (1-5) across financial, legal, team, and market dimensions',
+          fields: [
+            { key: 'financial_risk', type: 'number' as const, description: 'Financial risk score (1-5)' },
+            { key: 'legal_risk', type: 'number' as const, description: 'Legal risk score (1-5)' },
+            { key: 'team_risk', type: 'number' as const, description: 'Team risk score (1-5)' },
+            { key: 'market_risk', type: 'number' as const, description: 'Market risk score (1-5)' },
+            { key: 'overall_risk', type: 'number' as const, description: 'Overall risk score (1-5)' },
+          ],
+        },
+        partner_decisions: { name: 'partner_decisions', format: 'json' as const, description: 'Partner go/no-go decision with conditions' },
+        investment_memo: { name: 'investment_memo', format: 'markdown' as const, description: 'Final investment recommendation with thesis, risks, and proposed terms' },
+        term_sheet_draft: { name: 'term_sheet_draft', format: 'markdown' as const, description: 'Draft term sheet with valuation and key terms' },
       },
       edges: [
         { from: 'ingest_materials', to: 'market_research' },

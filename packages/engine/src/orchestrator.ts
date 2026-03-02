@@ -35,6 +35,8 @@ export interface OrchestratorOptions {
   interruptHandler?: InterruptHandler;
   /** Default timeout for inline interrupt escalation (ms) */
   escalateTimeoutMs?: number;
+  /** Preserve workspace directories after phase execution (default: false) */
+  preserveWorkspace?: boolean;
 }
 
 interface ExecuteContext {
@@ -57,9 +59,10 @@ export class FlowOrchestrator {
   /**
    * Execute a flow end-to-end.
    * Returns RunResult with status, cost, and output files.
+   * @param externalRunId - optional pre-generated runId (used by RunManager to avoid race conditions)
    */
-  async execute(flow: FlowDefinition, userUploads: StateFile[]): Promise<RunResult> {
-    const runId = randomUUID();
+  async execute(flow: FlowDefinition, userUploads: StateFile[], externalRunId?: string): Promise<RunResult> {
+    const runId = externalRunId ?? randomUUID();
 
     // 1. Validate the flow
     const validation = validateFlow(flow);
@@ -268,6 +271,16 @@ export class FlowOrchestrator {
         ? compileChildPrompts(node.id, graph).markdowns
         : undefined;
 
+      emit({
+        type: 'prompt_compiled',
+        nodeId: node.id,
+        promptChars: prompt.length,
+        childPromptCount: childPrompts?.size ?? 0,
+        childPromptTotalChars: childPrompts
+          ? [...childPrompts.values()].reduce((sum, md) => sum + md.length, 0)
+          : 0,
+      });
+
       const inputFiles = await this.stateStore.loadPhaseInputs(ctx.runId, sym.declaredInputs);
 
       // Resolve skills
@@ -275,6 +288,14 @@ export class FlowOrchestrator {
       let resolvedSkills: ResolvedSkill[] = [];
       if (allSkillNames.length > 0 && this.options?.skillSearchPaths?.length) {
         resolvedSkills = await resolveSkills(allSkillNames, this.options.skillSearchPaths);
+        for (const skill of resolvedSkills) {
+          emit({
+            type: 'skill_loaded',
+            nodeId: node.id,
+            skillName: skill.name,
+            fileCount: 1 + skill.references.size + skill.scripts.size,
+          });
+        }
       }
 
       // Prepare workspace
@@ -285,6 +306,15 @@ export class FlowOrchestrator {
         inputFiles,
         skills: resolvedSkills,
         childPrompts,
+      });
+
+      emit({
+        type: 'workspace_prepared',
+        nodeId: node.id,
+        inputFileCount: inputFiles.length,
+        skillCount: resolvedSkills.length,
+        childPromptCount: childPrompts?.size ?? 0,
+        workspacePath,
       });
 
       // Run the phase (with interrupt watcher if handler provided)
@@ -355,7 +385,9 @@ export class FlowOrchestrator {
         ctx.runState.updatedAt = new Date().toISOString();
         await this.stateStore.saveRunState(ctx.runId, ctx.runState);
 
-        await cleanupWorkspace(workspacePath);
+        if (!this.options?.preserveWorkspace) {
+          await cleanupWorkspace(workspacePath);
+        }
 
         return {
           success: true,
@@ -375,7 +407,9 @@ export class FlowOrchestrator {
         ctx.runState.updatedAt = new Date().toISOString();
         await this.stateStore.saveRunState(ctx.runId, ctx.runState);
 
-        await cleanupWorkspace(workspacePath);
+        if (!this.options?.preserveWorkspace) {
+          await cleanupWorkspace(workspacePath);
+        }
 
         return {
           success: false,
@@ -398,6 +432,15 @@ export class FlowOrchestrator {
       const expectedOutputs = getExpectedOutputs(node);
       const outputValidation = validateOutputs(outputs, expectedOutputs);
 
+      emit({
+        type: 'output_validated',
+        nodeId: node.id,
+        expectedCount: expectedOutputs.length,
+        foundCount: outputValidation.found.length,
+        missingFiles: outputValidation.missing,
+        valid: outputValidation.missing.length === 0,
+      });
+
       // Update cost
       totalCost.turns += phaseResult.cost.turns;
       totalCost.usd += phaseResult.cost.usd;
@@ -416,8 +459,10 @@ export class FlowOrchestrator {
       ctx.runState.updatedAt = new Date().toISOString();
       await this.stateStore.saveRunState(ctx.runId, ctx.runState);
 
-      // Clean up workspace
-      await cleanupWorkspace(workspacePath);
+      // Clean up workspace (unless preservation is enabled)
+      if (!this.options?.preserveWorkspace) {
+        await cleanupWorkspace(workspacePath);
+      }
     }
 
     // All phases complete

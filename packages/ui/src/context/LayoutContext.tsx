@@ -15,7 +15,7 @@ import type { CompilePreviewResult } from '../lib/api-client';
 
 export interface EditorTab {
   id: string;
-  type: 'agent' | 'skill' | 'reference' | 'artifact' | 'validation' | 'compile' | 'run' | 'output' | 'run-history';
+  type: 'agent' | 'skill' | 'reference' | 'artifact' | 'validation' | 'compile' | 'run' | 'output' | 'run-history' | 'pre-run';
   label: string;
   nodeId?: string;
   skillName?: string;
@@ -26,6 +26,10 @@ export interface EditorTab {
   runId?: string;
   outputFileName?: string;
   projectId?: string;
+  /** Pre-run panel: required input definitions */
+  requiredInputs?: Array<{ name: string; schema: { name: string; format: string; description: string; fields?: Array<{ key: string; type: string; description: string; required?: boolean }> } | null }>;
+  /** Pre-run panel: still loading required inputs */
+  fetchingInputs?: boolean;
 }
 
 /* ── Component map ────────────────────────────────────────── */
@@ -40,6 +44,7 @@ const COMPONENT_MAP: Record<EditorTab['type'], string> = {
   run: 'run-panel',
   output: 'output-viewer',
   'run-history': 'run-history-panel',
+  'pre-run': 'pre-run-panel',
 };
 
 export type WorkspaceSelection =

@@ -11,7 +11,7 @@ export const CheckpointNode = memo(function CheckpointNode({ data, selected }: N
   const title = node.config.presentation?.title;
 
   const borderClass = runStatus === 'waiting'
-    ? 'border-amber-500 shadow-amber-100 shadow-md'
+    ? 'border-amber-500 node-waiting-glow'
     : runStatus === 'completed'
     ? 'border-emerald-500'
     : runStatus === 'failed'

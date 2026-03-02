@@ -5,6 +5,8 @@ import type { PhaseResult, ProgressEvent } from '@forgeflow/types';
 import { FORGEFLOW_PHASE_SYSTEM_PROMPT } from '@forgeflow/compiler';
 import type { AgentRunner } from './runner.js';
 import { getImageRef, imageExists, buildImage } from './docker-image.js';
+import { extractVerboseEvents } from './verbose-events.js';
+import type { SequenceRef } from './verbose-events.js';
 
 export interface DockerAgentRunnerOptions {
   /** Claude model to use (default: 'sonnet') */
@@ -95,6 +97,8 @@ export class DockerAgentRunner implements AgentRunner {
     let numTurns = 0;
     let totalCostUsd = 0;
     let errors: string[] = [];
+    const seq: SequenceRef = { value: 0 };
+    const toolNameMap = new Map<string, string>();
 
     try {
       // Start container and attach to stdout for JSONL progress
@@ -133,12 +137,22 @@ export class DockerAgentRunner implements AgentRunner {
                     emit({ type: 'message', content: block.text });
                   }
                 }
-              } else if (msg.type === 'result') {
+              }
+
+              if (msg.type === 'result') {
                 resultSubtype = msg.subtype;
                 numTurns = msg.num_turns ?? 0;
                 totalCostUsd = msg.total_cost_usd ?? 0;
                 if (msg.subtype !== 'success' && msg.errors) {
                   errors = msg.errors;
+                }
+              }
+
+              // Extract verbose events from all message types
+              if (msg.type === 'assistant' || msg.type === 'user') {
+                const verboseEvents = extractVerboseEvents(msg, options.nodeId, seq, toolNameMap);
+                for (const ev of verboseEvents) {
+                  emit(ev);
                 }
               }
             } catch {

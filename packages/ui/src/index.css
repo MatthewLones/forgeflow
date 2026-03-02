@@ -84,6 +84,43 @@ html, body, #root {
   font-size: 13px;
 }
 
+/* ===========================
+   Running node glow animation
+   =========================== */
+
+@keyframes node-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  50% { box-shadow: 0 0 12px 4px rgba(59, 130, 246, 0.25); }
+}
+
+@keyframes node-glow-pulse-amber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  50% { box-shadow: 0 0 12px 4px rgba(245, 158, 11, 0.25); }
+}
+
+.node-running-glow {
+  animation: node-glow-pulse 2s ease-in-out infinite;
+}
+
+.node-waiting-glow {
+  animation: node-glow-pulse-amber 2s ease-in-out infinite;
+}
+
+/* Activity indicator — pulsing dot (like Claude Code) */
+@keyframes activity-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.activity-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3b82f6;
+  animation: activity-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
 /* React Flow overrides */
 .react-flow__node {
   font-family: var(--font-sans);
@@ -209,6 +246,91 @@ html, body, #root {
 
 .prose-skill strong {
   font-weight: 600;
+}
+
+/* ===========================
+   Copilot Chat Markdown (compact)
+   =========================== */
+
+.prose-copilot {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.prose-copilot > *:first-child { margin-top: 0; }
+.prose-copilot > *:last-child { margin-bottom: 0; }
+
+.prose-copilot h1 { font-size: 1.15em; font-weight: 700; margin: 0.8em 0 0.3em; }
+.prose-copilot h2 { font-size: 1.1em; font-weight: 600; margin: 0.7em 0 0.3em; }
+.prose-copilot h3 { font-size: 1.05em; font-weight: 600; margin: 0.6em 0 0.2em; }
+
+.prose-copilot p { margin: 0.4em 0; }
+
+.prose-copilot ul, .prose-copilot ol {
+  margin: 0.3em 0;
+  padding-left: 1.3em;
+}
+.prose-copilot li { margin: 0.15em 0; }
+
+.prose-copilot code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: rgba(0,0,0,0.04);
+  border: 1px solid var(--color-border);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+
+.prose-copilot pre {
+  background: rgba(0,0,0,0.03);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.prose-copilot pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.prose-copilot blockquote {
+  border-left: 2px solid var(--color-node-agent);
+  margin: 0.5em 0;
+  padding: 0.2em 0 0.2em 0.8em;
+  color: var(--color-text-secondary);
+}
+
+.prose-copilot strong { font-weight: 600; }
+.prose-copilot a { color: var(--color-node-agent); text-decoration: none; }
+.prose-copilot a:hover { text-decoration: underline; }
+
+.prose-copilot table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 11px;
+}
+.prose-copilot th {
+  text-align: left;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-bottom: 2px solid var(--color-border);
+  background: rgba(0,0,0,0.02);
+}
+.prose-copilot td {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.prose-copilot hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 0.8em 0;
 }
 
 /* ===========================

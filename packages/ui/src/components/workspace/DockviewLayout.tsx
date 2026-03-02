@@ -20,9 +20,7 @@ import { useSyncSkill } from '../../hooks/useSyncSkill';
 import { useParams } from 'react-router-dom';
 import { ValidationPanel } from './ValidationPanel';
 import { CompilePreviewPanel } from './CompilePreviewPanel';
-import { RunPanel } from './RunPanel';
 import { OutputViewer } from './OutputViewer';
-import { RunHistoryPanel } from './RunHistoryPanel';
 
 /* ── Panel components ─────────────────────────────────────── */
 
@@ -320,9 +318,7 @@ const components = {
   'reference-viewer': ReferenceViewerPanel,
   'validation-panel': ValidationPanel,
   'compile-panel': CompilePreviewPanel,
-  'run-panel': RunPanel,
   'output-viewer': OutputViewer,
-  'run-history-panel': RunHistoryPanel,
   'empty': EmptyPanel,
 };
 
@@ -338,6 +334,7 @@ const TYPE_DOT_COLORS: Record<string, string> = {
   run: 'bg-blue-500',
   output: 'bg-gray-500',
   'run-history': 'bg-blue-400',
+  'pre-run': 'bg-emerald-500',
 };
 
 function ForgeFlowTab(props: IDockviewPanelHeaderProps<EditorTab>) {

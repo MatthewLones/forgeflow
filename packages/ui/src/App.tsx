@@ -7,6 +7,14 @@ const WorkspacePage = lazy(() =>
   import('./pages/WorkspacePage').then((m) => ({ default: m.WorkspacePage })),
 );
 
+const RunDashboardPage = lazy(() =>
+  import('./pages/RunDashboardPage').then((m) => ({ default: m.RunDashboardPage })),
+);
+
+const RunListPage = lazy(() =>
+  import('./pages/RunListPage').then((m) => ({ default: m.RunListPage })),
+);
+
 function Loading() {
   return (
     <div className="h-screen flex items-center justify-center text-sm text-[var(--color-text-muted)]">
@@ -37,6 +45,22 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <WorkspacePage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/projects/:projectId/runs"
+          element={
+            <Suspense fallback={<Loading />}>
+              <RunListPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/projects/:projectId/runs/:runId"
+          element={
+            <Suspense fallback={<Loading />}>
+              <RunDashboardPage />
             </Suspense>
           }
         />

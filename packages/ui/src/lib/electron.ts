@@ -27,6 +27,7 @@ export interface ForgeFlowElectronAPI {
     readFileUtf8: (filePath: string) => Promise<string>;
     writeFile: (filePath: string, data: ArrayBuffer | string) => Promise<void>;
   };
+  onForgeFileOpen?: (callback: (filePath: string) => void) => () => void;
 }
 
 declare global {

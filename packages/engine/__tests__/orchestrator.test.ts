@@ -221,8 +221,14 @@ describe('FlowOrchestrator', () => {
     const types = events.map((e) => e.type);
     expect(types).toEqual([
       'phase_started',
+      'prompt_compiled',
+      'workspace_prepared',
+      'output_validated',
       'phase_completed',
       'phase_started',
+      'prompt_compiled',
+      'workspace_prepared',
+      'output_validated',
       'phase_completed',
       'run_completed',
     ]);

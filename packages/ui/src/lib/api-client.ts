@@ -172,6 +172,35 @@ export const api = {
       put<{ ok: boolean }>(`/projects/${id}/flow`, flow),
 
     getFlow: (id: string) => get<FlowDefinition>(`/projects/${id}/flow`),
+
+    /** Download a .forge bundle as a Blob and trigger browser download */
+    exportBundle: async (id: string, fileName?: string) => {
+      const res = await fetch(`${API_BASE}/projects/${id}/export`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new ApiError(res.status, (data as { error?: string }).error ?? res.statusText);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName ?? `${id}.forge`;
+      // Extract filename from Content-Disposition if available
+      const cd = res.headers.get('Content-Disposition');
+      if (cd) {
+        const match = cd.match(/filename="?([^"]+)"?/);
+        if (match) a.download = match[1];
+      }
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+
+    /** Import a .forge bundle file */
+    importBundle: async (file: File): Promise<ProjectMeta> => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return postFormData<ProjectMeta>('/projects/import', formData);
+    },
   },
 
   skills: {
@@ -237,11 +266,41 @@ export const api = {
 
     compilePreview: (flow: FlowDefinition) =>
       post<CompilePreviewResult>('/compile/preview', flow),
+
+    requiredInputs: (projectId: string) =>
+      get<{
+        requiredInputs: Array<{
+          name: string;
+          schema: {
+            name: string;
+            format: string;
+            description: string;
+            fields?: Array<{
+              key: string;
+              type: string;
+              description: string;
+              required?: boolean;
+            }>;
+          } | null;
+        }>;
+      }>(`/projects/${projectId}/required-inputs`),
   },
 
   runs: {
-    start: (projectId: string, runner: 'mock' | 'local' | 'docker' = 'mock') =>
-      post<{ runId: string }>(`/projects/${projectId}/run`, { runner }),
+    start: (projectId: string, runner: 'mock' | 'local' | 'docker' = 'mock', files?: File[], model?: string) => {
+      const formData = new FormData();
+      formData.append('runner', runner);
+      if (model) formData.append('model', model);
+      if (files) {
+        for (const file of files) {
+          formData.append('files', file, file.name);
+        }
+      }
+      return postFormData<{ runId: string }>(`/projects/${projectId}/run`, formData);
+    },
+
+    stop: (runId: string) =>
+      post<{ ok: boolean }>(`/runs/${runId}/stop`),
 
     getState: (runId: string) =>
       get<import('@forgeflow/types').RunState>(`/runs/${runId}`),
@@ -285,5 +344,71 @@ export const api = {
       const res = await getRaw(`/runs/${runId}/outputs/${encodeURIComponent(fileName)}`);
       return res.text();
     },
+
+    /** Get computed post-run summary */
+    getSummary: (runId: string) =>
+      get<{
+        runId: string;
+        status: string;
+        duration: { startedAt: string; completedAt: string };
+        cost: { turns: number; usd: number };
+        phases: Array<{
+          nodeId: string;
+          nodeName: string;
+          cost: number;
+          outputFiles: string[];
+          missingOutputs: string[];
+          toolCallCount: number;
+          textBlockCount: number;
+        }>;
+        artifacts: Array<{ name: string; size: number; producedBy: string }>;
+        errors: string[];
+        interrupts: Array<{ id: string; type: string; nodeId: string; escalated: boolean }>;
+      }>(`/runs/${runId}/summary`),
+
+    /** List workspace files for a run organized by phase */
+    getWorkspaceTree: (runId: string) =>
+      get<{
+        phases: Array<{
+          phaseId: string;
+          files: Array<{ path: string; size: number }>;
+        }>;
+      }>(`/runs/${runId}/workspace`),
+
+    /** Fetch a specific workspace file as text */
+    getWorkspaceFileText: async (runId: string, phaseId: string, filePath: string): Promise<string> => {
+      const res = await getRaw(`/runs/${runId}/workspace/${encodeURIComponent(phaseId)}/${filePath}`);
+      return res.text();
+    },
+
+    /** Get URL for a workspace file */
+    getWorkspaceFileUrl: (runId: string, phaseId: string, filePath: string) =>
+      `${API_BASE}/runs/${runId}/workspace/${encodeURIComponent(phaseId)}/${filePath}`,
+  },
+
+  copilot: {
+    /** Send a message to the copilot. Returns sessionId. */
+    sendMessage: (projectId: string, message: string, options?: { maxTurns?: number; maxBudgetUsd?: number; model?: string }) =>
+      post<{ sessionId: string }>(`/copilot/${projectId}/message`, { message, ...options }),
+
+    /** SSE stream of copilot events with replay */
+    streamProgress: (sessionId: string): EventSource =>
+      new EventSource(`${API_BASE}/copilot/${sessionId}/progress`),
+
+    /** Answer a pending ask_user question */
+    answerQuestion: (sessionId: string, questionId: string, answer: string) =>
+      post<{ ok: boolean }>(`/copilot/${sessionId}/answer-question`, { questionId, answer }),
+
+    /** Stop the current query */
+    stop: (sessionId: string) =>
+      post<{ ok: boolean }>(`/copilot/${sessionId}/stop`),
+
+    /** Reset the session (clear history) */
+    reset: (sessionId: string) =>
+      post<{ ok: boolean }>(`/copilot/${sessionId}/reset`),
+
+    /** Load past copilot events from disk */
+    loadHistory: (projectId: string) =>
+      get<{ events: import('@forgeflow/types').ProgressEvent[] }>(`/copilot/${projectId}/history`),
   },
 };

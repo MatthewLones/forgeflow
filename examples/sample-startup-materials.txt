@@ -1,0 +1,126 @@
+COMPANY OVERVIEW: NovaBridge AI
+================================
+
+Founded: 2024
+Headquarters: San Francisco, CA
+Stage: Series A
+Sector: Enterprise AI / Developer Tools
+
+FOUNDING TEAM
+-------------
+- Sarah Chen (CEO) — Ex-Google Brain research scientist (7 years), Stanford CS PhD. Led the team that published "Efficient Transformer Distillation" (NeurIPS 2023, 500+ citations). Previously founded a YC W22 startup (acqui-hired by Stripe).
+- Marcus Rivera (CTO) — Ex-Meta infra engineer (10 years), built internal ML serving platform handling 2B+ daily inferences. MS in Distributed Systems, CMU.
+- Dr. Aisha Patel (Chief Scientist) — Former DeepMind researcher, 30+ publications in reinforcement learning and code generation. Oxford DPhil.
+
+TEAM SIZE
+---------
+18 full-time (12 engineering, 3 research, 2 sales, 1 ops)
+Advisory board includes: former VP Engineering at Databricks, partner at a16z
+
+PRODUCT
+-------
+NovaBridge is an AI-powered code migration platform that automatically converts legacy enterprise codebases (COBOL, Fortran, legacy Java) to modern languages (Python, Go, Rust) while preserving business logic and generating comprehensive test suites.
+
+Key differentiator: proprietary "semantic graph" technology that understands business intent, not just syntax. Competing solutions achieve ~60% accuracy on complex migrations; NovaBridge consistently hits 92%+ with human-in-the-loop review.
+
+PRODUCT FEATURES
+- Automated codebase analysis and dependency mapping
+- Incremental migration with rollback capability
+- Generated test suites with 85%+ coverage
+- CI/CD integration (GitHub, GitLab, Jenkins)
+- Compliance-aware migrations (SOX, HIPAA, PCI-DSS)
+- Self-hosted or cloud deployment options
+
+TRACTION & METRICS
+------------------
+- ARR: $2.4M (up from $400K 12 months ago — 6x growth)
+- Customers: 14 enterprise contracts (avg deal size $170K/yr)
+- Pipeline: $8.2M qualified pipeline
+- Logo retention: 100% (no churn to date)
+- Net revenue retention: 145% (expansion within existing accounts)
+- Monthly active migrations: 340 (up from 45 a year ago)
+
+NOTABLE CUSTOMERS
+- Fortune 500 insurance company (migrating 4M LOC COBOL → Java)
+- Major US bank (regulatory compliance migration)
+- Department of Defense contractor (Fortran → Rust for embedded systems)
+- European telecom (legacy billing system modernization)
+
+FINANCIAL OVERVIEW
+------------------
+- Burn rate: $380K/month
+- Runway: 14 months at current burn
+- Gross margin: 78% (blended SaaS + professional services)
+- CAC payback: 11 months
+- LTV/CAC ratio: 5.2x
+
+Previous Funding:
+- Pre-seed: $1.2M (angels + YC, 2024)
+- Seed: $4.5M (led by Sequoia Scout, 2024)
+- Total raised: $5.7M
+
+CURRENT RAISE
+- Seeking: $18M Series A
+- Target valuation: $90M pre-money (5x forward ARR on projected $18M next-12-month ARR)
+- Use of funds:
+  - 50% R&D (expand model training, add support for more legacy languages)
+  - 25% Go-to-market (enterprise sales team expansion, US + EU)
+  - 15% Infrastructure (GPU compute for model training)
+  - 10% G&A
+
+MARKET OPPORTUNITY
+------------------
+- TAM: $87B (global IT modernization spending, Gartner 2025)
+- SAM: $12B (automated code migration tools)
+- SOM: $1.2B (enterprise AI-assisted migration, addressable in 5 years)
+- Market growth: 23% CAGR through 2030
+- Key tailwind: 70% of Fortune 500 still run critical systems on COBOL/Fortran
+- Regulatory pressure increasing (EU Digital Operational Resilience Act mandates modern systems by 2028)
+
+COMPETITIVE LANDSCAPE
+---------------------
+1. IBM watsonx Code Assistant — Large incumbent, broad but shallow AI capabilities. Accuracy ~55% on complex migrations.
+2. AWS Mainframe Modernization — Cloud-lock-in approach, limited language support.
+3. CodeMorph (startup) — Series B, $12M ARR, focused on Java-to-cloud. Not addressing legacy languages.
+4. Manual consulting firms (Accenture, Deloitte) — $200-500/hr, 18-36 month timelines. NovaBridge reduces timeline to 3-6 months.
+
+COMPETITIVE MOAT
+- Proprietary training data: partnerships with 3 Fortune 500 companies providing anonymized legacy codebases
+- 14 pending patents on semantic graph technology
+- First-mover in COBOL+Fortran AI migration (competitors focus on Java/C++)
+- Growing flywheel: each migration improves model accuracy
+
+RISKS
+-----
+- Concentration risk: top 3 customers = 52% of revenue
+- Regulatory: AI-generated code liability frameworks still evolving
+- Technical: scaling accuracy beyond 95% requires exponentially more training data
+- Competition: hyperscalers (AWS, Google, Microsoft) could build competing solutions
+- Key person risk: CEO and CTO are critical; no succession planning yet
+
+IP & LEGAL
+----------
+- 14 provisional patents filed (USPTO), 2 granted
+- All employees have signed IP assignment agreements
+- No outstanding litigation
+- SOC 2 Type II certification in progress (expected Q2 2025)
+- GDPR compliant (EU data residency options available)
+
+CAP TABLE (Pre-Series A)
+-------------------------
+- Founders: 62% (Sarah 30%, Marcus 22%, Aisha 10%)
+- Employee option pool: 15% (8% allocated, 7% unallocated)
+- Seed investors: 18% (Sequoia Scout 10%, angels 8%)
+- YC: 5%
+
+BOARD COMPOSITION
+- Sarah Chen (CEO)
+- Marcus Rivera (CTO)
+- Sequoia Scout representative
+- Independent director (former CTO of Palantir)
+- Series A lead will get a board seat
+
+REFERENCES
+----------
+- "NovaBridge saved us an estimated $40M and 2 years on our mainframe migration." — SVP Technology, Fortune 500 Insurance Co.
+- "The accuracy is remarkable. We expected to need extensive manual review, but the generated code passed 94% of our existing test suites on first pass." — Director of Engineering, US Bank Customer

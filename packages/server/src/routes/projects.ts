@@ -1,8 +1,13 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { ProjectStore } from '../services/project-store.js';
 
 const router = Router();
 const store = new ProjectStore();
+const forgeUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max bundle
+});
 
 // Seed default data on first access
 let seeded = false;
@@ -107,6 +112,50 @@ router.get('/projects/:id/flow', async (req, res) => {
     res.json(flow);
   } catch (err) {
     res.status(500).json({ error: 'Failed to get flow' });
+  }
+});
+
+// GET /api/projects/:id/export — download .forge bundle
+router.get('/projects/:id/export', async (req, res) => {
+  try {
+    const bundle = await store.exportProject(req.params.id);
+    if (!bundle) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+
+    // Get project name for filename
+    const project = await store.getProject(req.params.id);
+    const fileName = (project?.meta.name ?? req.params.id)
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.forge"`);
+    res.setHeader('Content-Length', bundle.length);
+    res.send(bundle);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to export project';
+    res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/projects/import — upload and import a .forge bundle
+router.post('/projects/import', forgeUpload.single('file'), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: 'No file uploaded' });
+      return;
+    }
+
+    const meta = await store.importProject(file.buffer);
+    res.status(201).json(meta);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to import project';
+    res.status(400).json({ error: message });
   }
 });
 

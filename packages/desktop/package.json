@@ -6,13 +6,77 @@
   "scripts": {
     "build": "electron-vite build --config electron-vite.config.ts",
     "dev": "electron-vite build --config electron-vite.config.ts && electron .",
-    "start": "electron ."
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.forgeflow.app",
+    "productName": "ForgeFlow",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "!node_modules"
+    ],
+    "extraResources": [
+      {
+        "from": "../ui/dist",
+        "to": "ui",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "forge",
+        "name": "ForgeFlow Project",
+        "description": "ForgeFlow project bundle",
+        "mimeType": "application/x-forgeflow",
+        "icon": "resources/forge-file",
+        "role": "Editor"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "resources/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "darkModeSupport": true
+    },
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "icon": "resources",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@forgeflow/server": "workspace:*"
   },
   "devDependencies": {
     "electron": "^35.0.0",
+    "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0"
   }
 }

@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useFlow } from '../../context/FlowContext';
 import { useDag } from '../../context/DagContext';
 import { useLayout } from '../../context/LayoutContext';
-import { useRun } from '../../context/RunContext';
 import { api } from '../../lib/api-client';
+import { ForgeExportIcon } from '../icons/ForgeFileIcon';
 import type { SaveStatus } from '../../hooks/useSyncFlow';
 
 interface WorkspaceToolbarProps {
@@ -25,11 +25,11 @@ export function WorkspaceToolbar({ projectId, onToggleAI, aiPanelOpen, saveStatu
   const { state } = useFlow();
   const { flow } = state;
   const { dagCollapsed, toggleDag } = useDag();
-  const { openTab, selectRunHistory } = useLayout();
-  const { run, startRun, resetRun } = useRun();
+  const { openTab } = useLayout();
   const navigate = useNavigate();
   const [validating, setValidating] = useState(false);
   const [compiling, setCompiling] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const handleValidate = async () => {
     setValidating(true);
@@ -61,13 +61,23 @@ export function WorkspaceToolbar({ projectId, onToggleAI, aiPanelOpen, saveStatu
     }
   };
 
-  const isRunning = run.status === 'running' || run.status === 'starting';
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await api.projects.exportBundle(projectId);
+    } catch {
+      // Could show a toast, but for now silent
+    } finally {
+      setExporting(false);
+    }
+  };
 
-  const handleRun = async () => {
-    if (isRunning) return;
-    if (run.status !== 'idle') resetRun();
-    openTab({ id: 'run', type: 'run', label: 'Run' });
-    await startRun(projectId, 'mock');
+  const handleRun = () => {
+    navigate(`/projects/${projectId}/runs/new`);
+  };
+
+  const handleHistory = () => {
+    navigate(`/projects/${projectId}/runs`);
   };
 
   return (
@@ -107,8 +117,23 @@ export function WorkspaceToolbar({ projectId, onToggleAI, aiPanelOpen, saveStatu
         </button>
         <ToolbarButton label={validating ? 'Validating...' : 'Validate'} onClick={handleValidate} disabled={validating} />
         <ToolbarButton label={compiling ? 'Compiling...' : 'Compile'} onClick={handleCompile} disabled={compiling} />
-        <RunButton status={run.status} onClick={handleRun} disabled={isRunning} />
-        <ToolbarButton label="History" onClick={() => selectRunHistory(projectId)} />
+        <button
+          type="button"
+          onClick={handleRun}
+          className="text-xs font-medium px-3 py-1.5 rounded-md border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+        >
+          Run
+        </button>
+        <ToolbarButton label="History" onClick={handleHistory} />
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={exporting}
+          className="text-xs font-medium px-3 py-1.5 rounded-md border border-[var(--color-border)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+        >
+          <ForgeExportIcon size={13} />
+          {exporting ? 'Exporting...' : 'Export'}
+        </button>
 
         {onToggleAI && (
           <button
@@ -147,33 +172,3 @@ function ToolbarButton({ label, onClick, disabled, title }: {
   );
 }
 
-const RUN_LABELS: Record<string, string> = {
-  idle: 'Run',
-  starting: 'Starting...',
-  running: 'Running...',
-  awaiting_input: 'Waiting...',
-  completed: 'Run',
-  failed: 'Run',
-};
-
-function RunButton({ status, onClick, disabled }: {
-  status: string;
-  onClick?: () => void;
-  disabled?: boolean;
-}) {
-  const isActive = status === 'running' || status === 'starting';
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`text-xs font-medium px-3 py-1.5 rounded-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-        isActive
-          ? 'border-blue-500 bg-blue-500 text-white'
-          : 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700'
-      }`}
-    >
-      {RUN_LABELS[status] ?? 'Run'}
-    </button>
-  );
-}

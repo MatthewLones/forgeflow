@@ -4,6 +4,7 @@ import { FlowProvider, useFlow } from '../context/FlowContext';
 import { DagProvider, useDag } from '../context/DagContext';
 import { LayoutProvider } from '../context/LayoutContext';
 import { RunProvider } from '../context/RunContext';
+import { CopilotProvider } from '../context/CopilotContext';
 import { useProjectStore } from '../context/ProjectStore';
 import { AgentExplorer } from '../components/workspace/AgentExplorer';
 import { WorkspaceToolbar } from '../components/workspace/WorkspaceToolbar';
@@ -11,6 +12,7 @@ import { DagMiniView } from '../components/workspace/DagMiniView';
 import { EditorLayout } from '../components/workspace/EditorLayout';
 import { AISidePanel } from '../components/ai/AISidePanel';
 import { autoLayout } from '../lib/flow-to-reactflow';
+import { api } from '../lib/api-client';
 import { useSyncFlow, type SaveStatus } from '../hooks/useSyncFlow';
 import { useAutoEdges } from '../hooks/useAutoEdges';
 
@@ -84,71 +86,83 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
   // Auto-create/remove DAG edges based on artifact dependencies
   useAutoEdges();
 
+  // Reload flow from server when copilot mutates it
+  const handleFlowChanged = useCallback(async () => {
+    try {
+      const flow = await api.projects.getFlow(projectId);
+      if (flow) dispatch({ type: 'SET_FLOW', flow });
+    } catch (err) {
+      console.error('Failed to reload flow after copilot change:', err);
+    }
+  }, [projectId, dispatch]);
+
   return (
-    <div className="h-screen flex flex-col">
-      <WorkspaceToolbar projectId={projectId} onToggleAI={() => setAiPanelOpen((v) => !v)} aiPanelOpen={aiPanelOpen} saveStatus={saveStatus} />
+    <CopilotProvider projectId={projectId} onFlowChanged={handleFlowChanged}>
+      <div className="h-screen flex flex-col">
+        <WorkspaceToolbar projectId={projectId} onToggleAI={() => setAiPanelOpen((v) => !v)} aiPanelOpen={aiPanelOpen} saveStatus={saveStatus} />
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left sidebar — Agent Explorer */}
-        <div
-          className="border-r border-[var(--color-border)] shrink-0 overflow-hidden bg-[var(--color-sidebar-bg)]"
-          style={{ width: sidebar.size }}
-        >
-          <AgentExplorer />
-        </div>
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left sidebar — Agent Explorer */}
+          <div
+            className="border-r border-[var(--color-border)] shrink-0 overflow-hidden bg-[var(--color-sidebar-bg)]"
+            style={{ width: sidebar.size }}
+          >
+            <AgentExplorer />
+          </div>
 
-        {/* Sidebar resize handle */}
-        <div
-          className="w-1 shrink-0 cursor-col-resize hover:bg-[var(--color-node-agent)]/20 active:bg-[var(--color-node-agent)]/30 transition-colors"
-          onPointerDown={sidebar.onPointerDown}
-          onPointerMove={sidebar.onPointerMove}
-          onPointerUp={sidebar.onPointerUp}
-        />
+          {/* Sidebar resize handle */}
+          <div
+            className="w-1 shrink-0 cursor-col-resize hover:bg-[var(--color-node-agent)]/20 active:bg-[var(--color-node-agent)]/30 transition-colors"
+            onPointerDown={sidebar.onPointerDown}
+            onPointerMove={sidebar.onPointerMove}
+            onPointerUp={sidebar.onPointerUp}
+          />
 
-        {/* Main area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* DAG mini-view (collapsible + resizable) */}
-          {!dagCollapsed && (
+          {/* Main area */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* DAG mini-view (collapsible + resizable) */}
+            {!dagCollapsed && (
+              <>
+                <DagMiniView height={dag.size} />
+                <div
+                  className="h-1 shrink-0 cursor-row-resize hover:bg-[var(--color-node-agent)]/20 active:bg-[var(--color-node-agent)]/30 transition-colors"
+                  onPointerDown={dag.onPointerDown}
+                  onPointerMove={dag.onPointerMove}
+                  onPointerUp={dag.onPointerUp}
+                />
+              </>
+            )}
+            {dagCollapsed && (
+              <div className="h-0 border-b border-[var(--color-border)]" />
+            )}
+
+            {/* Editor panel(s) — dockview manages splits */}
+            <div className="flex-1 overflow-hidden bg-white">
+              <EditorLayout />
+            </div>
+          </div>
+
+          {/* AI Side Panel */}
+          {aiPanelOpen && (
             <>
-              <DagMiniView height={dag.size} />
+              {/* AI panel resize handle */}
               <div
-                className="h-1 shrink-0 cursor-row-resize hover:bg-[var(--color-node-agent)]/20 active:bg-[var(--color-node-agent)]/30 transition-colors"
-                onPointerDown={dag.onPointerDown}
-                onPointerMove={dag.onPointerMove}
-                onPointerUp={dag.onPointerUp}
+                className="w-1 shrink-0 cursor-col-resize hover:bg-[var(--color-node-agent)]/20 active:bg-[var(--color-node-agent)]/30 transition-colors"
+                onPointerDown={aiPanel.onPointerDown}
+                onPointerMove={aiPanel.onPointerMove}
+                onPointerUp={aiPanel.onPointerUp}
               />
+              <div
+                className="shrink-0 border-l border-[var(--color-border)] overflow-hidden"
+                style={{ width: aiPanel.size }}
+              >
+                <AISidePanel />
+              </div>
             </>
           )}
-          {dagCollapsed && (
-            <div className="h-0 border-b border-[var(--color-border)]" />
-          )}
-
-          {/* Editor panel(s) — dockview manages splits */}
-          <div className="flex-1 overflow-hidden bg-white">
-            <EditorLayout />
-          </div>
         </div>
-
-        {/* AI Side Panel */}
-        {aiPanelOpen && (
-          <>
-            {/* AI panel resize handle */}
-            <div
-              className="w-1 shrink-0 cursor-col-resize hover:bg-[var(--color-node-agent)]/20 active:bg-[var(--color-node-agent)]/30 transition-colors"
-              onPointerDown={aiPanel.onPointerDown}
-              onPointerMove={aiPanel.onPointerMove}
-              onPointerUp={aiPanel.onPointerUp}
-            />
-            <div
-              className="shrink-0 border-l border-[var(--color-border)] overflow-hidden"
-              style={{ width: aiPanel.size }}
-            >
-              <AISidePanel />
-            </div>
-          </>
-        )}
       </div>
-    </div>
+    </CopilotProvider>
   );
 }
 
