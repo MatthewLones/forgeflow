@@ -12,10 +12,10 @@ import { ActivityIndicator } from '../run-dashboard/ActivityIndicator';
 function selectionChip(selection: WorkspaceSelection): { icon: string; label: string } | null {
   if (!selection) return null;
   switch (selection.type) {
-    case 'agent': return { icon: 'a', label: selection.nodeId };
-    case 'skill': return { icon: 's', label: selection.skillName };
-    case 'reference': return { icon: 'r', label: selection.refPath.split('/').pop() ?? selection.refPath };
-    case 'artifact': return { icon: 'f', label: selection.artifactName };
+    case 'agent': return { icon: '//', label: selection.nodeId };
+    case 'skill': return { icon: '/', label: selection.skillName };
+    case 'reference': return { icon: '@', label: selection.refPath.split('/').pop() ?? selection.refPath };
+    case 'artifact': return { icon: '@', label: selection.artifactName };
     default: return null;
   }
 }
@@ -55,19 +55,19 @@ function renderMarkdown(text: string, entities?: KnownEntities): string {
 
     // Check interrupt types
     if (interruptSet.has(lower)) {
-      return `<span class="forge-chip" data-chip-type="interrupt" data-chip-value="${lower}" style="${CHIP_BASE_STYLE}color:${interrupt.color};background:${interrupt.bg};">${trimmed}</span>`;
+      return `<span class="forge-chip" data-chip-type="interrupt" data-chip-value="${lower}" style="${CHIP_BASE_STYLE}color:${interrupt.color};background:${interrupt.bg};">/interrupt:${lower}</span>`;
     }
     // Check node IDs (agents)
     if (entities?.nodeIds.has(trimmed)) {
-      return `<span class="forge-chip" data-chip-type="agent" data-chip-value="${trimmed}" style="${CHIP_BASE_STYLE}color:${agent.color};background:${agent.bg};">${trimmed}</span>`;
+      return `<span class="forge-chip" data-chip-type="agent" data-chip-value="${trimmed}" style="${CHIP_BASE_STYLE}color:${agent.color};background:${agent.bg};">//agent:${trimmed}</span>`;
     }
     // Check skill names
     if (entities?.skillNames.has(trimmed)) {
-      return `<span class="forge-chip" data-chip-type="skill" data-chip-value="${trimmed}" style="${CHIP_BASE_STYLE}color:${skill.color};background:${skill.bg};">s&thinsp;${trimmed}</span>`;
+      return `<span class="forge-chip" data-chip-type="skill" data-chip-value="${trimmed}" style="${CHIP_BASE_STYLE}color:${skill.color};background:${skill.bg};">/skill:${trimmed}</span>`;
     }
     // Check artifact names
     if (entities?.artifactNames.has(trimmed)) {
-      return `<span class="forge-chip" data-chip-type="artifact" data-chip-value="${trimmed}" style="${CHIP_BASE_STYLE}color:${artifact.color};background:${artifact.bg};">f&thinsp;${trimmed}</span>`;
+      return `<span class="forge-chip" data-chip-type="artifact" data-chip-value="${trimmed}" style="${CHIP_BASE_STYLE}color:${artifact.color};background:${artifact.bg};">@${trimmed}</span>`;
     }
 
     // Not a known entity — keep as regular code
@@ -93,7 +93,9 @@ export function AISidePanel() {
   const isActive = state.status === 'active';
   const isWaiting = state.status === 'waiting_answer';
 
-  // Build known entities from the flow for chip rendering
+  // Build known entities from the flow for chip rendering.
+  // Also scan copilot tool calls for entities the copilot just created
+  // (they may not be in the flow state yet due to async reload timing).
   const knownEntities = useMemo<KnownEntities>(() => {
     const nodeIds = new Set<string>();
     function collectNodes(nodes: Array<{ id: string; children: Array<{ id: string; children: unknown[] }> }>) {
@@ -107,16 +109,51 @@ export function AISidePanel() {
     const skillNames = new Set(availableSkills.map((s) => s.name));
     const artifactNames = new Set(Object.keys(flowState.flow.artifacts ?? {}));
 
-    // Collect interrupt types from node configs
-    const interruptTypes = new Set(['review', 'approval', 'qa', 'selection']);
-    for (const n of flowState.flow.nodes) {
-      for (const iCfg of n.config.interrupts ?? []) {
-        interruptTypes.add(iCfg.type.toLowerCase());
+    // Also collect node outputs as artifact names
+    function collectOutputs(nodes: Array<{ config: { outputs?: Array<string | { name: string }> }; children: unknown[] }>) {
+      for (const n of nodes) {
+        for (const o of n.config.outputs ?? []) {
+          artifactNames.add(typeof o === 'string' ? o : o.name);
+        }
+        if (Array.isArray(n.children)) collectOutputs(n.children as typeof nodes);
+      }
+    }
+    collectOutputs(flowState.flow.nodes);
+
+    // Scan copilot tool calls for entities the copilot just created/mentioned
+    // This ensures chips render immediately even before flow reload completes
+    for (const msg of state.messages) {
+      if (!msg.toolCalls) continue;
+      for (const tc of msg.toolCalls) {
+        const name = tc.toolName;
+        const summary = tc.inputSummary ?? '';
+        if (name === 'mcp__forgeflow__add_node' || name === 'mcp__forgeflow__update_node' || name === 'mcp__forgeflow__add_child') {
+          // inputSummary typically starts with the node id or contains it
+          const idMatch = summary.match(/^"?(\w+)"?/);
+          if (idMatch) nodeIds.add(idMatch[1]);
+        } else if (name === 'mcp__forgeflow__create_skill' || name === 'mcp__forgeflow__update_skill') {
+          const skillMatch = summary.match(/^"?([a-z][\w-]*)"?/);
+          if (skillMatch) skillNames.add(skillMatch[1]);
+        }
+      }
+    }
+    // Also scan pending tool calls
+    for (const tc of state.pendingToolCalls) {
+      const name = tc.toolName;
+      const summary = tc.inputSummary ?? '';
+      if (name === 'mcp__forgeflow__add_node' || name === 'mcp__forgeflow__update_node' || name === 'mcp__forgeflow__add_child') {
+        const idMatch = summary.match(/^"?(\w+)"?/);
+        if (idMatch) nodeIds.add(idMatch[1]);
+      } else if (name === 'mcp__forgeflow__create_skill' || name === 'mcp__forgeflow__update_skill') {
+        const skillMatch = summary.match(/^"?([a-z][\w-]*)"?/);
+        if (skillMatch) skillNames.add(skillMatch[1]);
       }
     }
 
+    const interruptTypes = new Set(['review', 'approval', 'qa', 'selection']);
+
     return { nodeIds, skillNames, artifactNames, interruptTypes };
-  }, [flowState.flow.nodes, flowState.flow.artifacts, availableSkills]);
+  }, [flowState.flow.nodes, flowState.flow.artifacts, availableSkills, state.messages, state.pendingToolCalls]);
 
   // Auto-resize textarea — grows up to 240px then scrolls
   useEffect(() => {
@@ -241,7 +278,7 @@ export function AISidePanel() {
             {state.pendingText && (
               <div className="max-w-[90%] rounded-lg px-3 py-2 text-xs leading-relaxed bg-[var(--color-canvas-bg)] text-[var(--color-text-primary)] border border-[var(--color-border)]">
                 <div className="prose-copilot" dangerouslySetInnerHTML={{ __html: renderMarkdown(state.pendingText, knownEntities) }} />
-                {isActive && <span className="animate-pulse text-[var(--color-node-agent)]">|</span>}
+                {isActive && state.pendingToolCalls.length === 0 && <span className="animate-pulse text-[var(--color-node-agent)]">|</span>}
               </div>
             )}
             {verbosity !== 'compact' && state.pendingToolCalls.length > 0 && (

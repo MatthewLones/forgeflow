@@ -298,9 +298,11 @@ export class CopilotManager {
             ? b.content
             : JSON.stringify(b.content ?? '');
           const toolName = toolNameMap.get(b.tool_use_id as string) ?? 'unknown';
+          // Strip MCP prefix (e.g. "mcp__forgeflow__add_node" → "add_node")
+          const bareName = toolName.replace(/^mcp__forgeflow__/, '');
 
           // Detect flow-mutating tool results
-          if (MUTATING_TOOLS.has(toolName) && b.is_error !== true) {
+          if (MUTATING_TOOLS.has(bareName) && b.is_error !== true) {
             this.emitEvent(session, {
               type: 'copilot_flow_changed',
               projectId: session.projectId,

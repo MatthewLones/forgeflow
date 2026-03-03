@@ -70,7 +70,7 @@ A directed acyclic graph of nodes connected by edges. The flow has:
   "id": "analyze_risks",
   "type": "agent",
   "name": "Risk Analysis",
-  "instructions": "Read @company_profile and @market_analysis. Evaluate financial risks, competitive threats, and regulatory exposure. Write findings to risk_matrix with severity ratings (high/medium/low) for each risk category.\n\n/interrupt:qa",
+  "instructions": "Read @company_profile and @market_analysis. Evaluate financial risks, competitive threats, and regulatory exposure. Write findings to risk_matrix with severity ratings (high/medium/low) for each risk category.\n\nOnce the risk matrix is complete, pause for /interrupt:qa so a human can verify severity ratings are calibrated correctly and no major risk categories were overlooked.",
   "config": {
     "inputs": ["company_profile", "market_analysis"],
     "outputs": ["risk_matrix"],
@@ -147,15 +147,26 @@ Use children when a node needs to coordinate parallel research streams. The pare
 \`\`\`
 
 ## Interrupts (Human Oversight)
-Interrupts pause an agent mid-run for human input. They are **slash commands written in the instructions text**, just like \`/skill:name\` or \`//agent:name\`. The UI derives config from the text — never set interrupts in config directly.
+Interrupts pause an agent mid-run for human input. They are **slash commands woven into the instructions text**, just like \`/skill:name\` or \`//agent:name\`. The UI derives config from the text — never set interrupts in config directly.
 
-Write them anywhere in the node's instructions:
-- \`/interrupt:approval\` — Before destructive/expensive operations
-- \`/interrupt:qa\` — After analysis — let human verify quality
-- \`/interrupt:review\` — For document/code review gates
-- \`/interrupt:selection\` — When agent needs user to choose between options
+**CRITICAL: Interrupts must be integrated naturally into the instructions, not placed as bare tags on their own line.** The surrounding text should describe:
+- **What** should be reviewed/asked/approved
+- **Why** this pause point matters
+- **What the human should look for** or decide
 
-Example in instructions: \`"Analyze the data and produce \\risk_matrix.\\n\\n/interrupt:review"\`
+Types:
+- \`/interrupt:approval\` — Human must approve before proceeding (yes/no gate)
+- \`/interrupt:qa\` — Human reviews and answers specific questions about the work
+- \`/interrupt:review\` — Human reviews a draft or analysis for accuracy
+- \`/interrupt:selection\` — Human chooses between options the agent presents
+
+**Good examples:**
+- "Before finalizing, pause for /interrupt:review so a human can verify the market sizing methodology and confirm the TAM estimates are grounded in cited sources."
+- "Once the risk matrix is assembled, trigger /interrupt:qa to let a human review the aggregated scores. Key questions: Are any risk dimensions under-weighted? Do the findings contradict each other?"
+- "Before delivering the final documents, require /interrupt:approval from a senior partner. They should confirm the investment thesis holds and the proposed terms are within fund guidelines."
+
+**Bad example (never do this):**
+- Just writing \`/interrupt:review\` alone on a line with no context
 
 **When to use interrupts vs checkpoints:**
 - **Interrupts**: Lightweight pause within an agent's work. The agent can continue after the human responds. Use for quality checks, approvals, decisions mid-workflow.
