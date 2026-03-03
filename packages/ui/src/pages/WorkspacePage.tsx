@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { FlowProvider, useFlow } from '../context/FlowContext';
 import { DagProvider, useDag } from '../context/DagContext';
@@ -90,7 +90,27 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
   const handleFlowChanged = useCallback(async () => {
     try {
       const flow = await api.projects.getFlow(projectId);
-      if (flow) dispatch({ type: 'SET_FLOW', flow });
+      if (!flow) return;
+
+      // Compute positions for the updated flow (auto-layout if new nodes appeared)
+      let newPositions: Record<string, { x: number; y: number }>;
+      if (flow.layout && Object.keys(flow.layout).length > 0) {
+        const allHavePositions = flow.nodes.every((n) => flow.layout![n.id]);
+        if (allHavePositions) {
+          newPositions = flow.layout;
+        } else {
+          // Mix saved + auto-layout for new nodes
+          newPositions = await autoLayout(flow.nodes, flow.edges);
+          // Prefer saved positions where available
+          for (const [id, pos] of Object.entries(flow.layout)) {
+            newPositions[id] = pos;
+          }
+        }
+      } else {
+        newPositions = await autoLayout(flow.nodes, flow.edges);
+      }
+
+      dispatch({ type: 'SET_FLOW', flow, positions: newPositions });
     } catch (err) {
       console.error('Failed to reload flow after copilot change:', err);
     }
@@ -192,10 +212,36 @@ export function WorkspacePage() {
 
   const flow = id ? getFlowById(id) : null;
 
-  const positions = useMemo(
-    () => (flow ? autoLayout(flow.nodes, flow.edges) : {}),
-    [flow],
-  );
+  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [layoutReady, setLayoutReady] = useState(false);
+
+  useEffect(() => {
+    if (!flow) {
+      setLayoutReady(true);
+      return;
+    }
+
+    // If saved layout positions exist for all nodes, use them immediately
+    if (flow.layout && Object.keys(flow.layout).length > 0) {
+      const allHavePositions = flow.nodes.every((n) => flow.layout![n.id]);
+      if (allHavePositions) {
+        setPositions(flow.layout);
+        setLayoutReady(true);
+        return;
+      }
+    }
+
+    // Otherwise compute layout via ELK (async)
+    let cancelled = false;
+    setLayoutReady(false);
+    autoLayout(flow.nodes, flow.edges).then((pos) => {
+      if (!cancelled) {
+        setPositions(pos);
+        setLayoutReady(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [flow]);
 
   if (!id) {
     return (
@@ -205,7 +251,7 @@ export function WorkspacePage() {
     );
   }
 
-  if (loading) {
+  if (loading || !layoutReady) {
     return (
       <div className="h-screen flex items-center justify-center">
         <div className="flex items-center gap-3 text-sm text-[var(--color-text-muted)]">

@@ -33,6 +33,7 @@ interface FlowContextValue {
   addArtifact: (artifact: ArtifactSchema) => void;
   updateArtifact: (name: string, updates: Partial<ArtifactSchema>) => void;
   removeArtifact: (name: string) => void;
+  clearLayout: () => void;
 }
 
 const FlowContext = createContext<FlowContextValue | null>(null);
@@ -161,6 +162,11 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
     [],
   );
 
+  const clearLayout = useCallback(
+    () => dispatch({ type: 'CLEAR_LAYOUT' }),
+    [],
+  );
+
   return (
     <FlowContext.Provider
       value={{
@@ -180,6 +186,7 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
         addArtifact,
         updateArtifact,
         removeArtifact,
+        clearLayout,
       }}
     >
       {children}

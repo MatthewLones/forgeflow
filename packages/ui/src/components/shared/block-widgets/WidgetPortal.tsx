@@ -4,7 +4,6 @@ import { WidgetType, type EditorView } from '@codemirror/view';
 import type { SkillBlockType, SkillBlockData } from '../../../lib/skill-block-types';
 import { InputTableWidget } from './InputTableWidget';
 import { DecisionTreeWidget } from './DecisionTreeWidget';
-import { GuardrailWidget } from './GuardrailWidget';
 import { buildFencedBlock } from './block-templates';
 
 const FENCED_BLOCK_RE = /```forgeflow:([\w-]+)\n([\s\S]*?)```/g;
@@ -149,5 +148,4 @@ export class SkillBlockWidget extends WidgetType {
 const WIDGET_MAP: Partial<Record<SkillBlockType, React.FC<{ data: any; onChange: (data: any) => void }>>> = {
   input: InputTableWidget,
   decision: DecisionTreeWidget,
-  guardrail: GuardrailWidget,
 };

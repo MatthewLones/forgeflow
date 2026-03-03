@@ -1,6 +1,6 @@
 import type { ParsedSkillBlock, SkillBlockType, SkillBlockData } from './skill-block-types';
 
-const BLOCK_TYPES: Set<string> = new Set(['output', 'input', 'decision', 'guardrail']);
+const BLOCK_TYPES: Set<string> = new Set(['output', 'input', 'decision']);
 
 /**
  * Regex matching a forgeflow fenced code block:

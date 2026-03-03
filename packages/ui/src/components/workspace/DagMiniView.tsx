@@ -4,9 +4,13 @@ import {
   Background,
   BackgroundVariant,
   useReactFlow,
+  applyNodeChanges,
   type NodeMouseHandler,
   type NodeTypes,
   type EdgeTypes,
+  type ReactFlowInstance,
+  type NodeChange,
+  type Node,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { FlowNode } from '@forgeflow/types';
@@ -20,6 +24,11 @@ import {
   flowNodesToReactFlow,
   flowEdgesToReactFlow,
 } from '../../lib/flow-to-reactflow';
+import {
+  createDefaultNode,
+  generateNodeId,
+  collectAllNodeIds,
+} from '../../context/FlowReducer';
 import { AgentNode } from '../canvas/nodes/AgentNode';
 import { CheckpointNode } from '../canvas/nodes/CheckpointNode';
 import { FlowEdge } from '../canvas/edges/FlowEdge';
@@ -87,13 +96,14 @@ function CollapseIcon({ className }: { className?: string }) {
 }
 
 export function DagMiniView(props: { height?: number }) {
-  const { state, selectNode } = useFlow();
+  const { state, selectNode, addNode, removeNode, addChild, addEdge, clearLayout, dispatch } = useFlow();
   const { dagBreadcrumb, dagDrillIn, dagDrillOut, dagDrillForward, dagDrillRoot, canGoForward } = useDag();
   const { activeTabId, selectAgent } = useLayout();
   const { run } = useRun();
   const [fullscreen, setFullscreen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuEntry[] } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
 
   // Close fullscreen on Escape
   useEffect(() => {
@@ -123,26 +133,43 @@ export function DagMiniView(props: { height?: number }) {
     return { nodes: state.flow.nodes, edges: state.flow.edges, isChildren: false };
   }, [state.flow.nodes, state.flow.edges, dagBreadcrumb]);
 
+  // Positions: use state.positions at root level, childrenLayout for drilled-in views
   const positions = useMemo(() => {
     if (displayData.isChildren) {
-      return childrenLayout(displayData.nodes, {});
+      return childrenLayout(displayData.nodes, state.positions);
     }
-    return autoLayout(displayData.nodes, displayData.edges);
-  }, [displayData]);
+    // At root level, positions come from FlowReducer state (loaded from flow.layout or auto-computed)
+    const result: Record<string, { x: number; y: number }> = {};
+    for (const node of displayData.nodes) {
+      result[node.id] = state.positions[node.id] ?? { x: 0, y: 0 };
+    }
+    return result;
+  }, [displayData, state.positions]);
 
-  const rfNodes = useMemo(
-    () => {
-      const nodes = flowNodesToReactFlow(displayData.nodes, positions);
-      return nodes.map((n) => ({
+  // Manage nodes as state so React Flow can update positions during drag
+  const [rfNodes, setRfNodes] = useState<Node[]>([]);
+
+  // Sync rfNodes when source data changes
+  useEffect(() => {
+    const nodes = flowNodesToReactFlow(displayData.nodes, positions);
+    setRfNodes(
+      nodes.map((n) => ({
         ...n,
         selected: n.id === activeTabId,
         data: {
           ...n.data,
           runStatus: run.nodeStatuses[n.id] ?? 'idle',
         },
-      }));
+      })),
+    );
+  }, [displayData.nodes, positions, activeTabId, run.nodeStatuses]);
+
+  // Apply node changes (drag, select) in real-time
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      setRfNodes((nds) => applyNodeChanges(changes, nds));
     },
-    [displayData.nodes, positions, activeTabId, run.nodeStatuses],
+    [],
   );
 
   const rfEdges = useMemo(
@@ -159,13 +186,17 @@ export function DagMiniView(props: { height?: number }) {
     [displayData.edges, activeTabId],
   );
 
+  // Dismiss context menu on any interaction
+  const dismissContextMenu = useCallback(() => setContextMenu(null), []);
+
   const handleNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
+      dismissContextMenu();
       const flowNode = findNode(state.flow.nodes, node.id);
       selectAgent(node.id, flowNode?.name);
       selectNode(node.id);
     },
-    [selectAgent, selectNode, state.flow.nodes],
+    [selectAgent, selectNode, state.flow.nodes, dismissContextMenu],
   );
 
   const handleNodeDoubleClick: NodeMouseHandler = useCallback(
@@ -178,22 +209,154 @@ export function DagMiniView(props: { height?: number }) {
     [dagDrillIn, state.flow.nodes],
   );
 
+  // Persist position on drag stop
+  const handleNodeDragStop: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      dispatch({
+        type: 'MOVE_NODE',
+        nodeId: node.id,
+        position: node.position,
+      });
+    },
+    [dispatch],
+  );
+
+  // Rich right-click context menu for nodes
   const handleNodeContextMenu: NodeMouseHandler = useCallback(
     (event, node) => {
       event.preventDefault();
       const flowNode = findNode(state.flow.nodes, node.id);
+      if (!flowNode) return;
+
+      const existingIds = collectAllNodeIds(state.flow.nodes);
+
       const items: ContextMenuEntry[] = [
-        { label: 'Open', onClick: () => { selectAgent(node.id, flowNode?.name); selectNode(node.id); } },
+        {
+          label: 'Open',
+          onClick: () => {
+            selectAgent(node.id, flowNode.name);
+            selectNode(node.id);
+          },
+        },
+        { separator: true },
+        {
+          label: 'Add Agent After',
+          onClick: () => {
+            const id = generateNodeId('new_agent', existingIds);
+            const newNode = createDefaultNode('agent', id);
+            const pos = { x: node.position.x + 300, y: node.position.y };
+            dispatch({ type: 'ADD_NODE', node: newNode, position: pos });
+            dispatch({ type: 'ADD_EDGE', edge: { from: node.id, to: id } });
+          },
+        },
+        {
+          label: 'Add Checkpoint After',
+          onClick: () => {
+            const id = generateNodeId('new_checkpoint', existingIds);
+            const newNode = createDefaultNode('checkpoint', id);
+            const pos = { x: node.position.x + 300, y: node.position.y };
+            dispatch({ type: 'ADD_NODE', node: newNode, position: pos });
+            dispatch({ type: 'ADD_EDGE', edge: { from: node.id, to: id } });
+          },
+        },
       ];
-      if (flowNode && flowNode.children.length > 0) {
+
+      // Add Sub-Agent (only for agent nodes)
+      if (flowNode.type === 'agent') {
+        items.push({
+          label: 'Add Sub-Agent',
+          onClick: () => addChild(node.id, { x: 0, y: 0 }),
+        });
+      }
+
+      items.push({ separator: true });
+
+      // Duplicate
+      items.push({
+        label: 'Duplicate',
+        onClick: () => {
+          const id = generateNodeId(flowNode.id, existingIds);
+          const clone = JSON.parse(JSON.stringify(flowNode)) as FlowNode;
+          clone.id = id;
+          clone.name = `${flowNode.name} (copy)`;
+          const pos = { x: node.position.x + 40, y: node.position.y + 40 };
+          dispatch({ type: 'ADD_NODE', node: clone, position: pos });
+        },
+      });
+
+      items.push({ separator: true });
+
+      // Drill In/Out
+      if (flowNode.children.length > 0) {
         items.push({ label: 'Drill In', onClick: () => dagDrillIn(node.id) });
       }
       if (dagBreadcrumb.length > 0) {
         items.push({ label: 'Drill Out', onClick: dagDrillOut });
       }
-      setContextMenu({ x: (event as unknown as React.MouseEvent).clientX, y: (event as unknown as React.MouseEvent).clientY, items });
+
+      // Delete
+      items.push({ separator: true });
+      items.push({
+        label: 'Delete',
+        danger: true,
+        onClick: () => removeNode(node.id),
+      });
+
+      setContextMenu({
+        x: (event as unknown as React.MouseEvent).clientX,
+        y: (event as unknown as React.MouseEvent).clientY,
+        items,
+      });
     },
-    [selectAgent, selectNode, dagDrillIn, dagDrillOut, dagBreadcrumb, state.flow.nodes],
+    [state.flow.nodes, selectAgent, selectNode, addChild, removeNode, dagDrillIn, dagDrillOut, dagBreadcrumb, dispatch],
+  );
+
+  // Canvas-level right-click context menu
+  const handlePaneContextMenu = useCallback(
+    (event: MouseEvent | React.MouseEvent) => {
+      event.preventDefault();
+
+      const flowPos = rfInstance
+        ? rfInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+        : { x: 0, y: 0 };
+
+      const items: ContextMenuEntry[] = [
+        {
+          label: 'Add Agent Here',
+          onClick: () => addNode('agent', flowPos),
+        },
+        {
+          label: 'Add Checkpoint Here',
+          onClick: () => addNode('checkpoint', flowPos),
+        },
+        { separator: true },
+        {
+          label: 'Auto-Layout',
+          onClick: async () => {
+            const newPositions = await autoLayout(
+              displayData.nodes,
+              displayData.edges,
+            );
+            // Clear saved layout first, then set new positions
+            dispatch({ type: 'CLEAR_LAYOUT' });
+            for (const [nodeId, pos] of Object.entries(newPositions)) {
+              dispatch({ type: 'MOVE_NODE', nodeId, position: pos });
+            }
+          },
+        },
+        {
+          label: 'Fit View',
+          onClick: () => rfInstance?.fitView({ padding: 0.3, duration: 300 }),
+        },
+      ];
+
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        items,
+      });
+    },
+    [rfInstance, addNode, displayData, dispatch],
   );
 
   const breadcrumbNames = useMemo(() => {
@@ -278,23 +441,31 @@ export function DagMiniView(props: { height?: number }) {
         edges={rfEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        onInit={setRfInstance}
+        onNodesChange={handleNodesChange}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
         onNodeContextMenu={handleNodeContextMenu}
+        onNodeDragStop={handleNodeDragStop}
+        onPaneClick={dismissContextMenu}
+        onPaneContextMenu={handlePaneContextMenu}
+        onMoveStart={dismissContextMenu}
         fitView
         fitViewOptions={{ padding: fullscreen ? 0.4 : 0.3 }}
         panOnDrag
         zoomOnScroll
         zoomOnDoubleClick={false}
         zoomOnPinch
-        nodesDraggable={fullscreen}
+        nodesDraggable
         nodesConnectable={false}
         elementsSelectable
+        snapToGrid
+        snapGrid={[20, 20]}
         minZoom={0.1}
         maxZoom={fullscreen ? 2 : 1}
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={0.5} />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="var(--color-text-muted)" />
         <FitViewOnResize />
       </ReactFlow>
 

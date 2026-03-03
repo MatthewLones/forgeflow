@@ -78,7 +78,7 @@ export type ProgressEvent =
   // Rate limiting
   | { type: 'rate_limited'; nodeId: string; retryAttempt: number; maxRetries: number; waitMs: number; error: string }
   // Copilot events
-  | { type: 'copilot_text'; content: string; sequence: number }
+  | { type: 'copilot_text'; content: string; sequence: number; consolidated?: boolean }
   | { type: 'copilot_tool_call'; toolName: string; toolUseId: string; inputSummary: string; truncated: boolean; sequence: number }
   | { type: 'copilot_tool_result'; toolName: string; toolUseId: string; outputSummary: string; truncated: boolean; isError: boolean; sequence: number }
   | { type: 'copilot_todo_update'; todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm: string }> }

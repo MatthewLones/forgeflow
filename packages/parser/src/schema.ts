@@ -78,4 +78,5 @@ export const flowDefinitionSchema = z.object({
   nodes: z.array(flowNodeSchema).min(1),
   edges: z.array(flowEdgeSchema),
   artifacts: z.record(z.string(), artifactSchemaSchema).optional(),
+  layout: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).optional(),
 });

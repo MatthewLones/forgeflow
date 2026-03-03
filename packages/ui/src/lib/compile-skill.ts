@@ -1,7 +1,6 @@
 import type {
   InputBlock,
   DecisionBlock,
-  GuardrailBlock,
   SkillBlockType,
 } from './skill-block-types';
 
@@ -29,8 +28,6 @@ export function compileSkillContent(content: string): string {
         return compileInputBlock(data as InputBlock);
       case 'decision':
         return compileDecisionBlock(data as DecisionBlock);
-      case 'guardrail':
-        return compileGuardrailBlock(data as GuardrailBlock);
       default:
         return _match;
     }
@@ -63,14 +60,3 @@ function compileDecisionBlock(block: DecisionBlock): string {
   return `${header}| Condition | Action | References |\n|-----------|--------|------------|\n${rows}`;
 }
 
-function compileGuardrailBlock(block: GuardrailBlock): string {
-  if (!block.rules?.length) return '';
-
-  return block.rules
-    .map((r) => {
-      const prefix = r.type === 'do' ? '**DO**' : '**DO NOT**';
-      const reason = r.reason ? ` *${r.reason}*` : '';
-      return `> ${prefix} ${r.rule}${reason}`;
-    })
-    .join('\n>\n');
-}

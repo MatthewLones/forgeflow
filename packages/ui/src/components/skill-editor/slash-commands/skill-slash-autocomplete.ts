@@ -11,7 +11,6 @@ interface SkillBlockOption {
 const BLOCK_OPTIONS: SkillBlockOption[] = [
   { name: 'input', label: 'input', detail: 'Input file requirements' },
   { name: 'decision', label: 'decision', detail: 'Decision tree / routing logic' },
-  { name: 'guardrail', label: 'guardrail', detail: 'Do / Don\'t rules' },
 ];
 
 const INTERRUPT_TYPES = [
@@ -149,7 +148,7 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
 
     const options: Array<{ label: string; type: string; detail: string; apply: string | ((view: EditorView, _completion: Completion, from: number, to: number) => void) }> = [];
 
-    // Block commands (/output, /decision, /guardrail)
+    // Block commands (/output, /input, /decision)
     for (const opt of BLOCK_OPTIONS) {
       if (opt.name.includes(query)) {
         options.push({

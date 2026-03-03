@@ -399,7 +399,6 @@ html, body, #root {
 .cm-skill-block-output { background: #f0fdf4; }
 .cm-skill-block-input { background: #eff6ff; }
 .cm-skill-block-decision { background: #fefce8; }
-.cm-skill-block-guardrail { background: #fef2f2; border-left: 3px solid #ef4444; }
 
 /* Widget header bar */
 .skill-widget-header {
@@ -416,7 +415,6 @@ html, body, #root {
 .skill-widget-header-output { color: #059669; background: rgba(16, 185, 129, 0.08); }
 .skill-widget-header-input { color: #2563eb; background: rgba(59, 130, 246, 0.08); }
 .skill-widget-header-decision { color: #d97706; background: rgba(245, 158, 11, 0.08); }
-.skill-widget-header-guardrail { color: #dc2626; background: rgba(239, 68, 68, 0.08); }
 
 .skill-widget-icon {
   font-size: 12px;
@@ -559,7 +557,6 @@ html, body, #root {
 
 tr:hover .skill-widget-remove,
 .skill-widget-decision-row:hover > .skill-widget-remove,
-.skill-widget-guardrail-rule:hover > .skill-widget-remove,
 .skill-widget-field-row:hover > .skill-widget-remove {
   opacity: 1;
 }
@@ -727,83 +724,5 @@ tr:hover .skill-widget-remove,
   opacity: 0.5;
 }
 
-/* Guardrail widget */
-.skill-widget-guardrail-rules {
-  padding: 4px 0;
-}
 
-.skill-widget-guardrail-rule {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 6px 12px;
-  position: relative;
-}
-
-.skill-widget-guardrail-badge {
-  flex-shrink: 0;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 700;
-  border: none;
-  cursor: pointer;
-  letter-spacing: 0.04em;
-  transition: opacity 0.15s;
-}
-
-.skill-widget-guardrail-badge:hover {
-  opacity: 0.8;
-}
-
-.skill-widget-guardrail-badge-do {
-  background: rgba(16, 185, 129, 0.15);
-  color: #059669;
-}
-
-.skill-widget-guardrail-badge-dont {
-  background: rgba(239, 68, 68, 0.15);
-  color: #dc2626;
-}
-
-.skill-widget-guardrail-content {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.skill-widget-guardrail-input {
-  font-weight: 500;
-}
-
-.skill-widget-guardrail-reason {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  font-style: italic;
-}
-
-.skill-widget-guardrail-actions {
-  display: flex;
-  gap: 0;
-}
-
-.skill-widget-add-do {
-  color: #059669;
-}
-
-.skill-widget-add-do:hover {
-  background: rgba(16, 185, 129, 0.06);
-  color: #059669;
-}
-
-.skill-widget-add-dont {
-  color: #dc2626;
-}
-
-.skill-widget-add-dont:hover {
-  background: rgba(239, 68, 68, 0.06);
-  color: #dc2626;
-}
 

@@ -9,7 +9,7 @@ import type {
 } from '@forgeflow/types';
 
 export type FlowAction =
-  | { type: 'SET_FLOW'; flow: FlowDefinition }
+  | { type: 'SET_FLOW'; flow: FlowDefinition; positions?: Record<string, { x: number; y: number }> }
   | { type: 'SELECT_NODE'; nodeId: string | null }
   | { type: 'ADD_NODE'; node: FlowNode; position: { x: number; y: number } }
   | { type: 'REMOVE_NODE'; nodeId: string }
@@ -26,6 +26,7 @@ export type FlowAction =
   | { type: 'ADD_ARTIFACT'; artifact: ArtifactSchema }
   | { type: 'UPDATE_ARTIFACT'; name: string; updates: Partial<ArtifactSchema> }
   | { type: 'REMOVE_ARTIFACT'; name: string }
+  | { type: 'CLEAR_LAYOUT' }
   | { type: 'MARK_CLEAN' };
 
 export interface FlowState {
@@ -134,6 +135,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       return {
         ...state,
         flow: action.flow,
+        positions: action.positions ?? state.positions,
         dirty: false,
       };
 
@@ -149,6 +151,10 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         flow: {
           ...state.flow,
           nodes: [...state.flow.nodes, action.node],
+          layout: {
+            ...(state.flow.layout ?? {}),
+            [action.node.id]: action.position,
+          },
         },
         positions: {
           ...state.positions,
@@ -160,6 +166,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
 
     case 'REMOVE_NODE': {
       const { nodes: updatedNodes } = removeNodeRecursive(state.flow.nodes, action.nodeId);
+      const { [action.nodeId]: _removedLayout, ...remainingLayout } = state.flow.layout ?? {};
       return {
         ...state,
         flow: {
@@ -169,6 +176,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
           edges: state.flow.edges.filter(
             (e) => e.from !== action.nodeId && e.to !== action.nodeId,
           ),
+          layout: remainingLayout,
         },
         positions: Object.fromEntries(
           Object.entries(state.positions).filter(([id]) => id !== action.nodeId),
@@ -297,10 +305,18 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
     case 'MOVE_NODE': {
       return {
         ...state,
+        flow: {
+          ...state.flow,
+          layout: {
+            ...(state.flow.layout ?? {}),
+            [action.nodeId]: action.position,
+          },
+        },
         positions: {
           ...state.positions,
           [action.nodeId]: action.position,
         },
+        dirty: true,
       };
     }
 
@@ -333,6 +349,15 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       return {
         ...state,
         flow: { ...state.flow, artifacts },
+        dirty: true,
+      };
+    }
+
+    case 'CLEAR_LAYOUT': {
+      const { layout: _cleared, ...flowWithoutLayout } = state.flow;
+      return {
+        ...state,
+        flow: flowWithoutLayout as FlowDefinition,
         dirty: true,
       };
     }

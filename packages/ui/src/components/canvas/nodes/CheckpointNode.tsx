@@ -40,11 +40,11 @@ export const CheckpointNode = memo(function CheckpointNode({ data, selected }: N
     >
       {/* Header bar */}
       <div className="flex items-center gap-2 px-3 py-2 rounded-t-md border-b border-[var(--color-border)]/40">
-        <div className={`w-2.5 h-2.5 rounded-sm ${dotClass}`} />
+        <div className={`w-2.5 h-2.5 rounded-sm shrink-0 ${dotClass}`} />
         <span className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
           {node.name}
         </span>
-        <span className={`ml-auto text-[10px] font-medium px-1.5 py-0.5 rounded ${badgeColor}`}>
+        <span className={`ml-auto text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${badgeColor}`}>
           {badgeLabel}
         </span>
       </div>

@@ -81,7 +81,7 @@ function splitFrontmatter(content: string): {
  * Structured skill editor with slash command support and widget decorations.
  *
  * - Strips YAML frontmatter and only shows the body for editing
- * - `/output`, `/input`, `/decision`, `/guardrail` trigger block autocomplete
+ * - `/output`, `/input`, `/decision` trigger block autocomplete
  * - `//` triggers sub-skill autocomplete (inserts `//skill:NAME`)
  * - `@` triggers file reference autocomplete (inserts `@path/to/file.md`)
  * - Forgeflow fenced blocks render as interactive widgets

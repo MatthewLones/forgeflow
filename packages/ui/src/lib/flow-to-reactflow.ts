@@ -1,4 +1,4 @@
-import dagre from '@dagrejs/dagre';
+import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js';
 import type { Node, Edge } from '@xyflow/react';
 import type { FlowDefinition, FlowNode, FlowEdge } from '@forgeflow/types';
 import type { FlowNodeData } from '../types/canvas';
@@ -6,35 +6,80 @@ import type { FlowNodeData } from '../types/canvas';
 const NODE_WIDTH = 240;
 const NODE_HEIGHT = 80;
 
+const elk = new ELK();
+
+const ELK_OPTIONS: Record<string, string> = {
+  'elk.algorithm': 'layered',
+  'elk.direction': 'RIGHT',
+  // Spacing — compact but readable
+  'elk.layered.spacing.nodeNodeBetweenLayers': '80',
+  'elk.spacing.nodeNode': '40',
+  'elk.spacing.edgeNode': '25',
+  'elk.spacing.edgeEdge': '15',
+  'elk.layered.spacing.edgeNodeBetweenLayers': '25',
+  'elk.layered.spacing.edgeEdgeBetweenLayers': '15',
+  // Crossing minimization
+  'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+  'elk.layered.crossingMinimization.greedySwitch.type': 'TWO_SIDED',
+  // Node placement — NETWORK_SIMPLEX minimizes edge lengths for compact layouts
+  'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+  // Model order
+  'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+  // Edge routing
+  'elk.edgeRouting': 'SPLINES',
+  // Post-processing compaction to pull nodes closer
+  'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH',
+  'elk.layered.compaction.connectedComponents': 'true',
+  // Thoroughness (higher = better layout, slightly slower)
+  'elk.layered.thoroughness': '10',
+};
+
 /**
- * Auto-layout nodes using dagre when no saved positions exist.
+ * Auto-layout nodes using ELK.js (async — uses WASM worker).
+ * Produces significantly better layouts than dagre: proper edge
+ * crossing minimization, layered node placement, and smart spacing.
  */
-export function autoLayout(
+export async function autoLayout(
   nodes: FlowNode[],
   edges: FlowEdge[],
-): Record<string, { x: number; y: number }> {
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: 'LR', ranksep: 100, nodesep: 60 });
+): Promise<Record<string, { x: number; y: number }>> {
+  if (nodes.length === 0) return {};
 
-  for (const node of nodes) {
-    g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
-  }
-  for (const edge of edges) {
-    g.setEdge(edge.from, edge.to);
-  }
+  const nodeIds = new Set(nodes.map((n) => n.id));
 
-  dagre.layout(g);
+  const graph: ElkNode = {
+    id: 'root',
+    layoutOptions: ELK_OPTIONS,
+    children: nodes.map((node) => ({
+      id: node.id,
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
+    })),
+    // Filter out edges referencing nonexistent nodes — ELK throws on these
+    edges: edges
+      .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to))
+      .map((edge, i) => ({
+        id: `e${i}`,
+        sources: [edge.from],
+        targets: [edge.to],
+      })),
+  };
 
-  const positions: Record<string, { x: number; y: number }> = {};
-  for (const node of nodes) {
-    const pos = g.node(node.id);
-    positions[node.id] = {
-      x: pos.x - NODE_WIDTH / 2,
-      y: pos.y - NODE_HEIGHT / 2,
-    };
+  try {
+    const laid = await elk.layout(graph);
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const child of laid.children ?? []) {
+      positions[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
+    }
+    return positions;
+  } catch {
+    // Fallback: simple grid layout if ELK fails for any reason
+    const positions: Record<string, { x: number; y: number }> = {};
+    nodes.forEach((node, i) => {
+      positions[node.id] = { x: (i % 4) * (NODE_WIDTH + 80), y: Math.floor(i / 4) * (NODE_HEIGHT + 60) };
+    });
+    return positions;
   }
-  return positions;
 }
 
 /**
@@ -85,11 +130,11 @@ export function flowEdgesToReactFlow(edges: FlowEdge[]): Edge[] {
  * Convert an entire FlowDefinition to React Flow nodes + edges,
  * with auto-layout if no saved positions are provided.
  */
-export function flowToReactFlow(
+export async function flowToReactFlow(
   flow: FlowDefinition,
   savedPositions?: Record<string, { x: number; y: number }>,
-): { nodes: Node[]; edges: Edge[] } {
-  const positions = savedPositions ?? autoLayout(flow.nodes, flow.edges);
+): Promise<{ nodes: Node[]; edges: Edge[] }> {
+  const positions = savedPositions ?? await autoLayout(flow.nodes, flow.edges);
   return {
     nodes: flowNodesToReactFlow(flow.nodes, positions),
     edges: flowEdgesToReactFlow(flow.edges),

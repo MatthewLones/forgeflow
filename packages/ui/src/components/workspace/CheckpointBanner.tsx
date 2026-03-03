@@ -14,6 +14,9 @@ export function CheckpointBanner({ projectId, checkpoint }: CheckpointBannerProp
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Detect if this checkpoint was created by an escalated inline interrupt
+  const isEscalated = checkpoint.presentation?.sections?.includes('escalated_interrupt') ?? false;
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -42,12 +45,22 @@ export function CheckpointBanner({ projectId, checkpoint }: CheckpointBannerProp
   };
 
   return (
-    <div className="shrink-0 border-b border-amber-300 bg-amber-50">
+    <div className={`shrink-0 border-b ${isEscalated ? 'border-red-300 bg-red-50' : 'border-amber-300 bg-amber-50'}`}>
+      {/* Escalation warning */}
+      {isEscalated && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-red-100 border-b border-red-200">
+          <span className="text-red-600 text-xs font-bold">{'\u26A0'}</span>
+          <span className="text-[11px] text-red-700">
+            An inline interrupt timed out and was escalated to this checkpoint. The agent&apos;s sandbox was preserved but execution is paused.
+          </span>
+        </div>
+      )}
+
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-amber-200">
-        <span className="text-amber-600 font-bold text-xs">{'\u23F8'}</span>
-        <span className="text-xs font-semibold text-amber-800">
-          Checkpoint: {checkpoint.presentation?.title ?? checkpoint.checkpointNodeId}
+      <div className={`flex items-center gap-2 px-4 py-2 border-b ${isEscalated ? 'border-red-200' : 'border-amber-200'}`}>
+        <span className={`${isEscalated ? 'text-red-600' : 'text-amber-600'} font-bold text-xs`}>{'\u23F8'}</span>
+        <span className={`text-xs font-semibold ${isEscalated ? 'text-red-800' : 'text-amber-800'}`}>
+          {isEscalated ? 'Escalated Interrupt' : 'Checkpoint'}: {checkpoint.presentation?.title ?? checkpoint.checkpointNodeId}
         </span>
       </div>
 

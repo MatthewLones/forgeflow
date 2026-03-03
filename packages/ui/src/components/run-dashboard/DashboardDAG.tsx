@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   ReactFlow,
   Background,
@@ -41,7 +41,15 @@ export function DashboardDAG({
   selectedNodeId: string | null;
   onNodeClick: (nodeId: string | null) => void;
 }) {
-  const positions = useMemo(() => autoLayout(nodes, edges), [nodes, edges]);
+  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    autoLayout(nodes, edges).then((pos) => {
+      if (!cancelled) setPositions(pos);
+    });
+    return () => { cancelled = true; };
+  }, [nodes, edges]);
 
   const rfNodes = useMemo(
     () => {

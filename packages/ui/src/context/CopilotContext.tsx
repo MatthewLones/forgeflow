@@ -40,7 +40,7 @@ export interface PendingQuestion {
   questions: Array<{
     question: string;
     header?: string;
-    options?: Array<{ label: string; description?: string }>;
+    options?: Array<string | { label: string; description?: string }>;
     multiSelect?: boolean;
   }>;
 }
@@ -57,6 +57,8 @@ interface CopilotState {
   pendingQuestion: PendingQuestion | null;
   totalCostUsd: number;
   error: string | null;
+  /** True if history was loaded from a previous session */
+  hasHistory: boolean;
 }
 
 /* ── Actions ───────────────────────────────────────────── */
@@ -69,7 +71,7 @@ type CopilotAction =
   | { type: 'QUESTION_ANSWERED' }
   | { type: 'ERROR'; error: string }
   | { type: 'RESET' }
-  | { type: 'LOAD_HISTORY'; messages: CopilotMessage[]; totalCostUsd: number };
+  | { type: 'LOAD_HISTORY'; messages: CopilotMessage[]; totalCostUsd: number; todos: TodoItem[] };
 
 /* ── Initial state ─────────────────────────────────────── */
 
@@ -91,6 +93,7 @@ const initialState: CopilotState = {
   pendingQuestion: null,
   totalCostUsd: 0,
   error: null,
+  hasHistory: false,
 };
 
 /* ── Reducer ───────────────────────────────────────────── */
@@ -118,6 +121,11 @@ function copilotReducer(state: CopilotState, action: CopilotAction): CopilotStat
 
       switch (event.type) {
         case 'copilot_text': {
+          // Consolidated blocks (from full assistant message) replace pendingText
+          // to dedup with earlier streaming deltas that may have already arrived.
+          // If SSE wasn't connected during streaming, this is the authoritative text.
+          const isConsolidated = 'consolidated' in event && (event as Record<string, unknown>).consolidated === true;
+
           // If we have pending tool calls, flush them into a message first
           // This creates turn-by-turn conversation flow
           if (state.pendingToolCalls.length > 0) {
@@ -134,6 +142,9 @@ function copilotReducer(state: CopilotState, action: CopilotAction): CopilotStat
               pendingText: event.content,
               pendingToolCalls: [],
             };
+          }
+          if (isConsolidated) {
+            return { ...state, pendingText: event.content };
           }
           return { ...state, pendingText: state.pendingText + event.content };
         }
@@ -173,19 +184,34 @@ function copilotReducer(state: CopilotState, action: CopilotAction): CopilotStat
 
         case 'copilot_completed': {
           // Flush pending text + tool calls into a message
-          const assistantMsg: CopilotMessage = {
-            id: `assistant-${Date.now()}`,
-            role: 'assistant',
-            content: state.pendingText,
-            timestamp: Date.now(),
-            toolCalls: state.pendingToolCalls.length > 0 ? [...state.pendingToolCalls] : undefined,
-          };
+          const completedMessages = [...state.messages];
+
+          if (state.pendingText || state.pendingToolCalls.length > 0) {
+            completedMessages.push({
+              id: `assistant-${Date.now()}`,
+              role: 'assistant',
+              content: state.pendingText,
+              timestamp: Date.now(),
+              toolCalls: state.pendingToolCalls.length > 0 ? [...state.pendingToolCalls] : undefined,
+            });
+          }
+
+          // Detect if session ended due to budget/turn limit — show a helpful resume hint
+          // Budget cap ($3) is the practical limiter; turn limit (10K) is effectively unlimited
+          const MAX_BUDGET_USD = 3.0;
+          if (event.totalCostUsd >= MAX_BUDGET_USD * 0.95) {
+            completedMessages.push({
+              id: `system-limit-${Date.now()}`,
+              role: 'assistant',
+              content: `I hit the budget cap ($${event.totalCostUsd.toFixed(2)}). Send another message and I'll pick up right where I left off — full conversation context is preserved.`,
+              timestamp: Date.now(),
+            });
+          }
+
           return {
             ...state,
             status: 'idle',
-            messages: state.pendingText || state.pendingToolCalls.length > 0
-              ? [...state.messages, assistantMsg]
-              : state.messages,
+            messages: completedMessages,
             pendingText: '',
             pendingToolCalls: [],
             totalCostUsd: event.totalCostUsd,
@@ -217,6 +243,8 @@ function copilotReducer(state: CopilotState, action: CopilotAction): CopilotStat
         ...state,
         messages: [WELCOME, ...action.messages],
         totalCostUsd: action.totalCostUsd,
+        todos: action.todos,
+        hasHistory: action.messages.length > 0,
       };
 
     default:
@@ -270,6 +298,7 @@ export function CopilotProvider({
       let pendingText = '';
       let pendingTools: CopilotToolCall[] = [];
       let totalCostUsd = 0;
+      let lastTodos: TodoItem[] = [];
 
       for (const event of events) {
         // Handle user messages (not a ProgressEvent, custom record)
@@ -327,6 +356,9 @@ export function CopilotProvider({
                 : tc,
             );
             break;
+          case 'copilot_todo_update':
+            lastTodos = event.todos;
+            break;
           case 'copilot_completed':
             // Flush remaining content
             if (pendingText || pendingTools.length > 0) {
@@ -356,8 +388,8 @@ export function CopilotProvider({
         });
       }
 
-      if (messages.length > 0) {
-        dispatch({ type: 'LOAD_HISTORY', messages, totalCostUsd });
+      if (messages.length > 0 || lastTodos.length > 0) {
+        dispatch({ type: 'LOAD_HISTORY', messages, totalCostUsd, todos: lastTodos });
       }
     }).catch(() => { /* no history available */ });
   }, [projectId]);
@@ -387,7 +419,11 @@ export function CopilotProvider({
     }
 
     source.addEventListener('error', () => {
-      // SSE errors are common during idle periods; just reconnect quietly
+      // EventSource auto-reconnects, but if the connection is gone (server restart etc),
+      // close it to avoid infinite reconnect loops with stale state.
+      if (source.readyState === EventSource.CLOSED) {
+        cleanupSSE();
+      }
     });
   }, [cleanupSSE]);
 
@@ -398,14 +434,12 @@ export function CopilotProvider({
       const { sessionId } = await api.copilot.sendMessage(projectId, message);
       dispatch({ type: 'SESSION_STARTED', sessionId });
 
-      // Only subscribe if we don't have an active SSE connection to this session
-      if (!eventSourceRef.current || state.sessionId !== sessionId) {
-        subscribeSSE(sessionId);
-      }
+      // Always (re)subscribe — the previous SSE may have silently died
+      subscribeSSE(sessionId);
     } catch (err) {
       dispatch({ type: 'ERROR', error: err instanceof Error ? err.message : String(err) });
     }
-  }, [projectId, subscribeSSE, state.sessionId]);
+  }, [projectId, subscribeSSE]);
 
   const answerQuestion = useCallback(async (questionId: string, answer: string) => {
     if (!state.sessionId) return;
@@ -430,6 +464,11 @@ export function CopilotProvider({
     }
     dispatch({ type: 'RESET' });
   }, [cleanupSSE, state.sessionId]);
+
+  // Cleanup SSE connection on unmount
+  useEffect(() => {
+    return () => cleanupSSE();
+  }, [cleanupSSE]);
 
   const value = useMemo<CopilotContextValue>(
     () => ({ state, sendMessage, answerQuestion, stop, reset }),

@@ -37,12 +37,12 @@ export const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<A
     >
       {/* Header bar */}
       <div className="flex items-center gap-2 px-3 py-2 rounded-t-md border-b border-[var(--color-border)]/40">
-        <div className={`w-2.5 h-2.5 rounded-full ${dotClass}`} />
+        <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotClass}`} />
         <span className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
           {node.name}
         </span>
         {hasChildren && (
-          <span className="ml-auto text-[10px] font-medium text-[var(--color-node-agent)] bg-[var(--color-node-agent)]/10 px-1.5 py-0.5 rounded">
+          <span className="ml-auto text-[10px] font-medium text-[var(--color-node-agent)] bg-[var(--color-node-agent)]/10 px-1.5 py-0.5 rounded shrink-0">
             {node.children.length} sub
           </span>
         )}

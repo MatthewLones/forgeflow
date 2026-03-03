@@ -13,7 +13,6 @@ export interface SlashAutocompleteOptions {
 
 const BLOCK_OPTIONS = [
   { name: 'decision', label: 'decision', detail: 'Decision tree / routing logic' },
-  { name: 'guardrail', label: 'guardrail', detail: 'Do / Don\'t rules' },
 ];
 
 const INTERRUPT_TYPES = [
@@ -144,7 +143,7 @@ export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAge
       const query = singleSlash.text.slice(1).toLowerCase();
       const options: Array<{ label: string; type: string; detail: string; apply: string | ((view: EditorView, _completion: Completion, from: number, to: number) => void) }> = [];
 
-      // Block commands (/output, /decision, /guardrail)
+      // Block commands (/decision)
       for (const opt of BLOCK_OPTIONS) {
         if (opt.name.includes(query)) {
           options.push({

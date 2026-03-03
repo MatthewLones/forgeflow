@@ -9,13 +9,9 @@ const forgeUpload = multer({
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max bundle
 });
 
-// Seed default data on first access
-let seeded = false;
+// Seed default data if no projects exist (idempotent — checks internally)
 async function ensureSeeded() {
-  if (!seeded) {
-    await store.seedIfEmpty();
-    seeded = true;
-  }
+  await store.seedIfEmpty();
 }
 
 // GET /api/projects — list all projects

@@ -106,6 +106,8 @@ export function SlashCommandEditor({
   const onClickAgentRef = useRef(onClickAgent);
   const onClickArtifactRef = useRef(onClickArtifact);
   const onClickArtifactOutputRef = useRef(onClickArtifactOutput);
+  /** Tracks whether the latest doc change came from local typing (to avoid feedback loops) */
+  const localChangeRef = useRef(false);
 
   onChangeRef.current = onChange;
   onCreateAgentRef.current = onCreateAgent;
@@ -115,6 +117,23 @@ export function SlashCommandEditor({
   onClickAgentRef.current = onClickAgent;
   onClickArtifactRef.current = onClickArtifact;
   onClickArtifactOutputRef.current = onClickArtifactOutput;
+
+  // Sync external content changes into CodeMirror (e.g. when copilot edits the flow)
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    // Skip if this change originated from local typing
+    if (localChangeRef.current) {
+      localChangeRef.current = false;
+      return;
+    }
+    const currentDoc = view.state.doc.toString();
+    if (currentDoc !== content) {
+      view.dispatch({
+        changes: { from: 0, to: currentDoc.length, insert: content },
+      });
+    }
+  }, [content]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -281,6 +300,7 @@ export function SlashCommandEditor({
         theme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
+            localChangeRef.current = true;
             const doc = update.state.doc.toString();
             onChangeRef.current(doc);
 

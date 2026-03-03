@@ -34,6 +34,8 @@ interface CopilotSession {
   abortController: AbortController | null;
   totalCostUsd: number;
   totalTurns: number;
+  /** Number of query() calls — first is fresh, subsequent use `continue: true` to resume conversation */
+  queryCount: number;
 }
 
 /* ── Manager ─────────────────────────────────────────────── */
@@ -71,6 +73,7 @@ export class CopilotManager {
       abortController: null,
       totalCostUsd: 0,
       totalTurns: 0,
+      queryCount: 0,
     };
     this.sessions.set(sessionId, session);
     this.projectSessions.set(projectId, sessionId);
@@ -167,17 +170,24 @@ export class CopilotManager {
     const seq = { value: 0 };
     const toolNameMap = new Map<string, string>();
 
+    // Track whether this is a continuation of an existing conversation
+    const isFollowUp = session.queryCount > 0;
+    session.queryCount++;
+
     try {
       const stream = sdk.query({
         prompt: message,
         options: {
           cwd: projectPath,
           model: options?.model ?? 'sonnet',
-          maxTurns: options?.maxTurns ?? 25,
-          maxBudgetUsd: options?.maxBudgetUsd ?? 1.0,
+          maxTurns: options?.maxTurns ?? 10_000,
+          maxBudgetUsd: options?.maxBudgetUsd ?? 3.0,
           permissionMode: 'bypassPermissions',
           allowDangerouslySkipPermissions: true,
-          persistSession: false,
+          // Persist session to disk so follow-up messages can resume
+          // the full conversation via `continue: true`
+          persistSession: true,
+          ...(isFollowUp ? { continue: true } : {}),
           settingSources: [],
           systemPrompt: {
             type: 'preset',
@@ -213,22 +223,47 @@ export class CopilotManager {
 
   private processStreamMessage(
     session: CopilotSession,
-    message: { type: string; message?: { content?: unknown[] }; subtype?: string; num_turns?: number; total_cost_usd?: number },
+    message: Record<string, unknown>,
     seq: { value: number },
     toolNameMap: Map<string, string>,
   ): void {
+    // Handle token-level streaming deltas for real-time text
+    if (message.type === 'stream_event') {
+      const event = message.event as Record<string, unknown> | undefined;
+      if (!event) return;
+
+      if (event.type === 'content_block_delta') {
+        const delta = event.delta as Record<string, unknown> | undefined;
+        if (delta?.type === 'text_delta' && typeof delta.text === 'string' && delta.text) {
+          // Stream to live SSE clients but don't persist (tokens are tiny fragments).
+          // The full text will be persisted when the complete assistant message arrives.
+          this.emitEvent(session, {
+            type: 'copilot_text',
+            content: delta.text,
+            sequence: seq.value++,
+          }, false);
+        }
+      }
+      return;
+    }
+
     if (message.type === 'assistant') {
-      const content = message.message?.content;
+      const msg = message.message as Record<string, unknown> | undefined;
+      const content = msg?.content;
       if (!Array.isArray(content)) return;
 
       for (const block of content) {
         const b = block as Record<string, unknown>;
+        // Emit full text blocks to SSE clients AND persist for history replay.
+        // Stream deltas (persist=false) may have already delivered this token-by-token,
+        // so the `consolidated` flag tells the UI to replace pendingText instead of appending.
         if (b.type === 'text' && typeof b.text === 'string' && b.text) {
           this.emitEvent(session, {
             type: 'copilot_text',
             content: b.text,
             sequence: seq.value++,
-          });
+            consolidated: true,
+          } as ProgressEvent);
         } else if (b.type === 'tool_use' && typeof b.name === 'string') {
           toolNameMap.set(b.id as string, b.name);
           const inputStr = JSON.stringify(b.input ?? {});
@@ -252,7 +287,8 @@ export class CopilotManager {
         }
       }
     } else if (message.type === 'user') {
-      const content = message.message?.content;
+      const msg = message.message as Record<string, unknown> | undefined;
+      const content = msg?.content;
       if (!Array.isArray(content)) return;
 
       for (const block of content) {
@@ -283,8 +319,8 @@ export class CopilotManager {
         }
       }
     } else if (message.type === 'result') {
-      session.totalTurns = (message as { num_turns?: number }).num_turns ?? session.totalTurns;
-      session.totalCostUsd = (message as { total_cost_usd?: number }).total_cost_usd ?? session.totalCostUsd;
+      session.totalTurns = (message.num_turns as number | undefined) ?? session.totalTurns;
+      session.totalCostUsd = (message.total_cost_usd as number | undefined) ?? session.totalCostUsd;
     }
   }
 
@@ -310,10 +346,16 @@ export class CopilotManager {
     return () => { session.sseClients.delete(res); };
   }
 
-  private emitEvent(session: CopilotSession, event: ProgressEvent): void {
-    session.events.push(event);
-    // Persist to disk
-    this.persistEvent(session.projectId, event);
+  /**
+   * Emit an event to SSE clients and optionally persist to disk.
+   * @param persist - If false, only sends to live SSE clients (used for streaming tokens
+   *   that will be consolidated into a single copilot_text event later).
+   */
+  private emitEvent(session: CopilotSession, event: ProgressEvent, persist = true): void {
+    if (persist) {
+      session.events.push(event);
+      this.persistEvent(session.projectId, event);
+    }
 
     const data = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const client of session.sseClients) {
@@ -391,12 +433,20 @@ export class CopilotManager {
     session.events = [];
     session.totalCostUsd = 0;
     session.totalTurns = 0;
+    session.queryCount = 0;
     session.activeQuery = false;
     session.abortController = null;
 
-    // Also delete the events file
+    // Delete our events file
     const eventsPath = join(this.projectsBasePath, session.projectId, 'copilot-events.ndjson');
     try { unlinkSync(eventsPath); } catch { /* may not exist */ }
+
+    // Also remove SDK's persisted session so next message starts fresh
+    // SDK stores sessions under ~/.claude/projects/{cwd-hash}/
+    // Simplest approach: remove the project session mapping so getOrCreateSession
+    // creates a fresh one next time (SDK auto-creates new session on query())
+    this.sessions.delete(sessionId);
+    this.projectSessions.delete(session.projectId);
 
     log(`reset session ${sessionId}`);
   }
