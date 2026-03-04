@@ -110,7 +110,7 @@ export function WorkspaceToolbar({
         <button
           type="button"
           onClick={handleRun}
-          className="text-xs font-medium px-3 py-1.5 rounded-md border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+          className="text-xs font-medium px-3 py-1.5 rounded-md border border-emerald-400/60 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
           title={formatShortcut({ id: '', label: '', category: 'toolbar', key: 'r', mod: true, shift: true })}
         >
           Run
@@ -134,7 +134,7 @@ export function WorkspaceToolbar({
             title={formatShortcut({ id: '', label: '', category: 'layout', key: 'g', mod: true, shift: true })}
             className={`text-xs font-medium px-3 py-1.5 rounded-md border transition-colors flex items-center gap-1.5 ${
               gitPanelOpen
-                ? 'border-gray-700 bg-gray-800 text-white'
+                ? 'border-gray-400/60 bg-gray-100 text-gray-700'
                 : 'border-[var(--color-border)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)]'
             }`}
           >
@@ -143,7 +143,7 @@ export function WorkspaceToolbar({
             </svg>
             {git.status?.branch || 'Git'}
             {(git.status?.files?.length ?? 0) > 0 && (
-              <span className={`text-[9px] px-1 rounded-full ${gitPanelOpen ? 'bg-white/20' : 'bg-amber-500/15 text-amber-600'}`}>
+              <span className={`text-[9px] px-1 rounded-full ${gitPanelOpen ? 'bg-gray-500/15 text-gray-600' : 'bg-amber-500/15 text-amber-600'}`}>
                 {git.status!.files.length}
               </span>
             )}
@@ -156,7 +156,7 @@ export function WorkspaceToolbar({
             onClick={onToggleAI}
             className={`text-xs font-medium px-3 py-1.5 rounded-md border transition-colors ${
               aiPanelOpen
-                ? 'border-[var(--color-node-agent)] bg-[var(--color-node-agent)] text-white'
+                ? 'border-[var(--color-node-agent)]/40 bg-[var(--color-node-agent)]/10 text-[var(--color-node-agent)]'
                 : 'border-[var(--color-border)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)]'
             }`}
           >

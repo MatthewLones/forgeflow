@@ -66,6 +66,8 @@ const TYPE_GLYPHS: Record<NodeType, string> = {
   checkpoint: 'C',
 };
 
+/* ── Folder Icon ────────────────────────────────────────── */
+
 /* ── Section Header ──────────────────────────────────────── */
 
 function SectionHeader({
@@ -335,21 +337,21 @@ function ReferenceTreeItem({
           />
         ))}
 
-        {/* Expand/collapse for folders */}
+        {/* Expand/collapse + type icon */}
         {isFolder ? (
-          <span className="w-3 text-[var(--color-text-muted)] shrink-0 text-center text-[10px]">
+          <span className="w-4 h-4 flex items-center justify-center shrink-0 text-[var(--color-text-muted)] text-[14px]">
             {expanded ? '\u25BE' : '\u25B8'}
           </span>
         ) : (
-          <span className="w-3 shrink-0" />
+          <>
+            <span className="w-3 shrink-0" />
+            <span className={`w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold shrink-0 ${
+              FILE_TYPE_COLORS[entry.type] ?? FILE_TYPE_COLORS.other
+            } bg-[var(--color-canvas-bg)]`}>
+              {FILE_TYPE_ICONS[entry.type] ?? FILE_TYPE_ICONS.other}
+            </span>
+          </>
         )}
-
-        {/* File type icon */}
-        <span className={`w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold shrink-0 ${
-          isFolder ? 'text-[var(--color-node-checkpoint)]' : (FILE_TYPE_COLORS[entry.type] ?? FILE_TYPE_COLORS.other)
-        } bg-[var(--color-canvas-bg)]`}>
-          {isFolder ? (expanded ? '\u25BE' : '\u25B8') : (FILE_TYPE_ICONS[entry.type] ?? FILE_TYPE_ICONS.other)}
-        </span>
 
         <span className="truncate">{entry.name}</span>
 
@@ -638,6 +640,7 @@ function ArtifactTreeItem({
   onCommitRename,
   onCommitNewArtifact,
   onCancelNew,
+  onDropArtifact,
 }: {
   node: ArtifactTreeNode;
   depth: number;
@@ -650,10 +653,12 @@ function ArtifactTreeItem({
   onCommitRename: (oldPath: string, newName: string) => void;
   onCommitNewArtifact: (name: string) => void;
   onCancelNew: () => void;
+  onDropArtifact: (artifactPath: string, targetFolder: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [renameValue, setRenameValue] = useState(node.name);
   const [newValue, setNewValue] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const newInputRef = useRef<HTMLInputElement>(null);
 
@@ -683,11 +688,49 @@ function ArtifactTreeItem({
     onStartRename('');
   };
 
+  // Drag source (non-folder artifacts)
+  const handleDragStart = (e: React.DragEvent) => {
+    if (node.isFolder) return;
+    e.dataTransfer.setData('application/x-forgeflow-artifact', node.fullPath);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  // Drop target (folders only)
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!node.isFolder) return;
+    if (!e.dataTransfer.types.includes('application/x-forgeflow-artifact')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const artifactPath = e.dataTransfer.getData('application/x-forgeflow-artifact');
+    if (artifactPath && node.isFolder) {
+      onDropArtifact(artifactPath, node.fullPath);
+      if (!expanded) setExpanded(true);
+    }
+  };
+
   return (
     <div>
       <div
         role="treeitem"
         tabIndex={0}
+        draggable={!node.isFolder && !isRenaming}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         onClick={() => {
           if (isRenaming) return;
           if (node.isFolder) setExpanded(!expanded);
@@ -697,7 +740,9 @@ function ArtifactTreeItem({
         className={`w-full flex items-center gap-1.5 py-1 text-left text-xs transition-colors relative cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-node-agent)] focus-visible:ring-inset ${
           isActive
             ? 'bg-[var(--color-node-agent)]/8 text-[var(--color-text-primary)] border-l-2 border-l-[var(--color-node-agent)]'
-            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] border-l-2 border-l-transparent'
+            : isDragOver
+              ? 'bg-purple-500/10 border-l-2 border-l-purple-400 text-[var(--color-text-primary)]'
+              : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] border-l-2 border-l-transparent'
         }`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
       >
@@ -706,25 +751,23 @@ function ArtifactTreeItem({
           <span key={i} className="absolute top-0 bottom-0 w-px bg-[var(--color-border)]" style={{ left: `${8 + i * 16 + 7}px` }} />
         ))}
 
-        {/* Expand/collapse for folders */}
+        {/* Expand/collapse + type glyph */}
         {node.isFolder ? (
-          <span className="w-3 text-[var(--color-text-muted)] shrink-0 text-center text-[10px]">
+          <span className="w-4 h-4 flex items-center justify-center shrink-0 text-[var(--color-text-muted)] text-[14px]">
             {expanded ? '\u25BE' : '\u25B8'}
           </span>
         ) : (
-          <span className="w-3 shrink-0" />
+          <>
+            <span className="w-3 shrink-0" />
+            <span className={`w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold shrink-0 ${
+              isActive
+                ? 'text-white bg-purple-500'
+                : 'text-purple-500 bg-[var(--color-canvas-bg)]'
+            }`}>
+              A
+            </span>
+          </>
         )}
-
-        {/* Icon */}
-        <span className={`w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold shrink-0 ${
-          node.isFolder
-            ? 'text-[var(--color-node-checkpoint)] bg-[var(--color-canvas-bg)]'
-            : isActive
-              ? 'text-white bg-purple-500'
-              : 'text-purple-500 bg-[var(--color-canvas-bg)]'
-        }`}>
-          {node.isFolder ? (expanded ? '\u25BE' : '\u25B8') : 'A'}
-        </span>
 
         {/* Name or inline rename */}
         {isRenaming ? (
@@ -764,22 +807,6 @@ function ArtifactTreeItem({
         )}
       </div>
 
-      {/* Lineage info for leaf artifacts */}
-      {!node.isFolder && node.lineage && (
-        <div className="text-[10px] text-[var(--color-text-muted)] space-y-0.5 mt-0.5 mb-0.5"
-          style={{ paddingLeft: `${8 + depth * 16 + 24}px` }}
-        >
-          {node.lineage.producers.length > 0 ? (
-            <div><span className="text-[var(--color-node-agent)]">{'\u2192 '}</span>{node.lineage.producers.join(', ')}</div>
-          ) : (
-            <div><span className="text-[var(--color-node-checkpoint)]">{'\u2192 '}</span>user upload</div>
-          )}
-          {node.lineage.consumers.length > 0 && (
-            <div><span className="text-[var(--color-node-agent)]">{'\u2192 '}</span>{node.lineage.consumers.join(', ')}</div>
-          )}
-        </div>
-      )}
-
       {/* Children */}
       {node.isFolder && expanded && (
         <div>
@@ -797,6 +824,7 @@ function ArtifactTreeItem({
               onCommitRename={onCommitRename}
               onCommitNewArtifact={onCommitNewArtifact}
               onCancelNew={onCancelNew}
+              onDropArtifact={onDropArtifact}
             />
           ))}
 
@@ -1070,6 +1098,44 @@ export function AgentExplorer() {
     [selectArtifact, removeArtifact, removeArtifactFolder, addArtifactFolder],
   );
 
+  // Drag-and-drop: move artifact into a folder
+  const handleDropArtifact = useCallback((artifactPath: string, targetFolder: string) => {
+    const baseName = artifactPath.split('/').pop()!;
+    const newPath = targetFolder + '/' + baseName;
+    if (newPath === artifactPath) return; // already in this folder
+    // Check collision
+    const allNames = Object.keys(state.flow.artifacts ?? {});
+    if (allNames.includes(newPath)) {
+      window.alert(`An artifact named "${newPath}" already exists in that folder.`);
+      return;
+    }
+    renameArtifact(artifactPath, newPath);
+  }, [state.flow.artifacts, renameArtifact]);
+
+  // Drag-and-drop: move artifact to root level
+  const handleDropArtifactToRoot = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('application/x-forgeflow-artifact')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const artifactPath = e.dataTransfer.getData('application/x-forgeflow-artifact');
+    if (!artifactPath) return;
+    const baseName = artifactPath.split('/').pop()!;
+    if (baseName === artifactPath) return; // already at root
+    const allNames = Object.keys(state.flow.artifacts ?? {});
+    if (allNames.includes(baseName)) {
+      window.alert(`An artifact named "${baseName}" already exists at root level.`);
+      return;
+    }
+    renameArtifact(artifactPath, baseName);
+  }, [state.flow.artifacts, renameArtifact]);
+
+  const handleArtifactSectionDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('application/x-forgeflow-artifact')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
+
   // Reference "+" dropdown
   const handleRefAdd = useCallback((e: React.MouseEvent) => {
     const rect = (e.target as HTMLElement).getBoundingClientRect();
@@ -1301,7 +1367,11 @@ export function AgentExplorer() {
       />
 
       {artifactsExpanded && (
-        <div className="py-0.5">
+        <div
+          className="py-0.5"
+          onDragOver={handleArtifactSectionDragOver}
+          onDrop={handleDropArtifactToRoot}
+        >
           {artifactTree.length === 0 && newArtifactParent !== '__root__' ? (
             <div className="px-3 py-3 text-center">
               <div className="text-[10px] text-[var(--color-text-muted)]">
@@ -1324,6 +1394,7 @@ export function AgentExplorer() {
                   onCommitRename={handleArtifactCommitRename}
                   onCommitNewArtifact={handleCommitNewArtifact}
                   onCancelNew={() => setNewArtifactParent(null)}
+                  onDropArtifact={handleDropArtifact}
                 />
               ))}
 
