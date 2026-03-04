@@ -23,7 +23,7 @@ interface FlowContextValue {
   selectNode: (nodeId: string | null) => void;
   addNode: (type: NodeType, position: { x: number; y: number }) => void;
   removeNode: (nodeId: string) => void;
-  updateNode: (nodeId: string, updates: Partial<Pick<FlowNode, 'name' | 'instructions' | 'type'>>) => void;
+  updateNode: (nodeId: string, updates: Partial<Pick<FlowNode, 'name' | 'description' | 'instructions' | 'type'>>) => void;
   updateNodeConfig: (nodeId: string, config: Partial<NodeConfig>) => void;
   addEdge: (edge: FlowEdge) => void;
   removeEdge: (from: string, to: string) => void;
@@ -33,6 +33,10 @@ interface FlowContextValue {
   addArtifact: (artifact: ArtifactSchema) => void;
   updateArtifact: (name: string, updates: Partial<ArtifactSchema>) => void;
   removeArtifact: (name: string) => void;
+  renameArtifact: (oldName: string, newName: string) => void;
+  addArtifactFolder: (path: string) => void;
+  renameArtifactFolder: (oldPrefix: string, newPrefix: string) => void;
+  removeArtifactFolder: (prefix: string) => void;
   clearLayout: () => void;
 }
 
@@ -103,7 +107,7 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
   );
 
   const updateNode = useCallback(
-    (nodeId: string, updates: Partial<Pick<FlowNode, 'name' | 'instructions' | 'type'>>) =>
+    (nodeId: string, updates: Partial<Pick<FlowNode, 'name' | 'description' | 'instructions' | 'type'>>) =>
       dispatch({ type: 'UPDATE_NODE', nodeId, updates }),
     [],
   );
@@ -162,6 +166,27 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
     [],
   );
 
+  const renameArtifact = useCallback(
+    (oldName: string, newName: string) => dispatch({ type: 'RENAME_ARTIFACT', oldName, newName }),
+    [],
+  );
+
+  const addArtifactFolder = useCallback(
+    (path: string) => dispatch({ type: 'ADD_ARTIFACT_FOLDER', path }),
+    [],
+  );
+
+  const renameArtifactFolder = useCallback(
+    (oldPrefix: string, newPrefix: string) =>
+      dispatch({ type: 'RENAME_ARTIFACT_FOLDER', oldPrefix, newPrefix }),
+    [],
+  );
+
+  const removeArtifactFolder = useCallback(
+    (prefix: string) => dispatch({ type: 'REMOVE_ARTIFACT_FOLDER', prefix }),
+    [],
+  );
+
   const clearLayout = useCallback(
     () => dispatch({ type: 'CLEAR_LAYOUT' }),
     [],
@@ -186,6 +211,10 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
         addArtifact,
         updateArtifact,
         removeArtifact,
+        renameArtifact,
+        addArtifactFolder,
+        renameArtifactFolder,
+        removeArtifactFolder,
         clearLayout,
       }}
     >

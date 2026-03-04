@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import {
   DockviewReact,
   type DockviewReadyEvent,
@@ -7,6 +7,7 @@ import {
   type DockviewApi,
 } from 'dockview-react';
 import 'dockview-react/dist/styles/dockview.css';
+import type { FlowNode } from '@forgeflow/types';
 import { useLayout, type EditorTab } from '../../context/LayoutContext';
 import { useFlow } from '../../context/FlowContext';
 import { useProjectStore } from '../../context/ProjectStore';
@@ -21,6 +22,7 @@ import { useParams } from 'react-router-dom';
 import { ValidationPanel } from './ValidationPanel';
 import { CompilePreviewPanel } from './CompilePreviewPanel';
 import { OutputViewer } from './OutputViewer';
+import { SkillBottomPanel } from './SkillBottomPanel';
 
 /* ── Panel components ─────────────────────────────────────── */
 
@@ -157,6 +159,49 @@ function SkillEditorContent({ skillName, projectId }: { skillName: string; proje
   const scripts = state.files.filter((f) => f.path.startsWith('scripts/'));
   const hasFileTabs = references.length > 0 || scripts.length > 0;
 
+  // Get current skill's summary from the skills list
+  const currentSkillSummary = useMemo(
+    () => skills.find((s) => s.name === skillName) ?? { name: skillName, description: '', referenceCount: 0, subSkills: [] },
+    [skills, skillName],
+  );
+
+  // Extract description from SKILL.md YAML frontmatter
+  const skillDescription = useMemo(() => {
+    if (!skillMd) return '';
+    const fmMatch = skillMd.content.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) return '';
+    const descMatch = fmMatch[1].match(/description:\s*"?([^"\n]+)"?/);
+    return descMatch ? descMatch[1].trim() : '';
+  }, [skillMd?.content]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced description update into SKILL.md frontmatter
+  const descTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleDescriptionChange = useCallback(
+    (newDesc: string) => {
+      if (!skillMd) return;
+      if (descTimerRef.current) clearTimeout(descTimerRef.current);
+      descTimerRef.current = setTimeout(() => {
+        const content = skillMd.content;
+        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+        if (fmMatch) {
+          const fm = fmMatch[1];
+          const descLine = fm.match(/description:\s*"?[^"\n]*"?/);
+          let newFm: string;
+          if (descLine) {
+            newFm = fm.replace(descLine[0], `description: "${newDesc}"`);
+          } else {
+            newFm = fm + `\ndescription: "${newDesc}"`;
+          }
+          updateFile('SKILL.md', content.replace(fmMatch[0], `---\n${newFm}\n---`));
+        } else {
+          // No frontmatter — prepend one
+          updateFile('SKILL.md', `---\ndescription: "${newDesc}"\n---\n\n${content}`);
+        }
+      }, 500);
+    },
+    [skillMd, updateFile],
+  );
+
   return (
     <div className="h-full flex flex-col">
       {/* Primary header — agent-style */}
@@ -259,6 +304,15 @@ function SkillEditorContent({ skillName, projectId }: { skillName: string; proje
           </div>
         )}
       </div>
+
+      {/* Bottom panel — description, sub-skills, references */}
+      <SkillBottomPanel
+        skill={currentSkillSummary}
+        allSkills={skills}
+        description={skillDescription}
+        onDescriptionChange={handleDescriptionChange}
+        referenceCount={references.length}
+      />
     </div>
   );
 }
@@ -326,7 +380,7 @@ const components = {
 
 const TYPE_DOT_COLORS: Record<string, string> = {
   agent: 'bg-[var(--color-node-agent)]',
-  skill: 'bg-amber-500',
+  skill: 'bg-emerald-500',
   reference: 'bg-[var(--color-node-checkpoint)]',
   artifact: 'bg-purple-500',
   validation: 'bg-emerald-500',
@@ -342,6 +396,29 @@ function ForgeFlowTab(props: IDockviewPanelHeaderProps<EditorTab>) {
   const tabType = params?.type ?? 'agent';
   const dotColor = TYPE_DOT_COLORS[tabType] ?? TYPE_DOT_COLORS.agent;
 
+  // Build tooltip from available context
+  const { state } = useFlow();
+  const { skills } = useProjectStore();
+  const tooltip = useMemo(() => {
+    if (tabType === 'agent' && params?.nodeId) {
+      const findNode = (nodes: FlowNode[], id: string): FlowNode | null => {
+        for (const n of nodes) {
+          if (n.id === id) return n;
+          const found = findNode(n.children, id);
+          if (found) return found;
+        }
+        return null;
+      };
+      const node = findNode(state.flow.nodes, params.nodeId);
+      if (node?.description) return node.description;
+    }
+    if (tabType === 'skill' && params?.skillName) {
+      const skill = skills.find((s) => s.name === params.skillName);
+      if (skill?.description) return skill.description;
+    }
+    return undefined;
+  }, [tabType, params?.nodeId, params?.skillName, state.flow.nodes, skills]);
+
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -351,7 +428,10 @@ function ForgeFlowTab(props: IDockviewPanelHeaderProps<EditorTab>) {
   );
 
   return (
-    <div className="flex items-center gap-1.5 h-full px-2 text-xs cursor-pointer select-none group">
+    <div
+      className="flex items-center gap-1.5 h-full px-2 text-xs cursor-pointer select-none group"
+      data-tooltip={tooltip || undefined}
+    >
       <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
       <span className="truncate max-w-[120px]">{props.api.title}</span>
       <button
@@ -377,7 +457,20 @@ export function DockviewLayout() {
   const handleReady = useCallback(
     (event: DockviewReadyEvent) => {
       setApi(event.api);
-      setupKeyboardShortcuts(event.api);
+      // Fix horizontal tab scroll: translate vertical wheel → horizontal scroll
+      // Dockview v5 removed the public `element` accessor — fall back to DOM query
+      const container = (event.api as unknown as { element?: HTMLElement }).element
+        ?? document.querySelector('.forgeflow-dockview');
+      if (container) {
+        container.addEventListener('wheel', (e: WheelEvent) => {
+          const tabBar = (e.target as HTMLElement)?.closest('.dv-tabs-container');
+          if (!tabBar) return;
+          if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) {
+            e.preventDefault();
+            tabBar.scrollLeft += e.deltaY;
+          }
+        }, { passive: false });
+      }
     },
     [setApi],
   );
@@ -388,71 +481,9 @@ export function DockviewLayout() {
       defaultTabComponent={tabComponents.default}
       onReady={handleReady}
       className="h-full w-full dockview-theme-light forgeflow-dockview"
+      scrollbars="native"
     />
   );
 }
 
-/* ── Keyboard shortcuts ───────────────────────────────────── */
-
-function setupKeyboardShortcuts(api: DockviewApi) {
-  const handler = (e: KeyboardEvent) => {
-    const isMeta = e.metaKey || e.ctrlKey;
-
-    // Cmd+W — Close active panel
-    if (isMeta && e.key === 'w') {
-      e.preventDefault();
-      const active = api.activePanel;
-      if (active) {
-        api.removePanel(active);
-      }
-      return;
-    }
-
-    // Cmd+\ — Split right
-    if (isMeta && !e.shiftKey && e.key === '\\') {
-      e.preventDefault();
-      const active = api.activePanel;
-      if (active) {
-        api.addPanel({
-          id: `empty-${Date.now()}`,
-          component: 'empty',
-          title: 'Empty',
-          position: { referencePanel: active.id, direction: 'right' },
-        });
-      }
-      return;
-    }
-
-    // Cmd+Shift+\ — Split down
-    if (isMeta && e.shiftKey && e.key === '\\') {
-      e.preventDefault();
-      const active = api.activePanel;
-      if (active) {
-        api.addPanel({
-          id: `empty-${Date.now()}`,
-          component: 'empty',
-          title: 'Empty',
-          position: { referencePanel: active.id, direction: 'below' },
-        });
-      }
-      return;
-    }
-
-    // Cmd+1-9 — Focus group by index
-    if (isMeta && e.key >= '1' && e.key <= '9') {
-      const groups = api.groups;
-      const idx = parseInt(e.key) - 1;
-      if (idx < groups.length) {
-        e.preventDefault();
-        const group = groups[idx];
-        const firstPanel = group.panels[0];
-        if (firstPanel) {
-          firstPanel.api.setActive();
-        }
-      }
-    }
-  };
-
-  document.addEventListener('keydown', handler);
-  // Cleanup handled by DockviewReact unmount
-}
+/* Keyboard shortcuts are now centralized in useKeyboardShortcuts hook */

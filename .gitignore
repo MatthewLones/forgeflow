@@ -4,3 +4,14 @@ dist/
 .turbo/
 coverage/
 .env
+
+# Electron build artifacts
+packages/desktop/release/
+
+# OS files
+.DS_Store
+*.swp
+*~
+
+# Images that aren't source assets
+image copy.png

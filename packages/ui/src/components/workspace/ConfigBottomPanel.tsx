@@ -1,10 +1,15 @@
 import { useState, useCallback, useRef } from 'react';
 import type { FlowNode, NodeConfig, ArtifactSchema } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
+import { useLayout } from '../../context/LayoutContext';
+import { useProjectStore } from '../../context/ProjectStore';
+import { Chip } from '../shared/Chip';
+import { INTERRUPT_DESCRIPTIONS, artifactTooltip } from '../../lib/chip-styles';
 import { TagList } from '../inspector/fields/TagList';
 
 interface ConfigBottomPanelProps {
   node: FlowNode;
+  onDescriptionChange?: (desc: string) => void;
 }
 
 interface ConfigTab {
@@ -14,6 +19,7 @@ interface ConfigTab {
 }
 
 const CONFIG_TABS: ConfigTab[] = [
+  { id: 'description', label: 'Description', show: () => true },
   { id: 'io', label: 'I/O', show: () => true },
   { id: 'budget', label: 'Budget', show: () => true },
   { id: 'skills', label: 'Skills', show: () => true },
@@ -22,7 +28,7 @@ const CONFIG_TABS: ConfigTab[] = [
   { id: 'presentation', label: 'Presentation', show: (n) => n.type === 'checkpoint' },
 ];
 
-export function ConfigBottomPanel({ node }: ConfigBottomPanelProps) {
+export function ConfigBottomPanel({ node, onDescriptionChange }: ConfigBottomPanelProps) {
   const [height, setHeight] = useState(0);
   const [activeTab, setActiveTab] = useState('io');
   const visibleTabs = CONFIG_TABS.filter((t) => t.show(node));
@@ -107,7 +113,7 @@ export function ConfigBottomPanel({ node }: ConfigBottomPanelProps) {
       {isOpen && (
         <div className="overflow-y-auto" style={{ height: height - 3 }}>
           <div className="p-3">
-            <ConfigTabContent node={node} activeTab={activeTab} />
+            <ConfigTabContent node={node} activeTab={activeTab} onDescriptionChange={onDescriptionChange} />
           </div>
         </div>
       )}
@@ -130,8 +136,10 @@ function getTabBadge(tabId: string, node: FlowNode): number {
   }
 }
 
-function ConfigTabContent({ node, activeTab }: { node: FlowNode; activeTab: string }) {
+function ConfigTabContent({ node, activeTab, onDescriptionChange }: { node: FlowNode; activeTab: string; onDescriptionChange?: (desc: string) => void }) {
   switch (activeTab) {
+    case 'description':
+      return <DescriptionContent nodeId={node.id} description={node.description ?? ''} onChange={onDescriptionChange} />;
     case 'io':
       return <IOContent config={node.config} />;
     case 'budget':
@@ -149,6 +157,29 @@ function ConfigTabContent({ node, activeTab }: { node: FlowNode; activeTab: stri
   }
 }
 
+function DescriptionContent({ nodeId, description, onChange }: { nodeId: string; description: string; onChange?: (desc: string) => void }) {
+  const { updateNode } = useFlow();
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    updateNode(nodeId, { description: val });
+    onChange?.(val);
+  };
+
+  return (
+    <div>
+      <div className="text-[10px] font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-1">Description</div>
+      <input
+        type="text"
+        value={description}
+        onChange={handleChange}
+        className="w-full text-xs border border-[var(--color-border)] rounded px-2 py-1.5 bg-white placeholder:text-[var(--color-text-muted)]"
+        placeholder="Short description shown in tooltips and explorer..."
+      />
+    </div>
+  );
+}
+
 const FORMAT_LABELS: Record<string, string> = {
   json: 'Structured',
   markdown: 'Markdown',
@@ -160,6 +191,8 @@ const FORMAT_LABELS: Record<string, string> = {
 };
 
 function IOContent({ config }: { config: NodeConfig }) {
+  const { selectArtifact } = useLayout();
+  const { state } = useFlow();
   const outputs = config.outputs ?? [];
   const inputs = config.inputs ?? [];
 
@@ -176,23 +209,22 @@ function IOContent({ config }: { config: NodeConfig }) {
       {outputs.length > 0 && (
         <div>
           <div className="text-[10px] font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-1">Outputs</div>
-          <div className="space-y-1">
+          <div className="flex flex-wrap gap-1.5">
             {outputs.map((out, i) => {
               const schema = typeof out === 'string' ? { name: out, format: 'text', description: '' } : out as ArtifactSchema;
+              const flowSchema = state.flow.artifacts?.[schema.name];
+              const tooltip = artifactTooltip(flowSchema ?? schema);
               return (
-                <div key={i} className="flex items-center gap-2 text-xs">
-                  <span className="font-mono text-[var(--color-text-primary)]">{schema.name || '(unnamed)'}</span>
+                <div key={i} className="inline-flex items-center gap-1.5">
+                  <Chip
+                    type="artifact-output"
+                    name={schema.name || '(unnamed)'}
+                    onClick={() => selectArtifact(schema.name)}
+                    tooltip={tooltip}
+                  />
                   <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-50 text-emerald-700">
                     {FORMAT_LABELS[schema.format] || schema.format}
                   </span>
-                  {schema.description && (
-                    <span className="text-[var(--color-text-muted)] truncate">{schema.description}</span>
-                  )}
-                  {(schema as ArtifactSchema).fields?.length ? (
-                    <span className="text-[10px] text-[var(--color-text-muted)]">
-                      {(schema as ArtifactSchema).fields!.length} fields
-                    </span>
-                  ) : null}
                 </div>
               );
             })}
@@ -205,10 +237,16 @@ function IOContent({ config }: { config: NodeConfig }) {
           <div className="flex flex-wrap gap-1.5">
             {inputs.map((inp, i) => {
               const name = typeof inp === 'string' ? inp : (inp as ArtifactSchema).name;
+              const flowSchema = state.flow.artifacts?.[name];
+              const tooltip = artifactTooltip(flowSchema ?? null);
               return (
-                <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-purple-50 text-purple-700">
-                  @{name}
-                </span>
+                <Chip
+                  key={i}
+                  type="artifact"
+                  name={name}
+                  onClick={() => selectArtifact(name)}
+                  tooltip={tooltip}
+                />
               );
             })}
           </div>
@@ -272,6 +310,8 @@ function BudgetContent({ nodeId, config }: { nodeId: string; config: NodeConfig 
 }
 
 function SkillsContent({ config }: { config: NodeConfig }) {
+  const { selectSkill } = useLayout();
+  const { skills: availableSkills } = useProjectStore();
   const skills = config.skills ?? [];
 
   if (skills.length === 0) {
@@ -284,11 +324,23 @@ function SkillsContent({ config }: { config: NodeConfig }) {
 
   return (
     <div className="flex flex-wrap gap-1.5">
-      {skills.map((s, i) => (
-        <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-emerald-50 text-emerald-700">
-          /skill:{s}
-        </span>
-      ))}
+      {skills.map((s, i) => {
+        const summary = availableSkills.find((sk) => sk.name === s);
+        const parts: string[] = [];
+        if (summary?.description) parts.push(summary.description);
+        if (summary?.referenceCount) parts.push(`${summary.referenceCount} references`);
+        if (summary?.subSkills?.length) parts.push(`Sub-skills: ${summary.subSkills.join(', ')}`);
+        const tooltip = parts.join(' \u2022 ');
+        return (
+          <Chip
+            key={i}
+            type="skill"
+            name={s}
+            onClick={() => selectSkill(s)}
+            tooltip={tooltip}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -307,29 +359,34 @@ function InterruptsContent({ config }: { config: NodeConfig }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {interrupts.map((int, i) => (
-        <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-red-50 text-red-700">
-          /interrupt:{int.type}
-        </span>
+        <Chip
+          key={i}
+          type="interrupt"
+          name={int.type}
+          tooltip={INTERRUPT_DESCRIPTIONS[int.type] ?? ''}
+        />
       ))}
     </div>
   );
 }
 
 function ChildrenContent({ node }: { node: FlowNode }) {
+  const { selectAgent } = useLayout();
+
   if (node.children.length === 0) {
     return <div className="text-xs text-[var(--color-text-muted)]">No sub-agents</div>;
   }
   return (
-    <div className="space-y-1">
+    <div className="flex flex-wrap gap-1.5">
       {node.children.map((child) => (
-        <div
+        <Chip
           key={child.id}
-          className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"
-        >
-          <span className="w-2 h-2 rounded-full bg-[var(--color-node-agent)]" />
-          {child.name}
-          <span className="text-[var(--color-text-muted)]">({child.id})</span>
-        </div>
+          type="agent"
+          name={child.id}
+          label={child.name}
+          onClick={() => selectAgent(child.id)}
+          tooltip={child.description || child.name}
+        />
       ))}
     </div>
   );

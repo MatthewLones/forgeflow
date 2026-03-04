@@ -1,8 +1,8 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect, Component, type ErrorInfo, type ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { FlowProvider, useFlow } from '../context/FlowContext';
 import { DagProvider, useDag } from '../context/DagContext';
-import { LayoutProvider } from '../context/LayoutContext';
+import { LayoutProvider, useLayout } from '../context/LayoutContext';
 import { RunProvider } from '../context/RunContext';
 import { CopilotProvider } from '../context/CopilotContext';
 import { useProjectStore } from '../context/ProjectStore';
@@ -11,10 +11,16 @@ import { WorkspaceToolbar } from '../components/workspace/WorkspaceToolbar';
 import { DagMiniView } from '../components/workspace/DagMiniView';
 import { EditorLayout } from '../components/workspace/EditorLayout';
 import { AISidePanel } from '../components/ai/AISidePanel';
+import { ShortcutHelpOverlay } from '../components/workspace/ShortcutHelpOverlay';
+import { GitPanel } from '../components/workspace/GitPanel';
+import { GitHubConnectDialog } from '../components/workspace/GitHubConnectDialog';
+import { GitProvider } from '../context/GitContext';
 import { autoLayout } from '../lib/flow-to-reactflow';
 import { api } from '../lib/api-client';
 import { useSyncFlow, type SaveStatus } from '../hooks/useSyncFlow';
 import { useAutoEdges } from '../hooks/useAutoEdges';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import type { ShortcutBinding } from '../lib/keyboard-shortcuts';
 
 /* ── Resize hook ────────────────────────────────────────── */
 
@@ -27,6 +33,9 @@ const DAG_DEFAULT = 128;
 const AI_PANEL_MIN = 280;
 const AI_PANEL_MAX = 600;
 const AI_PANEL_DEFAULT = 360;
+const GIT_PANEL_MIN = 100;
+const GIT_PANEL_MAX = 400;
+const GIT_PANEL_DEFAULT = 200;
 
 function useResize(
   axis: 'x' | 'y',
@@ -74,17 +83,289 @@ function useResize(
 /* ── Workspace content (inside providers) ───────────────── */
 
 function WorkspaceContent({ projectId }: { projectId: string }) {
-  const { dagCollapsed } = useDag();
-  const { state, dispatch } = useFlow();
+  const navigate = useNavigate();
+  const { dagCollapsed, toggleDag } = useDag();
+  const { state, dispatch, addNode, removeNode, selectedNode } = useFlow();
+  const layout = useLayout();
+  const { loadSkills } = useProjectStore();
   const sidebar = useResize('x', SIDEBAR_DEFAULT, SIDEBAR_MIN, SIDEBAR_MAX);
   const dag = useResize('y', DAG_DEFAULT, DAG_MIN, DAG_MAX);
   const aiPanel = useResize('x', AI_PANEL_DEFAULT, AI_PANEL_MIN, AI_PANEL_MAX, true);
+  const gitPanel = useResize('y', GIT_PANEL_DEFAULT, GIT_PANEL_MIN, GIT_PANEL_MAX, true);
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
+  const [gitPanelOpen, setGitPanelOpen] = useState(false);
+  const [githubDialogOpen, setGithubDialogOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  // Toolbar action state (lifted from WorkspaceToolbar)
+  const [validating, setValidating] = useState(false);
+  const [compiling, setCompiling] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const saveStatus = useSyncFlow(projectId, state.flow, state.dirty, dispatch);
 
   // Auto-create/remove DAG edges based on artifact dependencies
   useAutoEdges();
+
+  // Ref for layout to avoid cascading dependency instability in useCallback/useMemo
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+
+  // ── Lifted toolbar actions ─────────────────────────────
+
+  const handleValidate = useCallback(async () => {
+    setValidating(true);
+    try {
+      const result = await api.flows.validate(state.flow);
+      layoutRef.current.openTab({
+        id: 'validation',
+        type: 'validation',
+        label: result.valid ? 'Valid' : 'Invalid',
+        validationResult: result,
+      });
+    } finally {
+      setValidating(false);
+    }
+  }, [state.flow]);
+
+  const handleCompile = useCallback(async () => {
+    setCompiling(true);
+    try {
+      const result = await api.flows.compilePreview(state.flow);
+      layoutRef.current.openTab({
+        id: 'compile-preview',
+        type: 'compile',
+        label: 'Compile Preview',
+        compileResult: result,
+      });
+    } finally {
+      setCompiling(false);
+    }
+  }, [state.flow]);
+
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    try {
+      await api.projects.exportBundle(projectId);
+    } catch {
+      // silent
+    } finally {
+      setExporting(false);
+    }
+  }, [projectId]);
+
+  const handleToggleAI = useCallback(() => setAiPanelOpen((v) => !v), []);
+
+  // ── Keyboard shortcuts ─────────────────────────────────
+
+  // Use a ref for helpOpen to avoid re-creating bindings array on every toggle
+  const helpOpenRef = useRef(helpOpen);
+  helpOpenRef.current = helpOpen;
+
+  const bindings = useMemo<ShortcutBinding[]>(() => [
+    // ── General ──
+    {
+      id: 'help.toggle', label: 'Keyboard shortcuts', category: 'general',
+      key: '/', mod: true, global: true,
+      handler: () => setHelpOpen((v) => !v),
+    },
+    {
+      id: 'escape', label: 'Dismiss', category: 'general',
+      key: 'Escape', global: true,
+      handler: () => {
+        if (helpOpenRef.current) setHelpOpen(false);
+        // Other Escape handlers (DAG fullscreen, rename cancel) are component-local
+      },
+    },
+
+    // ── Tabs & Panels ──
+    {
+      id: 'panel.close', label: 'Close tab', category: 'tabs',
+      key: 'w', mod: true, electronOnly: true,
+      handler: () => {
+        const api = layoutRef.current.api;
+        if (!api) return;
+        const active = api.activePanel;
+        if (active) api.removePanel(active);
+      },
+    },
+    {
+      id: 'panel.next', label: 'Next tab', category: 'tabs',
+      key: ']', mod: true,
+      handler: () => {
+        const api = layoutRef.current.api;
+        if (!api) return;
+        const active = api.activePanel;
+        if (!active) return;
+        const group = active.group;
+        if (!group) return;
+        const panels = group.panels;
+        const idx = panels.indexOf(active);
+        const next = panels[(idx + 1) % panels.length];
+        next?.api.setActive();
+      },
+    },
+    {
+      id: 'panel.prev', label: 'Previous tab', category: 'tabs',
+      key: '[', mod: true,
+      handler: () => {
+        const api = layoutRef.current.api;
+        if (!api) return;
+        const active = api.activePanel;
+        if (!active) return;
+        const group = active.group;
+        if (!group) return;
+        const panels = group.panels;
+        const idx = panels.indexOf(active);
+        const prev = panels[(idx - 1 + panels.length) % panels.length];
+        prev?.api.setActive();
+      },
+    },
+    {
+      id: 'panel.split-right', label: 'Split right', category: 'tabs',
+      key: '\\', mod: true,
+      handler: () => {
+        const api = layoutRef.current.api;
+        if (!api) return;
+        const active = api.activePanel;
+        if (active) {
+          api.addPanel({
+            id: `empty-${Date.now()}`,
+            component: 'empty',
+            title: 'Empty',
+            position: { referencePanel: active.id, direction: 'right' },
+          });
+        }
+      },
+    },
+    {
+      id: 'panel.split-down', label: 'Split down', category: 'tabs',
+      key: '\\', mod: true, shift: true,
+      handler: () => {
+        const api = layoutRef.current.api;
+        if (!api) return;
+        const active = api.activePanel;
+        if (active) {
+          api.addPanel({
+            id: `empty-${Date.now()}`,
+            component: 'empty',
+            title: 'Empty',
+            position: { referencePanel: active.id, direction: 'below' },
+          });
+        }
+      },
+    },
+    // Cmd+1-9 — Focus group by index
+    ...Array.from({ length: 9 }, (_, i) => ({
+      id: `group.${i + 1}` as const,
+      label: `Focus group ${i + 1}`,
+      category: 'tabs' as const,
+      key: String(i + 1),
+      mod: true,
+      handler: () => {
+        const api = layoutRef.current.api;
+        if (!api) return;
+        const groups = api.groups;
+        if (i < groups.length) {
+          groups[i].panels[0]?.api.setActive();
+        }
+      },
+    })),
+
+    // ── Toolbar Actions ──
+    {
+      id: 'toolbar.validate', label: 'Validate', category: 'toolbar',
+      key: 'b', mod: true, shift: true,
+      handler: () => handleValidate(),
+    },
+    {
+      id: 'toolbar.compile', label: 'Compile preview', category: 'toolbar',
+      key: 'e', mod: true, shift: true,
+      handler: () => handleCompile(),
+    },
+    {
+      id: 'toolbar.run', label: 'Run flow', category: 'toolbar',
+      key: 'r', mod: true, shift: true,
+      handler: () => navigate(`/projects/${projectId}/runs/new`),
+    },
+    {
+      id: 'toolbar.export', label: 'Export .forge', category: 'toolbar',
+      key: 'x', mod: true, shift: true,
+      handler: () => handleExport(),
+    },
+
+    // ── Layout ──
+    {
+      id: 'layout.toggle-dag', label: 'Toggle DAG', category: 'layout',
+      key: 'd', mod: true, shift: true,
+      handler: () => toggleDag(),
+    },
+    {
+      id: 'layout.toggle-ai', label: 'Toggle Forge AI', category: 'layout',
+      key: 'j', mod: true, shift: true,
+      handler: () => handleToggleAI(),
+    },
+    {
+      id: 'layout.focus-explorer', label: 'Focus explorer', category: 'layout',
+      key: '0', mod: true,
+      handler: () => {
+        const el = document.querySelector('[data-panel="explorer"] [role="treeitem"]') as HTMLElement;
+        el?.focus();
+      },
+    },
+    {
+      id: 'layout.toggle-git', label: 'Toggle Git panel', category: 'layout',
+      key: 'g', mod: true, shift: true,
+      handler: () => setGitPanelOpen((v) => !v),
+    },
+    {
+      id: 'layout.focus-ai', label: 'Focus AI input', category: 'layout',
+      key: 'l', mod: true, shift: true,
+      handler: () => {
+        // Ensure AI panel is open, then focus the textarea
+        setAiPanelOpen(true);
+        requestAnimationFrame(() => {
+          const textarea = document.querySelector('[data-panel="ai"] textarea') as HTMLElement;
+          textarea?.focus();
+        });
+      },
+    },
+
+    // ── Node Operations ──
+    {
+      id: 'node.add-agent', label: 'New agent', category: 'nodes',
+      key: 'n', mod: true, shift: true,
+      handler: () => addNode('agent', { x: 200, y: 200 }),
+    },
+    {
+      id: 'node.add-checkpoint', label: 'New checkpoint', category: 'nodes',
+      key: 'p', mod: true, shift: true,
+      handler: () => addNode('checkpoint', { x: 200, y: 200 }),
+    },
+    {
+      id: 'node.delete', label: 'Delete selected', category: 'nodes',
+      key: 'Backspace', mod: true,
+      handler: () => {
+        if (selectedNode && window.confirm(`Delete "${selectedNode.name}"?`)) {
+          removeNode(selectedNode.id);
+        }
+      },
+    },
+
+    // ── Navigation ──
+    {
+      id: 'nav.dashboard', label: 'Dashboard', category: 'navigation',
+      key: 'h', mod: true, shift: true,
+      handler: () => navigate('/'),
+    },
+    {
+      id: 'nav.history', label: 'Run history', category: 'navigation',
+      key: 'y', mod: true, shift: true,
+      handler: () => navigate(`/projects/${projectId}/runs`),
+    },
+  ], [toggleDag, handleToggleAI, handleValidate, handleCompile, handleExport, addNode, removeNode, selectedNode, navigate, projectId]);
+
+  useKeyboardShortcuts(bindings);
 
   // Reload flow from server when copilot mutates it
   const handleFlowChanged = useCallback(async () => {
@@ -111,19 +392,39 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
       }
 
       dispatch({ type: 'SET_FLOW', flow, positions: newPositions });
+
+      // Also reload skills — copilot may have created/updated skills
+      loadSkills(projectId).catch(() => {});
     } catch (err) {
       console.error('Failed to reload flow after copilot change:', err);
     }
-  }, [projectId, dispatch]);
+  }, [projectId, dispatch, loadSkills]);
 
   return (
     <CopilotProvider projectId={projectId} onFlowChanged={handleFlowChanged}>
+      <GitProvider projectId={projectId}>
       <div className="h-screen flex flex-col">
-        <WorkspaceToolbar projectId={projectId} onToggleAI={() => setAiPanelOpen((v) => !v)} aiPanelOpen={aiPanelOpen} saveStatus={saveStatus} />
+        <WorkspaceToolbar
+          projectId={projectId}
+          onToggleAI={handleToggleAI}
+          aiPanelOpen={aiPanelOpen}
+          saveStatus={saveStatus}
+          onValidate={handleValidate}
+          onCompile={handleCompile}
+          onExport={handleExport}
+          onShowHelp={() => setHelpOpen(true)}
+          validating={validating}
+          compiling={compiling}
+          exporting={exporting}
+          onToggleGit={() => setGitPanelOpen((v) => !v)}
+          gitPanelOpen={gitPanelOpen}
+          onOpenGitHub={() => setGithubDialogOpen(true)}
+        />
 
         <div className="flex-1 flex overflow-hidden">
           {/* Left sidebar — Agent Explorer */}
           <div
+            data-panel="explorer"
             className="border-r border-[var(--color-border)] shrink-0 overflow-hidden bg-[var(--color-sidebar-bg)]"
             style={{ width: sidebar.size }}
           >
@@ -160,6 +461,25 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
             <div className="flex-1 overflow-hidden bg-white">
               <EditorLayout />
             </div>
+
+            {/* Git Panel (bottom, resizable) */}
+            {gitPanelOpen && (
+              <>
+                <div
+                  className="h-1 shrink-0 cursor-row-resize hover:bg-[var(--color-node-agent)]/20 active:bg-[var(--color-node-agent)]/30 transition-colors"
+                  onPointerDown={gitPanel.onPointerDown}
+                  onPointerMove={gitPanel.onPointerMove}
+                  onPointerUp={gitPanel.onPointerUp}
+                />
+                <div
+                  data-panel="git"
+                  className="shrink-0 overflow-hidden border-t border-[var(--color-border)]"
+                  style={{ height: gitPanel.size }}
+                >
+                  <GitPanel onClose={() => setGitPanelOpen(false)} />
+                </div>
+              </>
+            )}
           </div>
 
           {/* AI Side Panel */}
@@ -173,6 +493,7 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
                 onPointerUp={aiPanel.onPointerUp}
               />
               <div
+                data-panel="ai"
                 className="shrink-0 border-l border-[var(--color-border)] overflow-hidden"
                 style={{ width: aiPanel.size }}
               >
@@ -181,9 +502,63 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
             </>
           )}
         </div>
+
+        {/* Keyboard shortcut help overlay */}
+        {helpOpen && (
+          <ShortcutHelpOverlay bindings={bindings} onClose={() => setHelpOpen(false)} />
+        )}
+
+        {/* GitHub connect dialog */}
+        {githubDialogOpen && (
+          <GitHubConnectDialog
+            projectId={projectId}
+            onClose={() => setGithubDialogOpen(false)}
+          />
+        )}
       </div>
+      </GitProvider>
     </CopilotProvider>
   );
+}
+
+/* ── Error boundary ──────────────────────────────────────── */
+
+class WorkspaceErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null; info: string }
+> {
+  state: { error: Error | null; info: string } = { error: null, info: '' };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[WorkspaceErrorBoundary]', error, info.componentStack);
+    this.setState({ info: info.componentStack ?? '' });
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="h-screen flex flex-col items-center justify-center gap-4 p-8">
+          <div className="text-sm font-semibold text-red-600">Something went wrong</div>
+          <pre className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg p-4 max-w-2xl overflow-auto max-h-60 whitespace-pre-wrap">
+            {this.state.error.message}
+            {this.state.info}
+          </pre>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="text-xs px-4 py-2 rounded-lg bg-[var(--color-node-agent)] text-white"
+          >
+            Reload
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 /* ── Page component (reads URL param, loads flow) ───────── */
@@ -280,14 +655,16 @@ export function WorkspacePage() {
   }
 
   return (
-    <FlowProvider key={id} flow={flow} positions={positions}>
-      <DagProvider>
-        <LayoutProvider>
-          <RunProvider>
-            <WorkspaceContent projectId={id} />
-          </RunProvider>
-        </LayoutProvider>
-      </DagProvider>
-    </FlowProvider>
+    <WorkspaceErrorBoundary>
+      <FlowProvider key={id} flow={flow} positions={positions}>
+        <DagProvider>
+          <LayoutProvider>
+            <RunProvider>
+              <WorkspaceContent projectId={id} />
+            </RunProvider>
+          </LayoutProvider>
+        </DagProvider>
+      </FlowProvider>
+    </WorkspaceErrorBoundary>
   );
 }

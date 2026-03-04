@@ -7,7 +7,7 @@ import {
   acceptCompletion,
 } from '@codemirror/autocomplete';
 import { markdown } from '@codemirror/lang-markdown';
-import { chipDecorationPlugin, CHIP_PATTERNS } from './chip-decoration';
+import { chipDecorationPlugin, CHIP_PATTERNS, chipTooltipFacet, type ChipTooltipData } from './chip-decoration';
 import { createSlashAutocomplete } from './slash-autocomplete';
 import { blockDecorationPlugin } from '../../shared/block-widgets';
 import { markdownDecorationPlugin } from '../../shared/markdown-decoration';
@@ -56,6 +56,8 @@ interface SlashCommandEditorProps {
   skills: string[];
   agents: string[];
   artifacts: string[];
+  artifactFolders?: string[];
+  tooltipData?: ChipTooltipData;
   onCreateAgent?: (name: string) => void;
   onCreateArtifact?: (name: string) => void;
   onCreateSkill?: (name: string) => void;
@@ -78,8 +80,8 @@ interface SlashCommandEditorProps {
 const CHIP_CLICK_MAP: { className: string; regex: RegExp; type: 'skill' | 'agent' | 'artifact' | 'artifact-output' }[] = [
   { className: 'cm-chip-skill', regex: /\/skill:([\w-]+)/g, type: 'skill' },
   { className: 'cm-chip-agent', regex: /\/\/agent:([\w-]+)/g, type: 'agent' },
-  { className: 'cm-chip-artifact', regex: /@([\w._-]+)/g, type: 'artifact' },
-  { className: 'cm-chip-artifact-output', regex: /\\([\w._-]+)/g, type: 'artifact-output' },
+  { className: 'cm-chip-artifact', regex: /@([\w._/-]+)/g, type: 'artifact' },
+  { className: 'cm-chip-artifact-output', regex: /\\([\w._/-]+)/g, type: 'artifact-output' },
 ];
 
 export function SlashCommandEditor({
@@ -88,6 +90,8 @@ export function SlashCommandEditor({
   skills,
   agents,
   artifacts,
+  artifactFolders,
+  tooltipData,
   onCreateAgent,
   onCreateArtifact,
   onCreateSkill,
@@ -179,6 +183,7 @@ export function SlashCommandEditor({
         borderRadius: '4px',
         fontSize: '12px',
         fontWeight: '500',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         cursor: 'pointer',
       },
       '.cm-chip-skill': {
@@ -237,6 +242,7 @@ export function SlashCommandEditor({
       skills,
       agents,
       artifacts,
+      artifactFolders,
       onCreateAgent: (name) => onCreateAgentRef.current?.(name),
       onCreateArtifact: (name) => onCreateArtifactRef.current?.(name),
       onCreateSkill: (name) => onCreateSkillRef.current?.(name),
@@ -264,6 +270,7 @@ export function SlashCommandEditor({
         }),
         markdown(),
         markdownDecorationPlugin,
+        ...(tooltipData ? [chipTooltipFacet.of(tooltipData)] : []),
         chipDecorationPlugin,
         blockDecorationPlugin,
         EditorView.domEventHandlers({

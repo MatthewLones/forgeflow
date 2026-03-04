@@ -26,11 +26,13 @@
     "@forgeflow/state-store": "workspace:*",
     "@forgeflow/types": "workspace:*",
     "@forgeflow/validator": "workspace:*",
+    "@octokit/rest": "^22.0.1",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
     "express": "^5.1.0",
     "mime-types": "^3.0.2",
     "multer": "^2.0.2",
+    "simple-git": "^3.32.3",
     "zod": "^3.24.0"
   },
   "devDependencies": {

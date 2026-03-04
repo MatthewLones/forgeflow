@@ -70,6 +70,16 @@ html, body, #root {
   border-top: 2px solid transparent;
 }
 
+/* Hide native scrollbar on tab container (scrollbars="native" mode) */
+.dockview-theme-light.forgeflow-dockview .dv-tabs-container {
+  scrollbar-width: none; /* Firefox */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.dockview-theme-light.forgeflow-dockview .dv-tabs-container::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
 /* Hide the default dockview close button since we render our own in ForgeFlowTab */
 .dockview-theme-light.forgeflow-dockview .dv-default-tab-action {
   display: none;
@@ -724,5 +734,32 @@ tr:hover .skill-widget-remove,
   opacity: 0.5;
 }
 
+/* ===========================
+   Chip Tooltips (JS-positioned)
+   =========================== */
+
+#forge-tooltip {
+  position: fixed;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #f1f5f9;
+  font-size: 11px;
+  font-weight: 400;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  max-width: 280px;
+  width: max-content;
+  text-align: left;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease-in-out;
+  z-index: 99999;
+}
+
+#forge-tooltip.visible {
+  opacity: 1;
+}
 
 

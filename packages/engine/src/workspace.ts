@@ -1,5 +1,5 @@
 import { mkdir, writeFile, readdir, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import type { FlowNode, StateFile } from '@forgeflow/types';
 import { artifactName } from '@forgeflow/types';
 import type { ResolvedSkill } from '@forgeflow/skill-resolver';
@@ -32,9 +32,13 @@ export async function prepareWorkspace(
   await mkdir(outputDir, { recursive: true });
   await mkdir(skillsDir, { recursive: true });
 
-  // Write input files
+  // Write input files (create parent dirs for nested paths like reports/analysis)
   for (const file of options.inputFiles) {
-    await writeFile(join(inputDir, file.name), file.content);
+    const filePath = join(inputDir, file.name);
+    if (file.name.includes('/')) {
+      await mkdir(dirname(filePath), { recursive: true });
+    }
+    await writeFile(filePath, file.content);
   }
 
   // Write child prompt files
@@ -76,6 +80,7 @@ export async function prepareWorkspace(
 
 /**
  * Collect output files from a workspace after phase execution.
+ * Recursively traverses subdirectories to support folder-based artifacts.
  */
 export async function collectOutputs(
   workspacePath: string,
@@ -84,26 +89,29 @@ export async function collectOutputs(
   const outputDir = join(workspacePath, 'output');
   const results: StateFile[] = [];
 
-  let entries: string[];
-  try {
-    entries = await readdir(outputDir);
-  } catch {
-    return results;
+  const SIGNAL_PREFIXES = ['__INTERRUPT__', '__ANSWER__', '__CHILD_START__', '__CHILD_DONE__'];
+
+  async function walkDir(dir: string, prefix: string) {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (SIGNAL_PREFIXES.some((p) => entry.name.startsWith(p))) continue;
+
+      const relativeName = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        await walkDir(join(dir, entry.name), relativeName);
+      } else {
+        const content = await readFile(join(dir, entry.name));
+        results.push({ name: relativeName, content, producedByPhase: phaseId });
+      }
+    }
   }
 
-  for (const name of entries) {
-    // Skip sandbox channel signal files
-    if (
-      name.startsWith('__INTERRUPT__') ||
-      name.startsWith('__ANSWER__') ||
-      name.startsWith('__CHILD_START__') ||
-      name.startsWith('__CHILD_DONE__')
-    ) continue;
-
-    const content = await readFile(join(outputDir, name));
-    results.push({ name, content, producedByPhase: phaseId });
-  }
-
+  await walkDir(outputDir, '');
   return results;
 }
 

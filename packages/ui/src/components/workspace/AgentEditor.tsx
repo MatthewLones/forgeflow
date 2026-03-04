@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import type { FlowNode, NodeType, ArtifactSchema } from '@forgeflow/types';
+import type { FlowNode, NodeType, NodeConfig, ArtifactSchema } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
 import { useProjectStore } from '../../context/ProjectStore';
 import { useLayout } from '../../context/LayoutContext';
 import { extractConfigFromInstructions } from '../../lib/sync-blocks-to-config';
 import { extractSkillOutputs } from '../../lib/skill-output-resolver';
+import { artifactTooltip } from '../../lib/chip-styles';
 import { SlashCommandEditor } from './slash-commands/SlashCommandEditor';
+import type { ChipTooltipData } from './slash-commands/chip-decoration';
 import { ConfigBottomPanel } from './ConfigBottomPanel';
 
 interface AgentEditorProps {
@@ -71,6 +73,66 @@ export function AgentEditor({ nodeId }: AgentEditorProps) {
     () => Object.keys(state.flow.artifacts ?? {}),
     [state.flow.artifacts],
   );
+
+  // Artifact folder paths (derived from artifact names + explicit empty folders)
+  const artifactFolders = useMemo(() => {
+    const folders = new Set<string>();
+    for (const name of artifactNames) {
+      const parts = name.split('/');
+      for (let i = 1; i < parts.length; i++) {
+        folders.add(parts.slice(0, i).join('/'));
+      }
+    }
+    for (const f of state.flow.artifactFolders ?? []) {
+      folders.add(f);
+    }
+    return [...folders];
+  }, [artifactNames, state.flow.artifactFolders]);
+
+  // Tooltip data for CodeMirror chip decorations
+  const tooltipData = useMemo<ChipTooltipData>(() => {
+    const skills = new Map<string, string>();
+    for (const s of availableSkills) {
+      const parts: string[] = [];
+      if (s.description) parts.push(s.description);
+      if (s.referenceCount) parts.push(`${s.referenceCount} references`);
+      if (s.subSkills?.length) parts.push(`Sub-skills: ${s.subSkills.join(', ')}`);
+      if (parts.length) skills.set(s.name, parts.join(' \u2022 '));
+    }
+
+    const artifacts = new Map<string, string>();
+    const allArtifactNames = Object.keys(state.flow.artifacts ?? {});
+    for (const [name, schema] of Object.entries(state.flow.artifacts ?? {})) {
+      const tt = artifactTooltip(schema as { format?: string; description?: string; fields?: { key: string }[] });
+      if (tt) artifacts.set(name, tt);
+    }
+    // Add folder tooltips
+    const folderContents = new Map<string, string[]>();
+    for (const name of allArtifactNames) {
+      const parts = name.split('/');
+      for (let i = 1; i < parts.length; i++) {
+        const folder = parts.slice(0, i).join('/');
+        if (!folderContents.has(folder)) folderContents.set(folder, []);
+        folderContents.get(folder)!.push(name);
+      }
+    }
+    for (const [folder, contents] of folderContents) {
+      artifacts.set(folder, `Folder: ${contents.length} artifact${contents.length !== 1 ? 's' : ''} (${contents.map((c) => c.split('/').pop()).join(', ')})`);
+    }
+
+    const agents = new Map<string, string>();
+    function collectAgentLabels(nodes: FlowNode[]) {
+      for (const n of nodes) {
+        const parts: string[] = [n.name];
+        if (n.description) parts.push(n.description);
+        agents.set(n.id, parts.join(' \u2022 '));
+        collectAgentLabels(n.children);
+      }
+    }
+    collectAgentLabels(state.flow.nodes);
+
+    return { skills, artifacts, agents };
+  }, [availableSkills, state.flow.artifacts, state.flow.nodes]);
 
   const handleCreateAgent = useCallback(
     (name: string) => {
@@ -196,12 +258,43 @@ export function AgentEditor({ nodeId }: AgentEditorProps) {
     return () => { cancelled = true; };
   }, [nodeSkillsKey, skillData]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sync config from instructions on initial load (e.g. interrupts, skills from saved flow)
+  useEffect(() => {
+    if (!node?.instructions) return;
+    const configUpdate = extractConfigFromInstructions(node.instructions, state.flow.artifacts);
+    if (!configUpdate) return;
+
+    // Only sync fields that are currently empty/missing in config
+    const needsSync =
+      (configUpdate.interrupts?.length && !node.config.interrupts?.length) ||
+      (configUpdate.skills?.length && !node.config.skills?.length) ||
+      (configUpdate.inputs?.length && !node.config.inputs?.length) ||
+      (configUpdate.outputs?.length && !node.config.outputs?.length);
+
+    if (needsSync) {
+      const patch: Partial<NodeConfig> = {};
+      if (configUpdate.interrupts?.length && !node.config.interrupts?.length) {
+        patch.interrupts = configUpdate.interrupts;
+      }
+      if (configUpdate.skills?.length && !node.config.skills?.length) {
+        patch.skills = configUpdate.skills;
+      }
+      if (configUpdate.inputs?.length && !node.config.inputs?.length) {
+        patch.inputs = configUpdate.inputs;
+      }
+      if (configUpdate.outputs?.length && !node.config.outputs?.length) {
+        patch.outputs = configUpdate.outputs;
+      }
+      updateNodeConfig(nodeId, patch);
+    }
+  }, [nodeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleInstructionsChange = useCallback(
     (text: string) => {
       updateNode(nodeId, { instructions: text });
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
       syncTimerRef.current = setTimeout(() => {
-        const configUpdate = extractConfigFromInstructions(text);
+        const configUpdate = extractConfigFromInstructions(text, state.flow.artifacts);
         if (configUpdate) {
           // Merge skill-inherited outputs into the extracted config
           const extractedNames = new Set(
@@ -217,7 +310,7 @@ export function AgentEditor({ nodeId }: AgentEditorProps) {
         }
       }, 500);
     },
-    [nodeId, updateNode, updateNodeConfig],
+    [nodeId, updateNode, updateNodeConfig, state.flow.artifacts],
   );
 
   const handleNameChange = useCallback(
@@ -285,6 +378,8 @@ export function AgentEditor({ nodeId }: AgentEditorProps) {
           skills={skillNames}
           agents={agentNames}
           artifacts={artifactNames}
+          artifactFolders={artifactFolders}
+          tooltipData={tooltipData}
           onCreateAgent={handleCreateAgent}
           onCreateArtifact={handleCreateArtifact}
           onCreateSkill={handleCreateSkill}

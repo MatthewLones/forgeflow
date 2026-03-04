@@ -1,4 +1,8 @@
-import type { FlowDefinition, ValidationResult } from '@forgeflow/types';
+import type {
+  FlowDefinition, ValidationResult,
+  GitStatus, GitCommit, GitBranch, GitDiffEntry,
+  GitHubConnection, GitHubRepo,
+} from '@forgeflow/types';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api';
 
@@ -23,6 +27,15 @@ export interface SkillSummary {
   description: string;
   referenceCount: number;
   subSkills: string[];
+}
+
+export interface ChatMeta {
+  chatId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  totalCostUsd: number;
 }
 
 export interface SkillFile {
@@ -389,7 +402,7 @@ export const api = {
   copilot: {
     /** Send a message to the copilot. Returns sessionId. */
     sendMessage: (projectId: string, message: string, options?: { maxTurns?: number; maxBudgetUsd?: number; model?: string }) =>
-      post<{ sessionId: string }>(`/copilot/${projectId}/message`, { message, ...options }),
+      post<{ sessionId: string; eventCount: number }>(`/copilot/${projectId}/message`, { message, ...options }),
 
     /** SSE stream of copilot events with replay */
     streamProgress: (sessionId: string): EventSource =>
@@ -407,8 +420,102 @@ export const api = {
     reset: (sessionId: string) =>
       post<{ ok: boolean }>(`/copilot/${sessionId}/reset`),
 
+    /** Check if there's an active copilot session for this project */
+    getActiveSession: (projectId: string) =>
+      get<{ active: boolean; sessionId?: string; activeQuery?: boolean; hasPendingQuestion?: boolean; eventCount?: number }>(`/copilot/${projectId}/active-session`),
+
     /** Load past copilot events from disk */
     loadHistory: (projectId: string) =>
       get<{ events: import('@forgeflow/types').ProgressEvent[] }>(`/copilot/${projectId}/history`),
+
+    /** List all chats for a project */
+    listChats: (projectId: string) =>
+      get<{ chats: ChatMeta[]; activeChatId: string | null }>(`/copilot/${projectId}/chats`),
+
+    /** Load events for a specific chat */
+    loadChatHistory: (projectId: string, chatId: string) =>
+      get<{ events: import('@forgeflow/types').ProgressEvent[] }>(`/copilot/${projectId}/chats/${chatId}`),
+
+    /** Archive current chat and start a new one */
+    newChat: (projectId: string) =>
+      post<ChatMeta>(`/copilot/${projectId}/chats/new`),
+
+    /** Switch to a different chat */
+    switchChat: (projectId: string, chatId: string) =>
+      post<ChatMeta>(`/copilot/${projectId}/chats/${chatId}/switch`),
+
+    /** Delete a chat */
+    deleteChat: (projectId: string, chatId: string) =>
+      del(`/copilot/${projectId}/chats/${chatId}`),
+  },
+
+  git: {
+    status: (projectId: string) =>
+      get<GitStatus>(`/projects/${projectId}/git/status`),
+
+    init: (projectId: string) =>
+      post<{ success: boolean }>(`/projects/${projectId}/git/init`),
+
+    stageAll: (projectId: string) =>
+      post<{ success: boolean }>(`/projects/${projectId}/git/stage`),
+
+    stageFiles: (projectId: string, paths: string[]) =>
+      post<{ success: boolean }>(`/projects/${projectId}/git/stage`, { paths }),
+
+    unstageFiles: (projectId: string, paths: string[]) =>
+      post<{ success: boolean }>(`/projects/${projectId}/git/unstage`, { paths }),
+
+    commit: (projectId: string, message: string) =>
+      post<{ hash: string }>(`/projects/${projectId}/git/commit`, { message }),
+
+    log: (projectId: string, limit?: number) =>
+      get<GitCommit[]>(`/projects/${projectId}/git/log${limit ? `?limit=${limit}` : ''}`),
+
+    diff: (projectId: string, hash?: string) =>
+      get<GitDiffEntry[]>(`/projects/${projectId}/git/diff${hash ? `?hash=${hash}` : ''}`),
+
+    branches: (projectId: string) =>
+      get<GitBranch[]>(`/projects/${projectId}/git/branches`),
+
+    createBranch: (projectId: string, name: string) =>
+      post<{ success: boolean }>(`/projects/${projectId}/git/branches`, { name }),
+
+    switchBranch: (projectId: string, name: string) =>
+      put<{ success: boolean }>(`/projects/${projectId}/git/branches`, { name }),
+
+    push: (projectId: string) =>
+      post<{ success: boolean }>(`/projects/${projectId}/git/push`),
+
+    pull: (projectId: string) =>
+      post<{ success: boolean; changes?: number }>(`/projects/${projectId}/git/pull`),
+
+    reset: (projectId: string, hash: string) =>
+      post<{ success: boolean }>(`/projects/${projectId}/git/reset`, { hash }),
+
+    setRemote: (projectId: string, url: string) =>
+      post<{ success: boolean }>(`/projects/${projectId}/git/remote`, { url }),
+
+    getRemote: (projectId: string) =>
+      get<{ url: string | null }>(`/projects/${projectId}/git/remote`),
+  },
+
+  github: {
+    status: () =>
+      get<GitHubConnection>('/github/status'),
+
+    getAuthUrl: () =>
+      get<{ url: string }>('/github/auth-url'),
+
+    repos: () =>
+      get<GitHubRepo[]>('/github/repos'),
+
+    createRepo: (name: string, description: string, isPrivate: boolean) =>
+      post<GitHubRepo>('/github/repos', { name, description, private: isPrivate }),
+
+    linkRepo: (projectId: string, repoUrl: string) =>
+      post<{ success: boolean }>('/github/repos/link', { projectId, repoUrl }),
+
+    disconnect: () =>
+      post<{ success: boolean }>('/github/disconnect'),
   },
 };

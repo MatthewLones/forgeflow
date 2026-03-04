@@ -15,6 +15,10 @@ const RunListPage = lazy(() =>
   import('./pages/RunListPage').then((m) => ({ default: m.RunListPage })),
 );
 
+const GitHubCallbackPage = lazy(() =>
+  import('./pages/GitHubCallbackPage').then((m) => ({ default: m.GitHubCallbackPage })),
+);
+
 function Loading() {
   return (
     <div className="h-screen flex items-center justify-center text-sm text-[var(--color-text-muted)]">
@@ -61,6 +65,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <RunDashboardPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/github/callback"
+          element={
+            <Suspense fallback={<Loading />}>
+              <GitHubCallbackPage />
             </Suspense>
           }
         />

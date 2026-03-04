@@ -50,6 +50,7 @@ const flowNodeSchema: z.ZodType<unknown> = z.lazy(() =>
     id: z.string().regex(nodeIdPattern, 'Node ID must be snake_case: [a-z][a-z0-9_]*'),
     type: z.enum(['agent', 'checkpoint']),
     name: z.string().min(1),
+    description: z.string().optional(),
     instructions: z.string(),
     config: nodeConfigSchema,
     children: z.array(flowNodeSchema),
@@ -78,5 +79,6 @@ export const flowDefinitionSchema = z.object({
   nodes: z.array(flowNodeSchema).min(1),
   edges: z.array(flowEdgeSchema),
   artifacts: z.record(z.string(), artifactSchemaSchema).optional(),
+  artifactFolders: z.array(z.string()).optional(),
   layout: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).optional(),
 });

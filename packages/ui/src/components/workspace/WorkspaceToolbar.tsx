@@ -1,10 +1,9 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFlow } from '../../context/FlowContext';
 import { useDag } from '../../context/DagContext';
-import { useLayout } from '../../context/LayoutContext';
-import { api } from '../../lib/api-client';
+import { useGit } from '../../context/GitContext';
 import { ForgeExportIcon } from '../icons/ForgeFileIcon';
+import { formatShortcut, isMac } from '../../lib/keyboard-shortcuts';
 import type { SaveStatus } from '../../hooks/useSyncFlow';
 
 interface WorkspaceToolbarProps {
@@ -12,6 +11,16 @@ interface WorkspaceToolbarProps {
   onToggleAI?: () => void;
   aiPanelOpen?: boolean;
   saveStatus?: SaveStatus;
+  onValidate?: () => void;
+  onCompile?: () => void;
+  onExport?: () => void;
+  onShowHelp?: () => void;
+  validating?: boolean;
+  compiling?: boolean;
+  exporting?: boolean;
+  onToggleGit?: () => void;
+  gitPanelOpen?: boolean;
+  onOpenGitHub?: () => void;
 }
 
 const SAVE_LABELS: Record<SaveStatus, string> = {
@@ -21,56 +30,27 @@ const SAVE_LABELS: Record<SaveStatus, string> = {
   error: 'Save failed',
 };
 
-export function WorkspaceToolbar({ projectId, onToggleAI, aiPanelOpen, saveStatus = 'idle' }: WorkspaceToolbarProps) {
+export function WorkspaceToolbar({
+  projectId,
+  onToggleAI,
+  aiPanelOpen,
+  saveStatus = 'idle',
+  onValidate,
+  onCompile,
+  onExport,
+  onShowHelp,
+  validating = false,
+  compiling = false,
+  exporting = false,
+  onToggleGit,
+  gitPanelOpen,
+  onOpenGitHub,
+}: WorkspaceToolbarProps) {
   const { state } = useFlow();
   const { flow } = state;
   const { dagCollapsed, toggleDag } = useDag();
-  const { openTab } = useLayout();
+  const git = useGit();
   const navigate = useNavigate();
-  const [validating, setValidating] = useState(false);
-  const [compiling, setCompiling] = useState(false);
-  const [exporting, setExporting] = useState(false);
-
-  const handleValidate = async () => {
-    setValidating(true);
-    try {
-      const result = await api.flows.validate(flow);
-      openTab({
-        id: 'validation',
-        type: 'validation',
-        label: result.valid ? 'Valid' : 'Invalid',
-        validationResult: result,
-      });
-    } finally {
-      setValidating(false);
-    }
-  };
-
-  const handleCompile = async () => {
-    setCompiling(true);
-    try {
-      const result = await api.flows.compilePreview(flow);
-      openTab({
-        id: 'compile-preview',
-        type: 'compile',
-        label: 'Compile Preview',
-        compileResult: result,
-      });
-    } finally {
-      setCompiling(false);
-    }
-  };
-
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      await api.projects.exportBundle(projectId);
-    } catch {
-      // Could show a toast, but for now silent
-    } finally {
-      setExporting(false);
-    }
-  };
 
   const handleRun = () => {
     navigate(`/projects/${projectId}/runs/new`);
@@ -115,25 +95,60 @@ export function WorkspaceToolbar({ projectId, onToggleAI, aiPanelOpen, saveStatu
         >
           {dagCollapsed ? 'Show DAG' : 'Hide DAG'}
         </button>
-        <ToolbarButton label={validating ? 'Validating...' : 'Validate'} onClick={handleValidate} disabled={validating} />
-        <ToolbarButton label={compiling ? 'Compiling...' : 'Compile'} onClick={handleCompile} disabled={compiling} />
+        <ToolbarButton
+          label={validating ? 'Validating...' : 'Validate'}
+          onClick={onValidate}
+          disabled={validating}
+          title={formatShortcut({ id: '', label: '', category: 'toolbar', key: 'b', mod: true, shift: true })}
+        />
+        <ToolbarButton
+          label={compiling ? 'Compiling...' : 'Compile'}
+          onClick={onCompile}
+          disabled={compiling}
+          title={formatShortcut({ id: '', label: '', category: 'toolbar', key: 'e', mod: true, shift: true })}
+        />
         <button
           type="button"
           onClick={handleRun}
           className="text-xs font-medium px-3 py-1.5 rounded-md border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+          title={formatShortcut({ id: '', label: '', category: 'toolbar', key: 'r', mod: true, shift: true })}
         >
           Run
         </button>
         <ToolbarButton label="History" onClick={handleHistory} />
         <button
           type="button"
-          onClick={handleExport}
+          onClick={onExport}
           disabled={exporting}
           className="text-xs font-medium px-3 py-1.5 rounded-md border border-[var(--color-border)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
         >
           <ForgeExportIcon size={13} />
           {exporting ? 'Exporting...' : 'Export'}
         </button>
+
+        {/* Git button with branch indicator */}
+        {onToggleGit && (
+          <button
+            type="button"
+            onClick={onToggleGit}
+            title={formatShortcut({ id: '', label: '', category: 'layout', key: 'g', mod: true, shift: true })}
+            className={`text-xs font-medium px-3 py-1.5 rounded-md border transition-colors flex items-center gap-1.5 ${
+              gitPanelOpen
+                ? 'border-gray-700 bg-gray-800 text-white'
+                : 'border-[var(--color-border)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)]'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path d="M6 3v12m0 0a3 3 0 1 0 3 3M6 15a3 3 0 0 1 3-3h6a3 3 0 0 0 3-3V3" />
+            </svg>
+            {git.status?.branch || 'Git'}
+            {(git.status?.files?.length ?? 0) > 0 && (
+              <span className={`text-[9px] px-1 rounded-full ${gitPanelOpen ? 'bg-white/20' : 'bg-amber-500/15 text-amber-600'}`}>
+                {git.status!.files.length}
+              </span>
+            )}
+          </button>
+        )}
 
         {onToggleAI && (
           <button
@@ -146,6 +161,17 @@ export function WorkspaceToolbar({ projectId, onToggleAI, aiPanelOpen, saveStatu
             }`}
           >
             Forge
+          </button>
+        )}
+
+        {onShowHelp && (
+          <button
+            type="button"
+            onClick={onShowHelp}
+            title={`Keyboard shortcuts (${isMac ? '\u2318' : 'Ctrl'}/)`}
+            className="text-xs font-medium w-7 h-7 flex items-center justify-center rounded-md border border-[var(--color-border)] bg-white text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-canvas-bg)] transition-colors"
+          >
+            ?
           </button>
         )}
       </div>
@@ -171,4 +197,3 @@ function ToolbarButton({ label, onClick, disabled, title }: {
     </button>
   );
 }
-

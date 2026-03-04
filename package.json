@@ -8,7 +8,10 @@
     "test:watch": "vitest",
     "lint": "eslint 'packages/*/src/**/*.ts'",
     "typecheck": "tsc -b",
-    "clean": "pnpm -r exec rm -rf dist"
+    "clean": "pnpm -r exec rm -rf dist",
+    "dev": "concurrently -n server,ui -c blue,green \"pnpm --filter @forgeflow/server dev\" \"pnpm --filter @forgeflow/ui dev\"",
+    "dev:desktop": "concurrently -n ui,electron -c green,magenta \"pnpm --filter @forgeflow/ui dev\" \"pnpm --filter @forgeflow/desktop dev\"",
+    "dist:desktop": "pnpm build && pnpm --filter @forgeflow/ui build && pnpm --filter @forgeflow/desktop dist"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -23,6 +26,7 @@
     "@types/node": "^25.3.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "concurrently": "^9.2.1",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
     "tsup": "^8.0.0",

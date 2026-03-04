@@ -6,6 +6,7 @@ export interface SlashAutocompleteOptions {
   skills: string[];
   agents: string[];
   artifacts: string[];
+  artifactFolders?: string[];
   onCreateAgent?: (name: string) => void;
   onCreateArtifact?: (name: string) => void;
   onCreateSkill?: (name: string) => void;
@@ -23,10 +24,10 @@ const INTERRUPT_TYPES = [
   { name: 'escalation', detail: 'flag a risk' },
 ];
 
-export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAgent, onCreateArtifact, onCreateSkill }: SlashAutocompleteOptions) {
+export function createSlashAutocomplete({ skills, agents, artifacts, artifactFolders = [], onCreateAgent, onCreateArtifact, onCreateSkill }: SlashAutocompleteOptions) {
   return function slashAutocomplete(context: CompletionContext): CompletionResult | null {
     // 1. Check for \ (artifact output declaration)
-    const backslash = context.matchBefore(/\\[\w._-]*/);
+    const backslash = context.matchBefore(/\\[\w._/-]*/);
     if (backslash) {
       const charBefore = backslash.from > 0
         ? context.state.doc.sliceString(backslash.from - 1, backslash.from)
@@ -43,8 +44,21 @@ export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAge
           detail: 'output artifact',
         }));
 
-      // Offer "Create" if query doesn't match an existing artifact
-      if (query && !artifacts.some((a) => a.toLowerCase() === query)) {
+      // Add folder options
+      for (const folder of artifactFolders) {
+        if (folder.toLowerCase().includes(query)) {
+          const count = artifacts.filter((a) => a.startsWith(folder + '/')).length;
+          options.push({
+            label: folder,
+            type: 'property',
+            apply: `\\${folder}`,
+            detail: `folder (${count} artifact${count !== 1 ? 's' : ''})`,
+          });
+        }
+      }
+
+      // Offer "Create" if query doesn't match an existing artifact or folder
+      if (query && !artifacts.some((a) => a.toLowerCase() === query) && !artifactFolders.some((f) => f.toLowerCase() === query)) {
         options.push({
           label: `Create "${query}"`,
           type: 'property',
@@ -64,7 +78,7 @@ export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAge
     }
 
     // 2. Check for @ (artifact input reference)
-    const atSign = context.matchBefore(/@[\w._-]*/);
+    const atSign = context.matchBefore(/@[\w._/-]*/);
     if (atSign) {
       const charBefore = atSign.from > 0
         ? context.state.doc.sliceString(atSign.from - 1, atSign.from)
@@ -81,8 +95,21 @@ export function createSlashAutocomplete({ skills, agents, artifacts, onCreateAge
           detail: 'artifact',
         }));
 
-      // Offer "Create" if query doesn't match an existing artifact
-      if (query && !artifacts.some((a) => a.toLowerCase() === query)) {
+      // Add folder options
+      for (const folder of artifactFolders) {
+        if (folder.toLowerCase().includes(query)) {
+          const count = artifacts.filter((a) => a.startsWith(folder + '/')).length;
+          options.push({
+            label: folder,
+            type: 'property',
+            apply: `@${folder}`,
+            detail: `folder (${count} artifact${count !== 1 ? 's' : ''})`,
+          });
+        }
+      }
+
+      // Offer "Create" if query doesn't match an existing artifact or folder
+      if (query && !artifacts.some((a) => a.toLowerCase() === query) && !artifactFolders.some((f) => f.toLowerCase() === query)) {
         options.push({
           label: `Create "${query}"`,
           type: 'property',

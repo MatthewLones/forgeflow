@@ -85,3 +85,13 @@ export type {
   PhaseIR,
   ChildPromptIR,
 } from './compile-ir.js';
+
+export type {
+  GitStatusFile,
+  GitStatus,
+  GitCommit,
+  GitBranch,
+  GitDiffEntry,
+  GitHubConnection,
+  GitHubRepo,
+} from './git.js';

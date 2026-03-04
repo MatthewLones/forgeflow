@@ -20,8 +20,8 @@ const PATTERNS = [
   { regex: /(?<!\/)\/skill:([\w-]+)/g, deco: skillRefDeco },
   { regex: /@([\w./-]+\.\w+)/g, deco: fileRefDeco },
   { regex: /\/interrupt:(approval|qa|selection|review|escalation)\b/g, deco: interruptDeco },
-  { regex: /\\([\w._-]+)/g, deco: artifactOutputDeco },
-  { regex: /@([\w._-]+)/g, deco: artifactDeco },
+  { regex: /\\([\w._/-]+)/g, deco: artifactOutputDeco },
+  { regex: /@([\w._/-]+)/g, deco: artifactDeco },
 ];
 
 /** Exported for the atomic-backspace handler */

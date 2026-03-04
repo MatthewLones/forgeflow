@@ -33,8 +33,8 @@ function createWindow(): void {
     mainWindow.loadURL(DEV_UI_URL);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    // Production: load built UI assets
-    const uiPath = path.join(__dirname, '..', '..', '..', 'ui', 'dist', 'index.html');
+    // Production: load built UI assets from electron-builder's extraResources
+    const uiPath = path.join(process.resourcesPath, 'ui', 'index.html');
     mainWindow.loadFile(uiPath);
   }
 

@@ -1,7 +1,19 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 import express, { type Express } from 'express';
 import cors from 'cors';
 import type { Server } from 'node:http';
+
+// Load .env: try cwd first (dev), then ~/.forgeflow/.env (packaged Electron)
+dotenv.config();
+if (!process.env.ANTHROPIC_API_KEY) {
+  const userEnv = path.join(os.homedir(), '.forgeflow', '.env');
+  if (fs.existsSync(userEnv)) {
+    dotenv.config({ path: userEnv });
+  }
+}
 import healthRouter from './routes/health.js';
 import projectsRouter from './routes/projects.js';
 import skillsRouter from './routes/skills.js';
@@ -9,6 +21,8 @@ import flowsRouter from './routes/flows.js';
 import runsRouter from './routes/runs.js';
 import referencesRouter from './routes/references.js';
 import copilotRouter from './routes/copilot.js';
+import gitRouter from './routes/git.js';
+import githubRouter from './routes/github.js';
 import { WorkspaceCleaner } from './services/workspace-cleaner.js';
 import { runManager } from './services/run-manager.js';
 
@@ -26,6 +40,8 @@ export function createApp(): Express {
   app.use('/api', runsRouter);
   app.use('/api', referencesRouter);
   app.use('/api', copilotRouter);
+  app.use('/api', gitRouter);
+  app.use('/api', githubRouter);
 
   return app;
 }

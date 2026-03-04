@@ -9,9 +9,11 @@ import {
   type ReactNode,
 } from 'react';
 import type { ProgressEvent } from '@forgeflow/types';
-import { api } from '../lib/api-client';
+import { api, type ChatMeta } from '../lib/api-client';
 
 /* ── Types ─────────────────────────────────────────────── */
+
+export type { ChatMeta } from '../lib/api-client';
 
 export interface CopilotToolCall {
   toolName: string;
@@ -59,6 +61,14 @@ interface CopilotState {
   error: string | null;
   /** True if history was loaded from a previous session */
   hasHistory: boolean;
+  /** True only while copilot_text events are actively arriving */
+  streamingText: boolean;
+  /** Current active chat ID */
+  chatId: string | null;
+  /** All chats for this project */
+  chatList: ChatMeta[];
+  /** Whether chat list has been loaded */
+  chatListLoaded: boolean;
 }
 
 /* ── Actions ───────────────────────────────────────────── */
@@ -71,7 +81,109 @@ type CopilotAction =
   | { type: 'QUESTION_ANSWERED' }
   | { type: 'ERROR'; error: string }
   | { type: 'RESET' }
-  | { type: 'LOAD_HISTORY'; messages: CopilotMessage[]; totalCostUsd: number; todos: TodoItem[] };
+  | { type: 'RECONNECT'; sessionId: string }
+  | { type: 'LOAD_HISTORY'; messages: CopilotMessage[]; totalCostUsd: number; todos: TodoItem[] }
+  | { type: 'LOAD_CHAT_LIST'; chats: ChatMeta[]; activeChatId: string | null }
+  | { type: 'SET_ACTIVE_CHAT'; chatId: string; messages: CopilotMessage[]; totalCostUsd: number; todos: TodoItem[] }
+  | { type: 'NEW_CHAT'; chatMeta: ChatMeta }
+  | { type: 'CHAT_DELETED'; chatId: string };
+
+/* ── Replay helper ─────────────────────────────────────── */
+
+/** Replay NDJSON events into CopilotMessages. Extracted for reuse in mount + switchChat. */
+function replayEvents(events: ProgressEvent[]): { messages: CopilotMessage[]; totalCostUsd: number; todos: TodoItem[] } {
+  const messages: CopilotMessage[] = [];
+  let pendingText = '';
+  let pendingTools: CopilotToolCall[] = [];
+  let totalCostUsd = 0;
+  let lastTodos: TodoItem[] = [];
+
+  for (const event of events) {
+    const evt = event as Record<string, unknown>;
+    if (evt.type === 'user_message' && typeof evt.content === 'string') {
+      if (pendingText || pendingTools.length > 0) {
+        messages.push({
+          id: `history-${messages.length}`,
+          role: 'assistant',
+          content: pendingText,
+          timestamp: Date.now(),
+          toolCalls: pendingTools.length > 0 ? [...pendingTools] : undefined,
+        });
+        pendingText = '';
+        pendingTools = [];
+      }
+      messages.push({
+        id: `history-user-${messages.length}`,
+        role: 'user',
+        content: evt.content,
+        timestamp: (evt.timestamp as number) ?? Date.now(),
+      });
+      continue;
+    }
+
+    switch (event.type) {
+      case 'copilot_text':
+        if (pendingTools.length > 0) {
+          messages.push({
+            id: `history-${messages.length}`,
+            role: 'assistant',
+            content: pendingText,
+            timestamp: Date.now(),
+            toolCalls: [...pendingTools],
+          });
+          pendingText = '';
+          pendingTools = [];
+        }
+        pendingText += event.content;
+        break;
+      case 'copilot_tool_call':
+        pendingTools.push({
+          toolName: event.toolName,
+          toolUseId: event.toolUseId,
+          status: 'running',
+          inputSummary: event.inputSummary,
+        });
+        break;
+      case 'copilot_tool_result':
+        pendingTools = pendingTools.map((tc) =>
+          tc.toolUseId === event.toolUseId
+            ? { ...tc, status: event.isError ? 'error' as const : 'done' as const, outputSummary: event.outputSummary }
+            : tc,
+        );
+        break;
+      case 'copilot_todo_update':
+        lastTodos = event.todos;
+        break;
+      case 'copilot_completed':
+        if (pendingText || pendingTools.length > 0) {
+          messages.push({
+            id: `history-${messages.length}`,
+            role: 'assistant',
+            content: pendingText,
+            timestamp: Date.now(),
+            toolCalls: pendingTools.length > 0 ? [...pendingTools] : undefined,
+          });
+          pendingText = '';
+          pendingTools = [];
+        }
+        totalCostUsd = event.totalCostUsd;
+        break;
+    }
+  }
+
+  // Flush remaining
+  if (pendingText || pendingTools.length > 0) {
+    messages.push({
+      id: `history-${messages.length}`,
+      role: 'assistant',
+      content: pendingText,
+      timestamp: Date.now(),
+      toolCalls: pendingTools.length > 0 ? [...pendingTools] : undefined,
+    });
+  }
+
+  return { messages, totalCostUsd, todos: lastTodos };
+}
 
 /* ── Initial state ─────────────────────────────────────── */
 
@@ -94,6 +206,10 @@ const initialState: CopilotState = {
   totalCostUsd: 0,
   error: null,
   hasHistory: false,
+  streamingText: false,
+  chatId: null,
+  chatList: [],
+  chatListLoaded: false,
 };
 
 /* ── Reducer ───────────────────────────────────────────── */
@@ -121,13 +237,8 @@ function copilotReducer(state: CopilotState, action: CopilotAction): CopilotStat
 
       switch (event.type) {
         case 'copilot_text': {
-          // Consolidated blocks (from full assistant message) replace pendingText
-          // to dedup with earlier streaming deltas that may have already arrived.
-          // If SSE wasn't connected during streaming, this is the authoritative text.
           const isConsolidated = 'consolidated' in event && (event as Record<string, unknown>).consolidated === true;
 
-          // If we have pending tool calls, flush them into a message first
-          // This creates turn-by-turn conversation flow
           if (state.pendingToolCalls.length > 0) {
             const flushed: CopilotMessage = {
               id: `assistant-${Date.now()}`,
@@ -141,17 +252,19 @@ function copilotReducer(state: CopilotState, action: CopilotAction): CopilotStat
               messages: [...state.messages, flushed],
               pendingText: event.content,
               pendingToolCalls: [],
+              streamingText: !isConsolidated,
             };
           }
           if (isConsolidated) {
-            return { ...state, pendingText: event.content };
+            return { ...state, pendingText: event.content, streamingText: false };
           }
-          return { ...state, pendingText: state.pendingText + event.content };
+          return { ...state, pendingText: state.pendingText + event.content, streamingText: true };
         }
 
         case 'copilot_tool_call':
           return {
             ...state,
+            streamingText: false,
             pendingToolCalls: [
               ...state.pendingToolCalls,
               { toolName: event.toolName, toolUseId: event.toolUseId, status: 'running', inputSummary: event.inputSummary },
@@ -179,11 +292,9 @@ function copilotReducer(state: CopilotState, action: CopilotAction): CopilotStat
           };
 
         case 'copilot_flow_changed':
-          // Handled in the provider component via callback
           return state;
 
         case 'copilot_completed': {
-          // Flush pending text + tool calls into a message
           const completedMessages = [...state.messages];
 
           if (state.pendingText || state.pendingToolCalls.length > 0) {
@@ -196,8 +307,6 @@ function copilotReducer(state: CopilotState, action: CopilotAction): CopilotStat
             });
           }
 
-          // Detect if session ended due to budget/turn limit — show a helpful resume hint
-          // Budget cap ($3) is the practical limiter; turn limit (10K) is effectively unlimited
           const MAX_BUDGET_USD = 3.0;
           if (event.totalCostUsd >= MAX_BUDGET_USD * 0.95) {
             completedMessages.push({
@@ -236,7 +345,7 @@ function copilotReducer(state: CopilotState, action: CopilotAction): CopilotStat
       return { ...state, status: 'error', error: action.error };
 
     case 'RESET':
-      return { ...initialState, messages: [WELCOME] };
+      return { ...initialState, messages: [WELCOME], chatList: state.chatList, chatListLoaded: state.chatListLoaded };
 
     case 'LOAD_HISTORY':
       return {
@@ -245,6 +354,58 @@ function copilotReducer(state: CopilotState, action: CopilotAction): CopilotStat
         totalCostUsd: action.totalCostUsd,
         todos: action.todos,
         hasHistory: action.messages.length > 0,
+      };
+
+    case 'RECONNECT':
+      return { ...state, sessionId: action.sessionId, status: 'active' };
+
+    case 'LOAD_CHAT_LIST':
+      return {
+        ...state,
+        chatList: action.chats,
+        chatListLoaded: true,
+        chatId: action.activeChatId,
+      };
+
+    case 'SET_ACTIVE_CHAT':
+      return {
+        ...state,
+        chatId: action.chatId,
+        sessionId: null,
+        status: 'idle',
+        messages: [WELCOME, ...action.messages],
+        pendingText: '',
+        pendingToolCalls: [],
+        totalCostUsd: action.totalCostUsd,
+        todos: action.todos,
+        pendingQuestion: null,
+        error: null,
+        hasHistory: action.messages.length > 0,
+        streamingText: false,
+      };
+
+    case 'NEW_CHAT':
+      return {
+        ...state,
+        chatId: action.chatMeta.chatId,
+        sessionId: null,
+        status: 'idle',
+        messages: [WELCOME],
+        pendingText: '',
+        pendingToolCalls: [],
+        todos: [],
+        pendingQuestion: null,
+        totalCostUsd: 0,
+        error: null,
+        hasHistory: false,
+        streamingText: false,
+        chatList: [action.chatMeta, ...state.chatList.filter((c) => c.chatId !== action.chatMeta.chatId)],
+      };
+
+    case 'CHAT_DELETED':
+      return {
+        ...state,
+        chatList: state.chatList.filter((c) => c.chatId !== action.chatId),
       };
 
     default:
@@ -267,7 +428,9 @@ interface CopilotContextValue {
   sendMessage: (message: string) => Promise<void>;
   answerQuestion: (questionId: string, answer: string) => Promise<void>;
   stop: () => void;
-  reset: () => void;
+  newChat: () => Promise<void>;
+  switchChat: (chatId: string) => Promise<void>;
+  deleteChat: (chatId: string) => Promise<void>;
 }
 
 const CopilotContext = createContext<CopilotContextValue | null>(null);
@@ -288,110 +451,40 @@ export function CopilotProvider({
   const onFlowChangedRef = useRef(onFlowChanged);
   onFlowChangedRef.current = onFlowChanged;
 
-  // Load chat history from disk on mount
+  // Load chat list + active chat history on mount
   useEffect(() => {
-    api.copilot.loadHistory(projectId).then(({ events }) => {
+    const loadEventsIntoState = (events: ProgressEvent[]) => {
       if (events.length === 0) return;
-
-      // Replay events into messages
-      const messages: CopilotMessage[] = [];
-      let pendingText = '';
-      let pendingTools: CopilotToolCall[] = [];
-      let totalCostUsd = 0;
-      let lastTodos: TodoItem[] = [];
-
-      for (const event of events) {
-        // Handle user messages (not a ProgressEvent, custom record)
-        const evt = event as Record<string, unknown>;
-        if (evt.type === 'user_message' && typeof evt.content === 'string') {
-          // Flush any pending assistant content first
-          if (pendingText || pendingTools.length > 0) {
-            messages.push({
-              id: `history-${messages.length}`,
-              role: 'assistant',
-              content: pendingText,
-              timestamp: Date.now(),
-              toolCalls: pendingTools.length > 0 ? [...pendingTools] : undefined,
-            });
-            pendingText = '';
-            pendingTools = [];
-          }
-          messages.push({
-            id: `history-user-${messages.length}`,
-            role: 'user',
-            content: evt.content,
-            timestamp: (evt.timestamp as number) ?? Date.now(),
-          });
-          continue;
+      try {
+        const { messages, totalCostUsd, todos } = replayEvents(events);
+        if (messages.length > 0 || todos.length > 0) {
+          dispatch({ type: 'LOAD_HISTORY', messages, totalCostUsd, todos });
         }
-
-        switch (event.type) {
-          case 'copilot_text':
-            // If we have pending tools, flush previous turn
-            if (pendingTools.length > 0) {
-              messages.push({
-                id: `history-${messages.length}`,
-                role: 'assistant',
-                content: pendingText,
-                timestamp: Date.now(),
-                toolCalls: [...pendingTools],
-              });
-              pendingText = '';
-              pendingTools = [];
-            }
-            pendingText += event.content;
-            break;
-          case 'copilot_tool_call':
-            pendingTools.push({
-              toolName: event.toolName,
-              toolUseId: event.toolUseId,
-              status: 'running',
-              inputSummary: event.inputSummary,
-            });
-            break;
-          case 'copilot_tool_result':
-            pendingTools = pendingTools.map((tc) =>
-              tc.toolUseId === event.toolUseId
-                ? { ...tc, status: event.isError ? 'error' as const : 'done' as const, outputSummary: event.outputSummary }
-                : tc,
-            );
-            break;
-          case 'copilot_todo_update':
-            lastTodos = event.todos;
-            break;
-          case 'copilot_completed':
-            // Flush remaining content
-            if (pendingText || pendingTools.length > 0) {
-              messages.push({
-                id: `history-${messages.length}`,
-                role: 'assistant',
-                content: pendingText,
-                timestamp: Date.now(),
-                toolCalls: pendingTools.length > 0 ? [...pendingTools] : undefined,
-              });
-              pendingText = '';
-              pendingTools = [];
-            }
-            totalCostUsd = event.totalCostUsd;
-            break;
-        }
+      } catch (err) {
+        console.error('[Copilot] Failed to replay events:', err);
       }
+    };
 
-      // Flush any remaining
-      if (pendingText || pendingTools.length > 0) {
-        messages.push({
-          id: `history-${messages.length}`,
-          role: 'assistant',
-          content: pendingText,
-          timestamp: Date.now(),
-          toolCalls: pendingTools.length > 0 ? [...pendingTools] : undefined,
-        });
-      }
+    const loadLegacy = () => {
+      api.copilot.loadHistory(projectId)
+        .then(({ events }) => loadEventsIntoState(events))
+        .catch(() => { /* no history available */ });
+    };
 
-      if (messages.length > 0 || lastTodos.length > 0) {
-        dispatch({ type: 'LOAD_HISTORY', messages, totalCostUsd, todos: lastTodos });
+    api.copilot.listChats(projectId).then(({ chats, activeChatId }) => {
+      dispatch({ type: 'LOAD_CHAT_LIST', chats, activeChatId });
+
+      if (activeChatId) {
+        api.copilot.loadChatHistory(projectId, activeChatId)
+          .then(({ events }) => loadEventsIntoState(events))
+          .catch(() => loadLegacy());
+      } else {
+        loadLegacy();
       }
-    }).catch(() => { /* no history available */ });
+    }).catch(() => {
+      // Server unavailable or old server without /chats endpoint — use legacy
+      loadLegacy();
+    });
   }, [projectId]);
 
   const cleanupSSE = useCallback(() => {
@@ -401,17 +494,27 @@ export function CopilotProvider({
     }
   }, []);
 
-  const subscribeSSE = useCallback((sessionId: string) => {
+  const subscribeSSE = useCallback((sessionId: string, skipReplayCount = 0) => {
     cleanupSSE();
     const source = api.copilot.streamProgress(sessionId);
     eventSourceRef.current = source;
 
+    let skipped = 0;
+
     for (const type of COPILOT_SSE_EVENT_TYPES) {
       source.addEventListener(type, (e) => {
         const event = JSON.parse((e as MessageEvent).data) as ProgressEvent;
+
+        if (skipped < skipReplayCount) {
+          skipped++;
+          if (event.type === 'copilot_flow_changed') {
+            onFlowChangedRef.current?.();
+          }
+          return;
+        }
+
         dispatch({ type: 'SSE_EVENT', event });
 
-        // Trigger flow reload on mutation
         if (event.type === 'copilot_flow_changed') {
           onFlowChangedRef.current?.();
         }
@@ -419,23 +522,29 @@ export function CopilotProvider({
     }
 
     source.addEventListener('error', () => {
-      // EventSource auto-reconnects, but if the connection is gone (server restart etc),
-      // close it to avoid infinite reconnect loops with stale state.
       if (source.readyState === EventSource.CLOSED) {
         cleanupSSE();
       }
     });
   }, [cleanupSSE]);
 
+  // Auto-reconnect to an active copilot session after page refresh
+  useEffect(() => {
+    api.copilot.getActiveSession(projectId).then((res) => {
+      if (res.active && res.sessionId && res.activeQuery) {
+        dispatch({ type: 'RECONNECT', sessionId: res.sessionId });
+        subscribeSSE(res.sessionId, res.eventCount ?? 0);
+      }
+    }).catch(() => { /* server not available */ });
+  }, [projectId, subscribeSSE]);
+
   const sendMessage = useCallback(async (message: string) => {
     dispatch({ type: 'SEND_MESSAGE', message });
 
     try {
-      const { sessionId } = await api.copilot.sendMessage(projectId, message);
+      const { sessionId, eventCount } = await api.copilot.sendMessage(projectId, message);
       dispatch({ type: 'SESSION_STARTED', sessionId });
-
-      // Always (re)subscribe — the previous SSE may have silently died
-      subscribeSSE(sessionId);
+      subscribeSSE(sessionId, eventCount);
     } catch (err) {
       dispatch({ type: 'ERROR', error: err instanceof Error ? err.message : String(err) });
     }
@@ -457,13 +566,37 @@ export function CopilotProvider({
     }
   }, [state.sessionId]);
 
-  const reset = useCallback(() => {
+  const newChat = useCallback(async () => {
     cleanupSSE();
-    if (state.sessionId) {
-      api.copilot.reset(state.sessionId).catch(() => {});
+    try {
+      const chatMeta = await api.copilot.newChat(projectId);
+      dispatch({ type: 'NEW_CHAT', chatMeta });
+    } catch {
+      // Fallback: just reset locally
+      dispatch({ type: 'RESET' });
     }
-    dispatch({ type: 'RESET' });
-  }, [cleanupSSE, state.sessionId]);
+  }, [cleanupSSE, projectId]);
+
+  const switchChat = useCallback(async (chatId: string) => {
+    if (state.status === 'active') return; // Block switching during active query
+    cleanupSSE();
+
+    try {
+      await api.copilot.switchChat(projectId, chatId);
+      const { events } = await api.copilot.loadChatHistory(projectId, chatId);
+      const { messages, totalCostUsd, todos } = replayEvents(events);
+      dispatch({ type: 'SET_ACTIVE_CHAT', chatId, messages, totalCostUsd, todos });
+    } catch (err) {
+      dispatch({ type: 'ERROR', error: err instanceof Error ? err.message : String(err) });
+    }
+  }, [state.status, cleanupSSE, projectId]);
+
+  const deleteChat = useCallback(async (chatId: string) => {
+    try {
+      await api.copilot.deleteChat(projectId, chatId);
+      dispatch({ type: 'CHAT_DELETED', chatId });
+    } catch { /* ignore */ }
+  }, [projectId]);
 
   // Cleanup SSE connection on unmount
   useEffect(() => {
@@ -471,8 +604,8 @@ export function CopilotProvider({
   }, [cleanupSSE]);
 
   const value = useMemo<CopilotContextValue>(
-    () => ({ state, sendMessage, answerQuestion, stop, reset }),
-    [state, sendMessage, answerQuestion, stop, reset],
+    () => ({ state, sendMessage, answerQuestion, stop, newChat, switchChat, deleteChat }),
+    [state, sendMessage, answerQuestion, stop, newChat, switchChat, deleteChat],
   );
 
   return (

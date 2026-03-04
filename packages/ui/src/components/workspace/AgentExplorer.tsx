@@ -78,7 +78,7 @@ function SectionHeader({
   title: string;
   expanded: boolean;
   onToggle: () => void;
-  onAdd?: () => void;
+  onAdd?: (e: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
@@ -102,7 +102,7 @@ function SectionHeader({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onAdd();
+            onAdd(e);
           }}
           title={`Add new ${title.toLowerCase().replace(/s$/, '')}`}
           className="text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-node-agent)] transition-colors px-1"
@@ -132,6 +132,11 @@ function AgentTreeItem({ node, depth, activeTabId, renamingNodeId, onSelect, onR
   const [renameValue, setRenameValue] = useState(node.name);
   const inputRef = useRef<HTMLInputElement>(null);
   const hasChildren = node.children.length > 0;
+
+  // Auto-expand when children are added (e.g. by copilot)
+  useEffect(() => {
+    if (hasChildren && !expanded) setExpanded(true);
+  }, [hasChildren]); // eslint-disable-line react-hooks/exhaustive-deps
   const isActive = activeTabId === node.id;
   const isRenaming = renamingNodeId === node.id;
 
@@ -182,6 +187,7 @@ function AgentTreeItem({ node, depth, activeTabId, renamingNodeId, onSelect, onR
             : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] border-l-2 border-l-transparent'
         }`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
+        data-tooltip={node.description || undefined}
       >
         {/* Indent guides */}
         {depth > 0 && Array.from({ length: depth }).map((_, i) => (
@@ -416,6 +422,7 @@ function SkillTreeItem({ skill, allSkills, depth, activeTabId, visited, onSelect
             : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] border-l-2 border-l-transparent'
         }`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
+        data-tooltip={skill.description || undefined}
       >
         {/* Indent guides */}
         {depth > 0 && Array.from({ length: depth }).map((_, i) => (
@@ -547,10 +554,291 @@ const FORMAT_BADGE_COLORS: Record<string, string> = {
   binary: 'bg-gray-100 text-gray-600',
 };
 
+/* ── Artifact Tree ──────────────────────────────────────── */
+
+interface ArtifactTreeNode {
+  name: string;        // Display name (last segment)
+  fullPath: string;    // Full artifact path (e.g., "reports/risk_matrix")
+  isFolder: boolean;
+  children: ArtifactTreeNode[];
+  lineage?: ArtifactLineage;
+}
+
+function buildArtifactTree(lineage: ArtifactLineage[], emptyFolders: string[]): ArtifactTreeNode[] {
+  const root: ArtifactTreeNode[] = [];
+
+  for (const artifact of lineage) {
+    const segments = artifact.name.split('/');
+    let currentLevel = root;
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const isLast = i === segments.length - 1;
+      const pathSoFar = segments.slice(0, i + 1).join('/');
+
+      let existing = currentLevel.find((n) => n.name === segment && n.isFolder === !isLast);
+      if (!existing) {
+        existing = {
+          name: segment,
+          fullPath: pathSoFar,
+          isFolder: !isLast,
+          children: [],
+          lineage: isLast ? artifact : undefined,
+        };
+        currentLevel.push(existing);
+      }
+      currentLevel = existing.children;
+    }
+  }
+
+  // Add explicit empty folders
+  for (const folderPath of emptyFolders) {
+    const segments = folderPath.split('/');
+    let currentLevel = root;
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const pathSoFar = segments.slice(0, i + 1).join('/');
+      let existing = currentLevel.find((n) => n.name === segment && n.isFolder);
+      if (!existing) {
+        existing = { name: segment, fullPath: pathSoFar, isFolder: true, children: [] };
+        currentLevel.push(existing);
+      }
+      currentLevel = existing.children;
+    }
+  }
+
+  // Sort: folders first, then alphabetical
+  function sortTree(nodes: ArtifactTreeNode[]) {
+    nodes.sort((a, b) => {
+      if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const n of nodes) sortTree(n.children);
+  }
+  sortTree(root);
+  return root;
+}
+
+/** Count all leaf (non-folder) artifacts under a tree node */
+function countArtifactsInFolder(node: ArtifactTreeNode): number {
+  if (!node.isFolder) return 1;
+  return node.children.reduce((sum, c) => sum + countArtifactsInFolder(c), 0);
+}
+
+function ArtifactTreeItem({
+  node,
+  depth,
+  activeTabId,
+  renamingPath,
+  newArtifactParent,
+  onSelect,
+  onContextMenu,
+  onStartRename,
+  onCommitRename,
+  onCommitNewArtifact,
+  onCancelNew,
+}: {
+  node: ArtifactTreeNode;
+  depth: number;
+  activeTabId: string | null;
+  renamingPath: string | null;
+  newArtifactParent: string | null;
+  onSelect: (name: string) => void;
+  onContextMenu: (e: React.MouseEvent, node: ArtifactTreeNode) => void;
+  onStartRename: (path: string) => void;
+  onCommitRename: (oldPath: string, newName: string) => void;
+  onCommitNewArtifact: (name: string) => void;
+  onCancelNew: () => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [renameValue, setRenameValue] = useState(node.name);
+  const [newValue, setNewValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const newInputRef = useRef<HTMLInputElement>(null);
+
+  const isRenaming = renamingPath === node.fullPath;
+  const isActive = activeTabId === `artifact:${node.fullPath}`;
+  const showNewInput = newArtifactParent === node.fullPath && node.isFolder;
+
+  useEffect(() => {
+    if (isRenaming) {
+      setRenameValue(node.name);
+      requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.select(); });
+    }
+  }, [isRenaming, node.name]);
+
+  useEffect(() => {
+    if (showNewInput) {
+      setNewValue('');
+      requestAnimationFrame(() => newInputRef.current?.focus());
+    }
+  }, [showNewInput]);
+
+  const commitRename = () => {
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== node.name) {
+      onCommitRename(node.fullPath, trimmed);
+    }
+    onStartRename('');
+  };
+
+  return (
+    <div>
+      <div
+        role="treeitem"
+        tabIndex={0}
+        onClick={() => {
+          if (isRenaming) return;
+          if (node.isFolder) setExpanded(!expanded);
+          else onSelect(node.fullPath);
+        }}
+        onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, node); }}
+        className={`w-full flex items-center gap-1.5 py-1 text-left text-xs transition-colors relative cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-node-agent)] focus-visible:ring-inset ${
+          isActive
+            ? 'bg-[var(--color-node-agent)]/8 text-[var(--color-text-primary)] border-l-2 border-l-[var(--color-node-agent)]'
+            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] border-l-2 border-l-transparent'
+        }`}
+        style={{ paddingLeft: `${8 + depth * 16}px` }}
+      >
+        {/* Indent guides */}
+        {depth > 0 && Array.from({ length: depth }).map((_, i) => (
+          <span key={i} className="absolute top-0 bottom-0 w-px bg-[var(--color-border)]" style={{ left: `${8 + i * 16 + 7}px` }} />
+        ))}
+
+        {/* Expand/collapse for folders */}
+        {node.isFolder ? (
+          <span className="w-3 text-[var(--color-text-muted)] shrink-0 text-center text-[10px]">
+            {expanded ? '\u25BE' : '\u25B8'}
+          </span>
+        ) : (
+          <span className="w-3 shrink-0" />
+        )}
+
+        {/* Icon */}
+        <span className={`w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold shrink-0 ${
+          node.isFolder
+            ? 'text-[var(--color-node-checkpoint)] bg-[var(--color-canvas-bg)]'
+            : isActive
+              ? 'text-white bg-purple-500'
+              : 'text-purple-500 bg-[var(--color-canvas-bg)]'
+        }`}>
+          {node.isFolder ? (expanded ? '\u25BE' : '\u25B8') : 'A'}
+        </span>
+
+        {/* Name or inline rename */}
+        {isRenaming ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+              if (e.key === 'Escape') { e.preventDefault(); onStartRename(''); }
+              e.stopPropagation();
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 min-w-0 text-xs bg-white border border-purple-400 rounded px-1 py-0 outline-none font-mono"
+          />
+        ) : (
+          <span className={`truncate font-mono text-[11px] ${isActive ? 'font-medium' : ''}`}>
+            {node.name}
+          </span>
+        )}
+
+        {/* Badge */}
+        {!isRenaming && (
+          node.isFolder ? (
+            <span className="ml-auto text-[9px] text-[var(--color-text-muted)] pr-2 shrink-0">
+              {countArtifactsInFolder(node)}
+            </span>
+          ) : node.lineage?.format ? (
+            <span className={`ml-auto text-[9px] font-medium px-1 py-0 rounded shrink-0 mr-1 ${
+              FORMAT_BADGE_COLORS[node.lineage.format] ?? 'bg-gray-100 text-gray-600'
+            }`}>
+              {node.lineage.format.toUpperCase()}
+            </span>
+          ) : null
+        )}
+      </div>
+
+      {/* Lineage info for leaf artifacts */}
+      {!node.isFolder && node.lineage && (
+        <div className="text-[10px] text-[var(--color-text-muted)] space-y-0.5 mt-0.5 mb-0.5"
+          style={{ paddingLeft: `${8 + depth * 16 + 24}px` }}
+        >
+          {node.lineage.producers.length > 0 ? (
+            <div><span className="text-[var(--color-node-agent)]">{'\u2192 '}</span>{node.lineage.producers.join(', ')}</div>
+          ) : (
+            <div><span className="text-[var(--color-node-checkpoint)]">{'\u2192 '}</span>user upload</div>
+          )}
+          {node.lineage.consumers.length > 0 && (
+            <div><span className="text-[var(--color-node-agent)]">{'\u2192 '}</span>{node.lineage.consumers.join(', ')}</div>
+          )}
+        </div>
+      )}
+
+      {/* Children */}
+      {node.isFolder && expanded && (
+        <div>
+          {node.children.map((child) => (
+            <ArtifactTreeItem
+              key={child.fullPath}
+              node={child}
+              depth={depth + 1}
+              activeTabId={activeTabId}
+              renamingPath={renamingPath}
+              newArtifactParent={newArtifactParent}
+              onSelect={onSelect}
+              onContextMenu={onContextMenu}
+              onStartRename={onStartRename}
+              onCommitRename={onCommitRename}
+              onCommitNewArtifact={onCommitNewArtifact}
+              onCancelNew={onCancelNew}
+            />
+          ))}
+
+          {/* Inline new artifact input inside folder */}
+          {showNewInput && (
+            <div className="flex items-center gap-1.5 py-1" style={{ paddingLeft: `${8 + (depth + 1) * 16}px` }}>
+              <span className="w-3 shrink-0" />
+              <span className="w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold shrink-0 text-purple-500 bg-[var(--color-canvas-bg)]">A</span>
+              <input
+                ref={newInputRef}
+                type="text"
+                value={newValue}
+                onChange={(e) => setNewValue(e.target.value)}
+                onBlur={() => {
+                  const trimmed = newValue.trim();
+                  if (trimmed) onCommitNewArtifact(node.fullPath + '/' + trimmed);
+                  else onCancelNew();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const trimmed = newValue.trim();
+                    if (trimmed) onCommitNewArtifact(node.fullPath + '/' + trimmed);
+                    else onCancelNew();
+                  }
+                  if (e.key === 'Escape') { e.preventDefault(); onCancelNew(); }
+                }}
+                placeholder="artifact_name"
+                className="flex-1 min-w-0 text-xs bg-white border border-purple-400 rounded px-1 py-0 outline-none font-mono"
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Main Explorer ───────────────────────────────────────── */
 
 export function AgentExplorer() {
-  const { state, addNode, addChild, removeNode, updateNode, selectNode } = useFlow();
+  const { state, addNode, addChild, removeNode, updateNode, selectNode, addArtifact, removeArtifact, renameArtifact, addArtifactFolder, renameArtifactFolder, removeArtifactFolder } = useFlow();
   const { activeTabId, selectAgent, selectSkill, selectReference, selectArtifact } = useLayout();
   const { skills, references, uploadReferences, deleteReference, createReferenceFolder, renameReference, createSkill, renameSkill, deleteSkill } = useProjectStore();
 
@@ -560,11 +848,16 @@ export function AgentExplorer() {
   const [artifactsExpanded, setArtifactsExpanded] = useState(true);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuEntry[] } | null>(null);
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null);
+  const [renamingArtifactPath, setRenamingArtifactPath] = useState<string | null>(null);
+  const [newArtifactParent, setNewArtifactParent] = useState<string | null>(null);  // folder path or '__root__'
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const newRootArtifactRef = useRef<HTMLInputElement>(null);
+  const [newRootArtifactValue, setNewRootArtifactValue] = useState('');
 
   const sortedNodes = topologicalOrder(state.flow.nodes, state.flow.edges);
   const artifactLineage = useMemo(() => buildArtifactLineage(state.flow.nodes, state.flow.artifacts), [state.flow.nodes, state.flow.artifacts]);
+  const artifactTree = useMemo(() => buildArtifactTree(artifactLineage, state.flow.artifactFolders ?? []), [artifactLineage, state.flow.artifactFolders]);
 
   const handleSelectAgent = useCallback(
     (nodeId: string, label: string) => {
@@ -574,11 +867,11 @@ export function AgentExplorer() {
     [selectAgent, selectNode],
   );
 
-  const handleAddAgent = useCallback(() => {
+  const handleAddAgent = useCallback((_e?: React.MouseEvent) => {
     addNode('agent', { x: 0, y: 0 });
   }, [addNode]);
 
-  const handleAddSkill = useCallback(async () => {
+  const handleAddSkill = useCallback(async (_e?: React.MouseEvent) => {
     const name = window.prompt('Skill name (e.g. contract-law-basics):');
     if (!name?.trim()) return;
     const projectId = state.flow.id;
@@ -683,6 +976,117 @@ export function AgentExplorer() {
     await uploadReferences(state.flow.id, files);
   }, [state.flow.id, uploadReferences]);
 
+  // Artifact handlers
+  const handleArtifactAdd = useCallback((e: React.MouseEvent) => {
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setContextMenu({
+      x: rect.left,
+      y: rect.bottom + 4,
+      items: [
+        { label: 'New Artifact', onClick: () => {
+          setNewArtifactParent('__root__');
+          setNewRootArtifactValue('');
+          requestAnimationFrame(() => newRootArtifactRef.current?.focus());
+        }},
+        { label: 'New Folder', onClick: () => {
+          const name = window.prompt('Folder name:');
+          if (!name?.trim()) return;
+          addArtifactFolder(name.trim());
+        }},
+      ],
+    });
+  }, [addArtifactFolder]);
+
+  const handleCommitNewArtifact = useCallback((name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) { setNewArtifactParent(null); return; }
+    // Validate no collision
+    const allNames = Object.keys(state.flow.artifacts ?? {});
+    if (allNames.includes(trimmed)) {
+      window.alert(`An artifact named "${trimmed}" already exists.`);
+      return;
+    }
+    // Check folder/artifact collision
+    const isAlsoFolder = allNames.some((a) => a.startsWith(trimmed + '/'));
+    if (isAlsoFolder) {
+      window.alert(`"${trimmed}" is already used as a folder prefix.`);
+      return;
+    }
+    addArtifact({ name: trimmed, format: 'json', description: '' });
+    setNewArtifactParent(null);
+  }, [state.flow.artifacts, addArtifact]);
+
+  const handleArtifactCommitRename = useCallback((oldPath: string, newName: string) => {
+    // Check if it's a folder rename
+    const allNames = Object.keys(state.flow.artifacts ?? {});
+    const isFolder = !allNames.includes(oldPath) && allNames.some((a) => a.startsWith(oldPath + '/'));
+    if (isFolder) {
+      // Folder rename: compute new prefix
+      const parts = oldPath.split('/');
+      parts[parts.length - 1] = newName;
+      const newPrefix = parts.join('/');
+      renameArtifactFolder(oldPath, newPrefix);
+    } else {
+      // Single artifact rename: compute new full path
+      const parts = oldPath.split('/');
+      parts[parts.length - 1] = newName;
+      const newPath = parts.join('/');
+      renameArtifact(oldPath, newPath);
+    }
+    setRenamingArtifactPath(null);
+  }, [state.flow.artifacts, renameArtifact, renameArtifactFolder]);
+
+  const handleArtifactContextMenu = useCallback(
+    (e: React.MouseEvent, treeNode: ArtifactTreeNode) => {
+      e.preventDefault();
+      const items: ContextMenuEntry[] = treeNode.isFolder
+        ? [
+            { label: 'New Artifact', onClick: () => setNewArtifactParent(treeNode.fullPath) },
+            { label: 'New Sub-Folder', onClick: () => {
+              const name = window.prompt('Sub-folder name:');
+              if (!name?.trim()) return;
+              addArtifactFolder(treeNode.fullPath + '/' + name.trim());
+            }},
+            { separator: true },
+            { label: 'Rename', onClick: () => setRenamingArtifactPath(treeNode.fullPath) },
+            { label: 'Delete', onClick: () => {
+              if (window.confirm(`Delete folder "${treeNode.name}" and all its artifacts?`)) {
+                removeArtifactFolder(treeNode.fullPath);
+              }
+            }, danger: true },
+          ]
+        : [
+            { label: 'Open', onClick: () => selectArtifact(treeNode.fullPath) },
+            { label: 'Rename', onClick: () => setRenamingArtifactPath(treeNode.fullPath) },
+            { separator: true },
+            { label: 'Delete', onClick: () => {
+              if (window.confirm(`Delete artifact "${treeNode.name}"?`)) {
+                removeArtifact(treeNode.fullPath);
+              }
+            }, danger: true },
+          ];
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [selectArtifact, removeArtifact, removeArtifactFolder, addArtifactFolder],
+  );
+
+  // Reference "+" dropdown
+  const handleRefAdd = useCallback((e: React.MouseEvent) => {
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setContextMenu({
+      x: rect.left,
+      y: rect.bottom + 4,
+      items: [
+        { label: 'Upload File...', onClick: () => fileInputRef.current?.click() },
+        { label: 'New Folder', onClick: () => {
+          const name = window.prompt('Folder name:');
+          if (!name?.trim()) return;
+          createReferenceFolder(state.flow.id, name.trim());
+        }},
+      ],
+    });
+  }, [state.flow.id, createReferenceFolder]);
+
   const handleRefContextMenu = useCallback(
     (e: React.MouseEvent, entry: ReferenceEntry) => {
       e.preventDefault();
@@ -738,7 +1142,7 @@ export function AgentExplorer() {
   );
 
   const handleSectionContextMenu = useCallback(
-    (e: React.MouseEvent, section: 'agents' | 'skills' | 'references') => {
+    (e: React.MouseEvent, section: 'agents' | 'skills' | 'references' | 'artifacts') => {
       e.preventDefault();
       let items: ContextMenuEntry[];
       if (section === 'agents') {
@@ -749,6 +1153,19 @@ export function AgentExplorer() {
       } else if (section === 'skills') {
         items = [
           { label: 'New Skill', onClick: () => handleAddSkill() },
+        ];
+      } else if (section === 'artifacts') {
+        items = [
+          { label: 'New Artifact', onClick: () => {
+            setNewArtifactParent('__root__');
+            setNewRootArtifactValue('');
+            requestAnimationFrame(() => newRootArtifactRef.current?.focus());
+          }},
+          { label: 'New Folder', onClick: () => {
+            const name = window.prompt('Folder name:');
+            if (!name?.trim()) return;
+            addArtifactFolder(name.trim());
+          }},
         ];
       } else {
         items = [
@@ -762,7 +1179,7 @@ export function AgentExplorer() {
       }
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [addNode, handleAddSkill, handleUploadClick, state.flow.id, createReferenceFolder],
+    [addNode, handleAddSkill, handleUploadClick, state.flow.id, createReferenceFolder, addArtifactFolder],
   );
 
   // Empty set for the root level of skill tree (no ancestors yet)
@@ -843,7 +1260,7 @@ export function AgentExplorer() {
         title="References"
         expanded={refsExpanded}
         onToggle={() => setRefsExpanded(!refsExpanded)}
-        onAdd={handleUploadClick}
+        onAdd={handleRefAdd}
         onContextMenu={(e) => handleSectionContextMenu(e, 'references')}
       />
 
@@ -879,57 +1296,67 @@ export function AgentExplorer() {
         title="Artifacts"
         expanded={artifactsExpanded}
         onToggle={() => setArtifactsExpanded(!artifactsExpanded)}
+        onAdd={handleArtifactAdd}
+        onContextMenu={(e) => handleSectionContextMenu(e, 'artifacts')}
       />
 
       {artifactsExpanded && (
         <div className="py-0.5">
-          {artifactLineage.length === 0 ? (
+          {artifactTree.length === 0 && newArtifactParent !== '__root__' ? (
             <div className="px-3 py-3 text-center">
               <div className="text-[10px] text-[var(--color-text-muted)]">
                 No artifacts declared yet
               </div>
             </div>
           ) : (
-            artifactLineage.map((artifact) => (
-              <div
-                key={artifact.name}
-                className="px-2 py-1 text-xs border-l-2 border-l-transparent hover:bg-[var(--color-canvas-bg)] cursor-pointer"
-                onClick={() => selectArtifact(artifact.name)}
-              >
-                <div className="flex items-center gap-1.5">
+            <>
+              {artifactTree.map((node) => (
+                <ArtifactTreeItem
+                  key={node.fullPath}
+                  node={node}
+                  depth={0}
+                  activeTabId={activeTabId}
+                  renamingPath={renamingArtifactPath}
+                  newArtifactParent={newArtifactParent}
+                  onSelect={(name) => selectArtifact(name)}
+                  onContextMenu={handleArtifactContextMenu}
+                  onStartRename={setRenamingArtifactPath}
+                  onCommitRename={handleArtifactCommitRename}
+                  onCommitNewArtifact={handleCommitNewArtifact}
+                  onCancelNew={() => setNewArtifactParent(null)}
+                />
+              ))}
+
+              {/* Inline new artifact at root level */}
+              {newArtifactParent === '__root__' && (
+                <div className="flex items-center gap-1.5 py-1 px-2">
                   <span className="w-3 shrink-0" />
-                  <span className="font-mono text-[11px] text-[var(--color-text-primary)] truncate">
-                    {artifact.name}
-                  </span>
-                  {artifact.format && (
-                    <span className={`text-[9px] font-medium px-1 py-0 rounded ${
-                      FORMAT_BADGE_COLORS[artifact.format] ?? 'bg-gray-100 text-gray-600'
-                    }`}>
-                      {artifact.format.toUpperCase()}
-                    </span>
-                  )}
+                  <span className="w-4 h-4 flex items-center justify-center rounded text-[9px] font-bold shrink-0 text-purple-500 bg-[var(--color-canvas-bg)]">A</span>
+                  <input
+                    ref={newRootArtifactRef}
+                    type="text"
+                    value={newRootArtifactValue}
+                    onChange={(e) => setNewRootArtifactValue(e.target.value)}
+                    onBlur={() => {
+                      const trimmed = newRootArtifactValue.trim();
+                      if (trimmed) handleCommitNewArtifact(trimmed);
+                      else setNewArtifactParent(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const trimmed = newRootArtifactValue.trim();
+                        if (trimmed) handleCommitNewArtifact(trimmed);
+                        else setNewArtifactParent(null);
+                      }
+                      if (e.key === 'Escape') { e.preventDefault(); setNewArtifactParent(null); }
+                    }}
+                    placeholder="artifact_name"
+                    className="flex-1 min-w-0 text-xs bg-white border border-purple-400 rounded px-1 py-0 outline-none font-mono"
+                  />
                 </div>
-                <div className="ml-6 text-[10px] text-[var(--color-text-muted)] space-y-0.5 mt-0.5">
-                  {artifact.producers.length > 0 ? (
-                    <div>
-                      <span className="text-[var(--color-node-agent)]">{'\u2192 '}</span>
-                      produced by: {artifact.producers.join(', ')}
-                    </div>
-                  ) : (
-                    <div>
-                      <span className="text-[var(--color-node-checkpoint)]">{'\u2192 '}</span>
-                      user upload
-                    </div>
-                  )}
-                  {artifact.consumers.length > 0 && (
-                    <div>
-                      <span className="text-[var(--color-node-agent)]">{'\u2192 '}</span>
-                      consumed by: {artifact.consumers.join(', ')}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))
+              )}
+            </>
           )}
         </div>
       )}

@@ -37,6 +37,8 @@ export interface FlowDefinition {
   edges: FlowEdge[];
   /** Flow-level artifact registry (keyed by artifact name) */
   artifacts?: Record<string, ArtifactSchema>;
+  /** Explicitly created empty artifact folders (auto-pruned when artifacts fill them) */
+  artifactFolders?: string[];
   /** Saved node positions from manual layout (keyed by node ID) */
   layout?: Record<string, { x: number; y: number }>;
 }

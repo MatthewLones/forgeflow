@@ -93,8 +93,8 @@ function splitFrontmatter(content: string): {
 const SKILL_CHIP_CLICK_MAP: { className: string; regex: RegExp; type: 'skill' | 'file' | 'artifact' }[] = [
   { className: 'cm-chip-subskill', regex: /\/\/?skill:([\w-]+)/g, type: 'skill' },
   { className: 'cm-chip-fileref', regex: /@([\w./-]+\.\w+)/g, type: 'file' },
-  { className: 'cm-chip-artifact', regex: /@([\w._-]+)/g, type: 'artifact' },
-  { className: 'cm-chip-artifact-output', regex: /\\([\w._-]+)/g, type: 'artifact' },
+  { className: 'cm-chip-artifact', regex: /@([\w._/-]+)/g, type: 'artifact' },
+  { className: 'cm-chip-artifact-output', regex: /\\([\w._/-]+)/g, type: 'artifact' },
 ];
 
 export function SkillSlashEditor({
@@ -166,6 +166,7 @@ export function SkillSlashEditor({
         borderRadius: '4px',
         fontSize: '12px',
         fontWeight: '500',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         cursor: 'pointer',
       },
       '.cm-chip-subskill': {

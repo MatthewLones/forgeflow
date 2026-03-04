@@ -2,10 +2,12 @@
   "name": "@forgeflow/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "ForgeFlow — AI agent workflow builder",
+  "author": "ForgeFlow",
   "main": "dist/main/main.js",
   "scripts": {
     "build": "electron-vite build --config electron-vite.config.ts",
-    "dev": "electron-vite build --config electron-vite.config.ts && electron .",
+    "dev": "electron-vite dev --config electron-vite.config.ts",
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
@@ -16,6 +18,7 @@
   "build": {
     "appId": "com.forgeflow.app",
     "productName": "ForgeFlow",
+    "electronVersion": "35.7.5",
     "directories": {
       "output": "release"
     },

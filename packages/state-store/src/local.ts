@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile, readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import type { StateFile, RunState, CheckpointState } from '@forgeflow/types';
 import type { StateStore } from './interface.js';
 
@@ -32,7 +32,11 @@ export class LocalStateStore implements StateStore {
     const dir = this.artifactsDir(runId);
     await mkdir(dir, { recursive: true });
     for (const file of files) {
-      await writeFile(join(dir, file.name), file.content);
+      const filePath = join(dir, file.name);
+      if (file.name.includes('/')) {
+        await mkdir(dirname(filePath), { recursive: true });
+      }
+      await writeFile(filePath, file.content);
     }
   }
 
@@ -92,29 +96,41 @@ export class LocalStateStore implements StateStore {
     const dir = this.uploadsDir(runId);
     await mkdir(dir, { recursive: true });
     for (const file of files) {
-      await writeFile(join(dir, file.name), file.content);
+      const filePath = join(dir, file.name);
+      if (file.name.includes('/')) {
+        await mkdir(dirname(filePath), { recursive: true });
+      }
+      await writeFile(filePath, file.content);
     }
   }
 
   async listArtifacts(runId: string): Promise<Array<{ name: string; size: number }>> {
-    const dir = this.artifactsDir(runId);
-    let entries: string[];
-    try {
-      entries = await readdir(dir);
-    } catch {
-      return [];
-    }
+    const baseDir = this.artifactsDir(runId);
     const results: Array<{ name: string; size: number }> = [];
-    for (const name of entries) {
+
+    async function walkDir(dir: string, prefix: string) {
+      let entries;
       try {
-        const s = await stat(join(dir, name));
-        if (s.isFile()) {
-          results.push({ name, size: s.size });
-        }
+        entries = await readdir(dir, { withFileTypes: true });
       } catch {
-        // skip inaccessible files
+        return;
+      }
+      for (const entry of entries) {
+        const relativeName = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          await walkDir(join(dir, entry.name), relativeName);
+        } else {
+          try {
+            const s = await stat(join(dir, entry.name));
+            results.push({ name: relativeName, size: s.size });
+          } catch {
+            // skip inaccessible files
+          }
+        }
       }
     }
+
+    await walkDir(baseDir, '');
     return results;
   }
 

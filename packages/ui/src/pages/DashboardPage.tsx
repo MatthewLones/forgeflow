@@ -48,7 +48,6 @@ export function DashboardPage() {
       {/* Top bar */}
       <header className="h-14 px-6 flex items-center border-b border-[var(--color-border)] bg-white">
         <span className="text-base font-bold text-[var(--color-node-agent)]">ForgeFlow</span>
-        <span className="text-xs text-[var(--color-text-muted)] ml-2">v0.1.0</span>
       </header>
 
       <main className="max-w-5xl mx-auto px-6 py-8">

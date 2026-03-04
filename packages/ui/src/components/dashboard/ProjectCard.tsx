@@ -24,9 +24,6 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
           <h3 className="text-sm font-semibold text-[var(--color-text-primary)] leading-tight">
             {project.name}
           </h3>
-          <span className="text-[10px] font-medium text-[var(--color-text-muted)] bg-[var(--color-canvas-bg)] px-1.5 py-0.5 rounded shrink-0 ml-2">
-            v{project.version}
-          </span>
         </div>
 
         <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed line-clamp-2 mb-4">

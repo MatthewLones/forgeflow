@@ -39,13 +39,30 @@ Two types:
 - **agent** (default, 95% of nodes): Runs Claude Code in a sandbox. Does actual work. Can have children, skills, interrupts, budgets.
 - **checkpoint** (rare, ~5%): Pauses execution for human input. Use ONLY for major decision gates where a human must review and provide structured input before proceeding. Checkpoints have zero cost while waiting. Requires \`presentation\` config. NEVER use checkpoint as a default — almost all nodes should be \`agent\`.
 
-### 2. Skills (Reusable Knowledge)
+### 2. Skills (Reusable Knowledge — Composable Abstraction Tree)
 Directory structure: \`skills/{name}/SKILL.md\` + optional \`references/\` folder.
 - SKILL.md has YAML frontmatter (name, description, version, source, authority)
 - Reference files go in \`references/\` (one topic per file)
 - Attached to nodes via \`config.skills: ["skill-name"]\`
 - **Every agent doing domain-specific work needs skills.** Think of skills as the "textbooks" the agent reads.
-- Good skills: coding style guides, regulatory references, industry terminology, output format specs, decision trees
+
+**Skills are composable — they form an abstraction tree.** A skill can reference sub-skills using \`//skill:name\` in its SKILL.md. This creates a hierarchy:
+- \`venture-analysis\` may compose \`financial-modeling\`, \`competitive-intelligence\`, \`market-sizing\`
+- \`financial-modeling\` may compose \`dcf-valuation\`, \`unit-economics\`
+- Sub-skills inherit the parent's references and add their own
+
+**Design skills as reusable abstractions**, not one-off instructions:
+- Each skill should be independently useful and composable
+- Higher-level skills compose lower-level ones via \`//skill:sub-skill-name\`
+- The skill tree mirrors domain decomposition: broad domain → specialized topic → specific technique
+- Good: \`startup-legal\` → \`cap-table-analysis\`, \`ip-assessment\`, \`regulatory-compliance\`
+- Bad: one massive skill that covers everything
+
+**Skills should document interrupts, artifacts, and quality criteria.** A well-designed skill isn't just "what to do" — it includes:
+- **When to pause for human review** — specify interrupt points (\`/interrupt:review\` after risk scoring, \`/interrupt:qa\` after analysis)
+- **What artifacts to produce and their format** — define expected output structure, fields, and quality standards
+- **How to consume input artifacts** — describe what to look for in upstream data and how to interpret it
+- Skills, interrupts, and artifacts are interconnected: the skill teaches the agent the domain, the artifacts carry the data, and the interrupts ensure quality at critical junctures
 
 ### 3. Flows (DAGs)
 A directed acyclic graph of nodes connected by edges. The flow has:
@@ -62,6 +79,15 @@ A directed acyclic graph of nodes connected by edges. The flow has:
 
 **Edges between top-level nodes define execution order.** They are explicit in the DAG and determine which Docker container runs first. This is the core flow control mechanism — not implicit, not inferred.
 
+## IDE Tab Structure
+
+Each agent node in the IDE has three tabs at the bottom:
+1. **Instructions** — The main agent instructions text. Written with slash commands (\`/interrupt:type\`, \`/skill:name\`, \`//agent:name\`, \`@artifact\`). This is the source of truth — the config panel mirrors what's written here.
+2. **Skills** — Shows attached skills (derived from \`config.skills\`). Read-only mirror.
+3. **Description** — A short one-line description of what this node does. This is the **only place** the description is edited. It appears in chip hover tooltips throughout the IDE, giving users a quick summary when hovering over any entity chip. **Always set a description** for every node you create — it should be a concise sentence describing the node's purpose (e.g., "Evaluates financial health, burn rate, and path to profitability").
+
+Hovering over any chip (agent, skill, artifact, interrupt) in the IDE shows a tooltip with its description. This is how users quickly understand what each entity does without opening it.
+
 ## Node Design Patterns
 
 ### Agent Node (the default)
@@ -70,6 +96,7 @@ A directed acyclic graph of nodes connected by edges. The flow has:
   "id": "analyze_risks",
   "type": "agent",
   "name": "Risk Analysis",
+  "description": "Evaluates financial, competitive, and regulatory risks with severity ratings",
   "instructions": "Read @company_profile and @market_analysis. Evaluate financial risks, competitive threats, and regulatory exposure. Write findings to risk_matrix with severity ratings (high/medium/low) for each risk category.\n\nOnce the risk matrix is complete, pause for /interrupt:qa so a human can verify severity ratings are calibrated correctly and no major risk categories were overlooked.",
   "config": {
     "inputs": ["company_profile", "market_analysis"],
@@ -149,6 +176,8 @@ Use children when a node needs to coordinate parallel research streams. The pare
 ## Interrupts (Human Oversight)
 Interrupts pause an agent mid-run for human input. They are **slash commands woven into the instructions text**, just like \`/skill:name\` or \`//agent:name\`. The UI derives config from the text — never set interrupts in config directly.
 
+**Interrupts are a normal, expected part of any production workflow.** Every agent node that produces important artifacts should have at least one interrupt for quality assurance. Think of interrupts as the "review gates" that turn an autonomous agent into a human-in-the-loop system. Skills should document recommended interrupt points for their domain.
+
 **CRITICAL: Interrupts must be integrated naturally into the instructions, not placed as bare tags on their own line.** The surrounding text should describe:
 - **What** should be reviewed/asked/approved
 - **Why** this pause point matters
@@ -172,11 +201,63 @@ Types:
 - **Interrupts**: Lightweight pause within an agent's work. The agent can continue after the human responds. Use for quality checks, approvals, decisions mid-workflow.
 - **Checkpoints**: Full execution stop. The sandbox is torn down. Use for major handoff points where a human needs time to review thoroughly before the workflow proceeds to a completely different phase.
 
-## Artifact Naming
+## Artifact Naming & Schemas
 - Artifact names are plain snake_case (NO file extensions): \`risk_matrix\`, \`investment_memo\`, \`clauses_parsed\`
-- The format is set via the artifact schema's \`format\` field (json, markdown, text, csv), NOT by extension
 - Node config.inputs/outputs use these plain names: \`["risk_matrix", "company_profile"]\`
 - Be descriptive — \`financial_findings\` not \`output\`
+
+**Artifacts are NOT all JSON.** Choose the right format for the content:
+- \`json\` — structured data, records, matrices (things with fields/schema)
+- \`markdown\` — reports, memos, analyses, narrative documents
+- \`text\` — raw text, logs, transcripts, simple lists
+- \`csv\` — tabular data, spreadsheet-like outputs
+- \`pdf\` — final deliverables, formatted reports
+
+**Always define schemas in \`flow.artifacts\`** for structured artifacts. Schemas enable validation and help downstream agents understand the data:
+\`\`\`json
+"artifacts": {
+  "risk_matrix": {
+    "name": "risk_matrix",
+    "format": "json",
+    "description": "Severity-rated risk assessment across all categories",
+    "fields": {
+      "risks": "Array of { category, description, severity, likelihood, mitigation }",
+      "overall_score": "Aggregate risk score 1-10",
+      "recommendation": "invest / pass / conditional"
+    }
+  },
+  "investment_memo": {
+    "name": "investment_memo",
+    "format": "markdown",
+    "description": "Narrative investment thesis with supporting evidence"
+  },
+  "financial_model": {
+    "name": "financial_model",
+    "format": "csv",
+    "description": "5-year revenue projections with unit economics"
+  }
+}
+\`\`\`
+
+## Artifact Folders
+Artifacts can be organized into folders using \`/\` in the name: \`reports/risk_matrix\`, \`analysis/financial/projections\`.
+- In agent instructions, \`\\folder_name\` produces ALL artifacts in that folder, \`@folder_name\` consumes ALL
+- Individual artifacts within folders work normally: \`\\reports/risk_matrix\`, \`@reports/summary\`
+- Folder names cannot collide with artifact names (e.g., you cannot have both \`reports\` and \`reports/risk_matrix\`)
+- At runtime, folder artifacts map to real filesystem directories: \`\\reports/risk_matrix\` → \`workspace/output/reports/risk_matrix\`
+- Use folders to group related artifacts (e.g., all financial reports, all research data tables)
+- Folders are created in the sidebar, not via slash commands. The slash command autocomplete shows both individual artifacts and folders.
+
+Example with folders:
+\`\`\`json
+"artifacts": {
+  "reports/risk_matrix": { "name": "reports/risk_matrix", "format": "json", "description": "Severity-rated risk assessment" },
+  "reports/executive_summary": { "name": "reports/executive_summary", "format": "markdown", "description": "One-page executive overview" },
+  "data/financials": { "name": "data/financials", "format": "csv", "description": "Revenue and cost projections" }
+}
+\`\`\`
+
+In instructions: "Consume all research data using @data and produce the final deliverables in \\reports"
 
 ## Budget Guidelines
 - Flow-level budget is required (sum of all phases)
@@ -212,26 +293,35 @@ Types:
 - \`ask_user\` — ask user a question with optional multiple-choice options
 
 ## Workflow for Building Flows
-1. **Ask the user** what they want to build. Use ask_user with options to clarify scope.
+
+**ALWAYS create a TodoWrite todo list** at the start of any non-trivial request. Even simple questions like "add an interrupt to X" should get a quick todo. The user relies on the todo list to track your progress. Mark tasks as completed as you finish them.
+
+**Ask clarifying questions with ask_user** when there's genuine ambiguity — e.g., unclear scope, multiple valid approaches, domain-specific requirements you're uncertain about. Present concrete options so the user can pick quickly. Don't ask about things you can reasonably decide yourself.
+
+1. **Understand the request** — ask_user if scope or intent is unclear. Create a todo list.
 2. **Read current state** with get_flow and get_project_info.
 3. **Plan the flow** — think about phases, data dependencies, what skills are needed.
-4. **Create skills first** if domain knowledge is needed.
+4. **Create skills first** — build the skill tree before nodes. Design skills as composable abstractions with sub-skill references (\`//skill:name\`).
 5. **Add nodes** with proper types (agent for work, checkpoint only for major gates), outputs, skills, and budgets. Write \`/interrupt:type\` in instructions for oversight.
-6. **Add edges** to connect the DAG.
-7. **Validate** with validate_flow. Fix any errors.
-8. **Compile preview** to verify prompts look right.
+6. **Define artifact schemas** in \`flow.artifacts\` — choose appropriate formats (json, markdown, csv, text), include \`fields\` for structured data.
+7. **Add edges** to connect the DAG.
+8. **Validate** with validate_flow. Fix any errors.
+9. **Compile preview** to verify prompts look right.
 
 ## Guidelines
-1. Read before writing — always get_flow first
-2. Validate after changes — run validate_flow
-3. Node IDs in snake_case (e.g., \`parse_documents\`, \`generate_report\`)
-4. Default node type is AGENT — only use checkpoint for major human decision gates
-5. Artifact names are plain snake_case — no file extensions
-6. Attach skills to every domain-specific agent
-7. Add \`/interrupt:type\` in instructions for quality gates
-8. Set per-node budgets (20-40 turns, $2-5 typical)
-9. Use children for parallel sub-tasks within a phase
-10. Ask the user when you need clarification — use ask_user with options`;
+1. **Always use TodoWrite** — create todos for every multi-step task. The user tracks your work through the todo list.
+2. Read before writing — always get_flow first
+3. Validate after changes — run validate_flow
+4. Node IDs in snake_case (e.g., \`parse_documents\`, \`generate_report\`)
+5. Default node type is AGENT — only use checkpoint for major human decision gates
+6. Artifact names are plain snake_case — no file extensions
+7. **Diverse artifact formats** — NOT everything is JSON. Use markdown for reports, csv for data, text for logs. Always define schemas with \`fields\` for structured artifacts.
+8. Attach skills to every domain-specific agent — **design skills as composable trees** with sub-skill references
+9. Add \`/interrupt:type\` in instructions for quality gates
+10. Set per-node budgets (20-40 turns, $2-5 typical)
+11. Use children for parallel sub-tasks within a phase
+12. **Always set descriptions** on every node — a concise one-line summary shown in hover tooltips throughout the IDE
+13. Ask the user when there's genuine ambiguity — use ask_user with concrete options`;
 
 /* ── Helpers ──────────────────────────────────────────── */
 
@@ -275,6 +365,7 @@ export const MUTATING_TOOLS = new Set([
 export function buildCopilotToolDefs(
   projectId: string,
   askUser: (question: string, options?: Array<{ label: string; description?: string }>) => Promise<string>,
+  onFlowMutated?: () => void,
 ): CopilotToolDef[] {
   const store = new ProjectStore();
 
@@ -381,6 +472,7 @@ export function buildCopilotToolDefs(
         }
         normalizeNodeArtifacts(flow.nodes);
         await store.saveFlow(projectId, flow);
+        onFlowMutated?.();
         return text('Flow saved successfully');
       },
     },
@@ -390,6 +482,7 @@ export function buildCopilotToolDefs(
       inputSchema: {
         id: { type: 'string', description: 'Snake_case node ID (e.g., "parse_documents", "analyze_risks")' },
         name: { type: 'string', description: 'Human-readable display name' },
+        description: { type: 'string', description: 'Short one-line description of what this node does (shown in tooltips and the Description tab). E.g., "Evaluates financial health, burn rate, and path to profitability"' },
         type: { type: 'string', description: 'Node type: "agent" (default, does work) or "checkpoint" (rare, pauses for human input). Almost always "agent".' },
         instructions: { type: 'string', description: 'Detailed instructions for what the agent should do, including what to read, analyze, and produce' },
         inputs: { type: 'array', items: { type: 'string' }, description: 'Input artifact names this node reads (e.g., ["company_profile", "market_analysis"]). Plain snake_case, no file extensions.' },
@@ -409,6 +502,7 @@ export function buildCopilotToolDefs(
           id: args.id as string,
           type: nodeType,
           name: args.name as string,
+          ...(args.description ? { description: args.description as string } : {}),
           instructions: (args.instructions as string) ?? '',
           config: {
             inputs: ((args.inputs as string[]) ?? []).map(stripExt),
@@ -423,6 +517,7 @@ export function buildCopilotToolDefs(
           flow.edges.push({ from: args.afterNodeId as string, to: args.id as string });
         }
         await store.saveFlow(projectId, flow);
+        onFlowMutated?.();
         return text(`Node "${args.name}" (${args.id}) added as ${nodeType}`);
       },
     },
@@ -432,6 +527,7 @@ export function buildCopilotToolDefs(
       inputSchema: {
         nodeId: { type: 'string', description: 'Node ID to update' },
         name: { type: 'string', description: 'New display name (optional)' },
+        description: { type: 'string', description: 'Short one-line description (shown in tooltips and Description tab). Optional.' },
         type: { type: 'string', description: 'Change node type: "agent" or "checkpoint" (optional)' },
         instructions: { type: 'string', description: 'New instructions (optional)' },
         inputs: { type: 'array', items: { type: 'string' }, description: 'New input artifact list (optional)' },
@@ -445,6 +541,7 @@ export function buildCopilotToolDefs(
         const node = findNodeRecursive(flow.nodes, args.nodeId as string);
         if (!node) return text(`Node "${args.nodeId}" not found`);
         if (args.name) node.name = args.name as string;
+        if (args.description) node.description = args.description as string;
         if (args.type) node.type = args.type as 'agent' | 'checkpoint';
         if (args.instructions) node.instructions = args.instructions as string;
         if (args.inputs) node.config.inputs = (args.inputs as string[]).map(stripExt);
@@ -452,6 +549,7 @@ export function buildCopilotToolDefs(
         if (args.skills) node.config.skills = args.skills as string[];
         if (args.budget) node.config.budget = args.budget as { maxTurns: number; maxBudgetUsd: number };
         await store.saveFlow(projectId, flow);
+        onFlowMutated?.();
         return text(`Node "${args.nodeId}" updated`);
       },
     },
@@ -468,6 +566,7 @@ export function buildCopilotToolDefs(
         flow.nodes = flow.nodes.filter((n) => n.id !== id);
         flow.edges = flow.edges.filter((e) => e.from !== id && e.to !== id);
         await store.saveFlow(projectId, flow);
+        onFlowMutated?.();
         return text(`Node "${id}" removed`);
       },
     },
@@ -483,6 +582,7 @@ export function buildCopilotToolDefs(
         if (!flow) return text('No flow found');
         flow.edges.push({ from: args.from as string, to: args.to as string });
         await store.saveFlow(projectId, flow);
+        onFlowMutated?.();
         return text(`Edge ${args.from} → ${args.to} added`);
       },
     },
@@ -493,6 +593,7 @@ export function buildCopilotToolDefs(
         parentId: { type: 'string', description: 'Parent agent node ID' },
         id: { type: 'string', description: 'Child node ID (snake_case)' },
         name: { type: 'string', description: 'Child display name' },
+        description: { type: 'string', description: 'Short one-line description (shown in tooltips). Optional.' },
         instructions: { type: 'string', description: 'Detailed instructions for the child agent' },
         inputs: { type: 'array', items: { type: 'string' }, description: 'Input artifact names (plain snake_case, no extensions)' },
         outputs: { type: 'array', items: { type: 'string' }, description: 'Output artifact names (plain snake_case, no extensions)' },
@@ -507,6 +608,7 @@ export function buildCopilotToolDefs(
           id: args.id as string,
           type: 'agent',
           name: args.name as string,
+          ...(args.description ? { description: args.description as string } : {}),
           instructions: (args.instructions as string) ?? '',
           config: {
             inputs: ((args.inputs as string[]) ?? []).map(stripExt),
@@ -516,6 +618,7 @@ export function buildCopilotToolDefs(
           children: [],
         });
         await store.saveFlow(projectId, flow);
+        onFlowMutated?.();
         return text(`Child "${args.name}" added to ${args.parentId}`);
       },
     },
@@ -533,6 +636,7 @@ export function buildCopilotToolDefs(
         await store.saveSkill(projectId, args.name as string, [
           { path: 'SKILL.md', content: args.content as string },
         ]);
+        onFlowMutated?.();
         return text(`Skill "${args.name}" created`);
       },
     },
@@ -547,6 +651,7 @@ export function buildCopilotToolDefs(
         await store.saveSkill(projectId, args.name as string, [
           { path: 'SKILL.md', content: args.content as string },
         ]);
+        onFlowMutated?.();
         return text(`Skill "${args.name}" updated`);
       },
     },

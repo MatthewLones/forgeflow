@@ -6,14 +6,16 @@ import type {
   FlowBudget,
   NodeType,
   ArtifactSchema,
+  ArtifactRef,
 } from '@forgeflow/types';
+import { artifactName } from '@forgeflow/types';
 
 export type FlowAction =
   | { type: 'SET_FLOW'; flow: FlowDefinition; positions?: Record<string, { x: number; y: number }> }
   | { type: 'SELECT_NODE'; nodeId: string | null }
   | { type: 'ADD_NODE'; node: FlowNode; position: { x: number; y: number } }
   | { type: 'REMOVE_NODE'; nodeId: string }
-  | { type: 'UPDATE_NODE'; nodeId: string; updates: Partial<Pick<FlowNode, 'name' | 'instructions' | 'type'>> }
+  | { type: 'UPDATE_NODE'; nodeId: string; updates: Partial<Pick<FlowNode, 'name' | 'description' | 'instructions' | 'type'>> }
   | { type: 'UPDATE_NODE_CONFIG'; nodeId: string; config: Partial<NodeConfig> }
   | { type: 'ADD_EDGE'; edge: FlowEdge }
   | { type: 'REMOVE_EDGE'; from: string; to: string }
@@ -26,6 +28,10 @@ export type FlowAction =
   | { type: 'ADD_ARTIFACT'; artifact: ArtifactSchema }
   | { type: 'UPDATE_ARTIFACT'; name: string; updates: Partial<ArtifactSchema> }
   | { type: 'REMOVE_ARTIFACT'; name: string }
+  | { type: 'RENAME_ARTIFACT'; oldName: string; newName: string }
+  | { type: 'ADD_ARTIFACT_FOLDER'; path: string }
+  | { type: 'RENAME_ARTIFACT_FOLDER'; oldPrefix: string; newPrefix: string }
+  | { type: 'REMOVE_ARTIFACT_FOLDER'; prefix: string }
   | { type: 'CLEAR_LAYOUT' }
   | { type: 'MARK_CLEAN' };
 
@@ -42,6 +48,7 @@ export function createDefaultNode(type: NodeType, id: string): FlowNode {
     id,
     type,
     name: type === 'agent' ? 'New Agent' : 'New Checkpoint',
+    description: '',
     instructions: '',
     config: {
       inputs: [],
@@ -127,6 +134,46 @@ function updateNodeInList(nodes: FlowNode[], nodeId: string, updater: (node: Flo
     }
     return node;
   });
+}
+
+/** Rename artifact references in all node configs (inputs/outputs) recursively */
+function renameArtifactRefsInNodes(
+  nodes: FlowNode[],
+  renameMap: Map<string, string>,
+): FlowNode[] {
+  function renameRef(ref: ArtifactRef): ArtifactRef {
+    const name = artifactName(ref);
+    const newName = renameMap.get(name);
+    if (!newName) return ref;
+    if (typeof ref === 'string') return newName;
+    return { ...ref, name: newName };
+  }
+
+  return nodes.map((node) => ({
+    ...node,
+    config: {
+      ...node.config,
+      inputs: node.config.inputs.map(renameRef),
+      outputs: node.config.outputs.map(renameRef),
+    },
+    children: renameArtifactRefsInNodes(node.children, renameMap),
+  }));
+}
+
+/** Remove artifact references from all node configs recursively */
+function removeArtifactRefsFromNodes(
+  nodes: FlowNode[],
+  namesToRemove: Set<string>,
+): FlowNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    config: {
+      ...node.config,
+      inputs: node.config.inputs.filter((ref) => !namesToRemove.has(artifactName(ref))),
+      outputs: node.config.outputs.filter((ref) => !namesToRemove.has(artifactName(ref))),
+    },
+    children: removeArtifactRefsFromNodes(node.children, namesToRemove),
+  }));
 }
 
 export function flowReducer(state: FlowState, action: FlowAction): FlowState {
@@ -346,9 +393,98 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
     case 'REMOVE_ARTIFACT': {
       const artifacts = { ...(state.flow.artifacts ?? {}) };
       delete artifacts[action.name];
+      const nodesAfterRemove = removeArtifactRefsFromNodes(
+        state.flow.nodes,
+        new Set([action.name]),
+      );
       return {
         ...state,
-        flow: { ...state.flow, artifacts },
+        flow: { ...state.flow, artifacts, nodes: nodesAfterRemove },
+        dirty: true,
+      };
+    }
+
+    case 'RENAME_ARTIFACT': {
+      const artifacts = { ...(state.flow.artifacts ?? {}) };
+      const existing = artifacts[action.oldName];
+      if (!existing) return state;
+      delete artifacts[action.oldName];
+      artifacts[action.newName] = { ...existing, name: action.newName };
+      const renameMap = new Map([[action.oldName, action.newName]]);
+      const renamedNodes = renameArtifactRefsInNodes(state.flow.nodes, renameMap);
+      return {
+        ...state,
+        flow: { ...state.flow, artifacts, nodes: renamedNodes },
+        dirty: true,
+      };
+    }
+
+    case 'ADD_ARTIFACT_FOLDER': {
+      const existing = state.flow.artifactFolders ?? [];
+      if (existing.includes(action.path)) return state;
+      return {
+        ...state,
+        flow: { ...state.flow, artifactFolders: [...existing, action.path] },
+        dirty: true,
+      };
+    }
+
+    case 'RENAME_ARTIFACT_FOLDER': {
+      const artifacts = { ...(state.flow.artifacts ?? {}) };
+      const renameMap = new Map<string, string>();
+
+      // Rename all artifacts with the old prefix
+      for (const key of Object.keys(artifacts)) {
+        if (key === action.oldPrefix || key.startsWith(action.oldPrefix + '/')) {
+          const newKey = action.newPrefix + key.slice(action.oldPrefix.length);
+          renameMap.set(key, newKey);
+        }
+      }
+
+      for (const [oldKey, newKey] of renameMap) {
+        const schema = artifacts[oldKey];
+        delete artifacts[oldKey];
+        artifacts[newKey] = { ...schema, name: newKey };
+      }
+
+      const renamedNodes = renameArtifactRefsInNodes(state.flow.nodes, renameMap);
+
+      // Update explicit empty folders
+      const folders = (state.flow.artifactFolders ?? []).map((f) => {
+        if (f === action.oldPrefix || f.startsWith(action.oldPrefix + '/')) {
+          return action.newPrefix + f.slice(action.oldPrefix.length);
+        }
+        return f;
+      });
+
+      return {
+        ...state,
+        flow: { ...state.flow, artifacts, nodes: renamedNodes, artifactFolders: folders },
+        dirty: true,
+      };
+    }
+
+    case 'REMOVE_ARTIFACT_FOLDER': {
+      const artifacts = { ...(state.flow.artifacts ?? {}) };
+      const namesToRemove = new Set<string>();
+
+      for (const key of Object.keys(artifacts)) {
+        if (key === action.prefix || key.startsWith(action.prefix + '/')) {
+          namesToRemove.add(key);
+          delete artifacts[key];
+        }
+      }
+
+      const cleanedNodes = removeArtifactRefsFromNodes(state.flow.nodes, namesToRemove);
+
+      // Remove from explicit empty folders
+      const folders = (state.flow.artifactFolders ?? []).filter(
+        (f) => f !== action.prefix && !f.startsWith(action.prefix + '/'),
+      );
+
+      return {
+        ...state,
+        flow: { ...state.flow, artifacts, nodes: cleanedNodes, artifactFolders: folders },
         dirty: true,
       };
     }

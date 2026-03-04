@@ -89,6 +89,8 @@ export interface FlowNode {
   type: NodeType;
   /** Display name on canvas */
   name: string;
+  /** Optional short description (shown in tooltips and explorer) */
+  description?: string;
   /** Free-text: what the agent should do */
   instructions: string;
   /** Structured configuration */

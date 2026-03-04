@@ -1,4 +1,3 @@
-import { syntaxTree } from '@codemirror/language';
 import {
   ViewPlugin,
   Decoration,
@@ -28,17 +27,29 @@ const listMarkerDeco = Decoration.mark({ class: 'cm-md-list-marker' });
 /** Replaces text with nothing — used to hide markdown syntax marks */
 const hideDeco = Decoration.replace({});
 
-/* ── Build decorations from the markdown syntax tree ─────── */
+/* ── Regex patterns for markdown ─────────────────────────── */
+
+/** Match ATX headings: `# `, `## `, etc. at start of line */
+const HEADING_RE = /^(#{1,6})\s/;
+/** Match **bold** or __bold__ (non-greedy, same line) */
+const BOLD_RE = /\*\*(.+?)\*\*|__(.+?)__/g;
+/** Match *italic* or _italic_ — single marker, not inside bold markers */
+const ITALIC_RE = /(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g;
+/** Match `inline code` */
+const INLINE_CODE_RE = /`([^`]+)`/g;
+/** Match > blockquote lines */
+const BLOCKQUOTE_RE = /^>\s?/;
+/** Match list markers: - or * or + or 1. at start of line */
+const LIST_MARKER_RE = /^(\s*)([-*+]|\d+\.)\s/;
+
+/* ── Build decorations via regex (no syntax tree dependency) ── */
 
 function buildMarkdownDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  const tree = syntaxTree(view.state);
+  const ranges: { from: number; to: number; deco: Decoration }[] = [];
+  const lineDecos: { lineFrom: number; deco: Decoration }[] = [];
 
-  // Collect all ranges, then sort (RangeSetBuilder requires sorted order)
-  const markRanges: { from: number; to: number; deco: Decoration }[] = [];
-  const lineDecos: Map<number, Decoration> = new Map();
-
-  // Determine which lines the cursor is on (handle multiple selections)
+  // Determine which lines the cursor is on
   const cursorLines = new Set<number>();
   for (const range of view.state.selection.ranges) {
     const startLine = view.state.doc.lineAt(range.from).number;
@@ -48,100 +59,103 @@ function buildMarkdownDecorations(view: EditorView): DecorationSet {
     }
   }
 
-  // Visible range bounds
-  const visFrom = view.visibleRanges[0]?.from ?? 0;
-  const visTo = view.visibleRanges[view.visibleRanges.length - 1]?.to ?? view.state.doc.length;
+  for (const { from, to } of view.visibleRanges) {
+    const text = view.state.doc.sliceString(from, to);
+    const lines = text.split('\n');
+    let offset = from;
 
-  tree.iterate({
-    from: visFrom,
-    to: visTo,
-    enter(node) {
-      // --- ATX Headings (# through ######) ---
-      if (node.name.startsWith('ATXHeading')) {
-        const level = parseInt(node.name.replace('ATXHeading', ''), 10);
-        if (level >= 1 && level <= 6 && headingDeco[level]) {
-          markRanges.push({ from: node.from, to: node.to, deco: headingDeco[level] });
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const lineFrom = offset;
+      const lineNum = view.state.doc.lineAt(lineFrom).number;
+      const onCursorLine = cursorLines.has(lineNum);
+
+      // --- Headings ---
+      const headingMatch = HEADING_RE.exec(line);
+      if (headingMatch) {
+        const level = headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6;
+        if (headingDeco[level]) {
+          ranges.push({ from: lineFrom, to: lineFrom + line.length, deco: headingDeco[level] });
+          // Hide the `# ` prefix when cursor is not on this line
+          if (!onCursorLine) {
+            ranges.push({ from: lineFrom, to: lineFrom + headingMatch[0].length, deco: hideDeco });
+          }
         }
       }
 
+      // --- Blockquote ---
+      if (BLOCKQUOTE_RE.test(line)) {
+        lineDecos.push({ lineFrom, deco: blockquoteLineDeco });
+        if (!onCursorLine) {
+          const qMatch = BLOCKQUOTE_RE.exec(line);
+          if (qMatch) {
+            ranges.push({ from: lineFrom, to: lineFrom + qMatch[0].length, deco: hideDeco });
+          }
+        }
+      }
+
+      // --- List markers ---
+      const listMatch = LIST_MARKER_RE.exec(line);
+      if (listMatch) {
+        const markerStart = lineFrom + listMatch[1].length;
+        const markerEnd = markerStart + listMatch[2].length;
+        ranges.push({ from: markerStart, to: markerEnd, deco: listMarkerDeco });
+      }
+
       // --- Bold ---
-      if (node.name === 'StrongEmphasis') {
-        markRanges.push({ from: node.from, to: node.to, deco: boldDeco });
+      BOLD_RE.lastIndex = 0;
+      let boldMatch: RegExpExecArray | null;
+      while ((boldMatch = BOLD_RE.exec(line)) !== null) {
+        const matchFrom = lineFrom + boldMatch.index;
+        const matchTo = matchFrom + boldMatch[0].length;
+        ranges.push({ from: matchFrom, to: matchTo, deco: boldDeco });
+        if (!onCursorLine) {
+          // Hide opening **
+          ranges.push({ from: matchFrom, to: matchFrom + 2, deco: hideDeco });
+          // Hide closing **
+          ranges.push({ from: matchTo - 2, to: matchTo, deco: hideDeco });
+        }
       }
 
       // --- Italic ---
-      if (node.name === 'Emphasis') {
-        markRanges.push({ from: node.from, to: node.to, deco: italicDeco });
-      }
-
-      // --- Blockquote (line decoration) ---
-      if (node.name === 'Blockquote') {
-        // Apply line decoration to each line within the blockquote
-        const startLine = view.state.doc.lineAt(node.from).number;
-        const endLine = view.state.doc.lineAt(node.to).number;
-        for (let l = startLine; l <= endLine; l++) {
-          lineDecos.set(l, blockquoteLineDeco);
+      ITALIC_RE.lastIndex = 0;
+      let italicMatch: RegExpExecArray | null;
+      while ((italicMatch = ITALIC_RE.exec(line)) !== null) {
+        const matchFrom = lineFrom + italicMatch.index;
+        const matchTo = matchFrom + italicMatch[0].length;
+        ranges.push({ from: matchFrom, to: matchTo, deco: italicDeco });
+        if (!onCursorLine) {
+          ranges.push({ from: matchFrom, to: matchFrom + 1, deco: hideDeco });
+          ranges.push({ from: matchTo - 1, to: matchTo, deco: hideDeco });
         }
       }
 
       // --- Inline code ---
-      if (node.name === 'InlineCode') {
-        markRanges.push({ from: node.from, to: node.to, deco: inlineCodeDeco });
-      }
-
-      // --- List markers (keep visible but style muted) ---
-      if (node.name === 'ListMark') {
-        markRanges.push({ from: node.from, to: node.to, deco: listMarkerDeco });
-      }
-
-      // --- HIDE MARKS when cursor is NOT on the same line ---
-      const nodeLine = view.state.doc.lineAt(node.from).number;
-      const onCursorLine = cursorLines.has(nodeLine);
-
-      if (!onCursorLine) {
-        // HeaderMark: hide `# ` / `## ` etc (include trailing space)
-        if (node.name === 'HeaderMark') {
-          const lineEnd = view.state.doc.lineAt(node.from).to;
-          const markEnd = Math.min(node.to + 1, lineEnd); // +1 for the space after #
-          markRanges.push({ from: node.from, to: markEnd, deco: hideDeco });
-        }
-
-        // EmphasisMark: hide `**` or `*`
-        if (node.name === 'EmphasisMark') {
-          markRanges.push({ from: node.from, to: node.to, deco: hideDeco });
-        }
-
-        // QuoteMark: hide `> ` (include trailing space)
-        if (node.name === 'QuoteMark') {
-          const lineEnd = view.state.doc.lineAt(node.from).to;
-          const markEnd = Math.min(node.to + 1, lineEnd);
-          markRanges.push({ from: node.from, to: markEnd, deco: hideDeco });
-        }
-
-        // CodeMark: hide backticks for inline code only (not fenced code blocks)
-        if (node.name === 'CodeMark') {
-          const parent = node.node.parent;
-          if (parent?.name === 'InlineCode') {
-            markRanges.push({ from: node.from, to: node.to, deco: hideDeco });
-          }
+      INLINE_CODE_RE.lastIndex = 0;
+      let codeMatch: RegExpExecArray | null;
+      while ((codeMatch = INLINE_CODE_RE.exec(line)) !== null) {
+        const matchFrom = lineFrom + codeMatch.index;
+        const matchTo = matchFrom + codeMatch[0].length;
+        ranges.push({ from: matchFrom, to: matchTo, deco: inlineCodeDeco });
+        if (!onCursorLine) {
+          ranges.push({ from: matchFrom, to: matchFrom + 1, deco: hideDeco });
+          ranges.push({ from: matchTo - 1, to: matchTo, deco: hideDeco });
         }
       }
-    },
-  });
 
-  // Add line decorations first (they must come before mark decorations at the same position)
-  const sortedLineNumbers = [...lineDecos.keys()].sort((a, b) => a - b);
-  for (const lineNum of sortedLineNumbers) {
-    const line = view.state.doc.line(lineNum);
-    builder.add(line.from, line.from, lineDecos.get(lineNum)!);
+      offset += line.length + 1; // +1 for the \n
+    }
   }
 
-  // Sort mark ranges by position
-  markRanges.sort((a, b) => a.from - b.from || a.to - b.to);
+  // Add line decorations first (sorted by position)
+  lineDecos.sort((a, b) => a.lineFrom - b.lineFrom);
+  for (const { lineFrom, deco } of lineDecos) {
+    builder.add(lineFrom, lineFrom, deco);
+  }
 
-  // Filter out overlapping replace decorations that conflict with each other
-  // (e.g., if both a HeaderMark hide and a heading style overlap)
-  for (const { from, to, deco } of markRanges) {
+  // Sort mark ranges and add them
+  ranges.sort((a, b) => a.from - b.from || a.to - b.to);
+  for (const { from, to, deco } of ranges) {
     builder.add(from, to, deco);
   }
 
@@ -159,8 +173,6 @@ export const markdownDecorationPlugin = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate) {
-      // Rebuild on doc changes, viewport changes, OR cursor movement
-      // (cursor movement reveals/hides marks on the active line)
       if (update.docChanged || update.viewportChanged || update.selectionSet) {
         this.decorations = buildMarkdownDecorations(update.view);
       }

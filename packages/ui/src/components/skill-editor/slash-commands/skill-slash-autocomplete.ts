@@ -42,7 +42,7 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
 
   return function skillSlashAutocomplete(context: CompletionContext): CompletionResult | null {
     // 0. Check for \ (artifact output declaration)
-    const backslash = context.matchBefore(/\\[\w._-]*/);
+    const backslash = context.matchBefore(/\\[\w._/-]*/);
     if (backslash) {
       const charBefore = backslash.from > 0
         ? context.state.doc.sliceString(backslash.from - 1, backslash.from)
