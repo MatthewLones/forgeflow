@@ -2,29 +2,32 @@
 
 An open-source IDE and runtime for building AI agent workflows. Design multi-phase, multi-agent flows visually — Claude executes them with per-phase sandboxing, file-based state, and human-in-the-loop checkpoints.
 
-<!-- TODO: Add badges (license, build, tests) -->
-<!-- TODO: Add screenshot of workspace view -->
-
 ## What Is ForgeFlow?
 
 ForgeFlow is both a **visual workflow designer** and an **execution engine** for complex AI agent tasks. You define workflows as directed acyclic graphs (DAGs) of nodes — each node runs in its own Docker sandbox via Claude Agent SDK, with state serialized between phases. Skills package reusable domain knowledge that any flow can reference.
 
-The IDE provides an IDE-like workspace with a DAG canvas, tabbed code editors, a skill authoring system with slash commands, and **Forge** — a built-in AI copilot powered by Claude that helps you build and modify workflows conversationally.
+The IDE provides a full workspace with a DAG canvas, tabbed code editors, a skill authoring system with slash commands, Git version control, and **Forge** — a built-in AI copilot powered by Claude that helps you build and modify workflows conversationally.
 
-ForgeFlow is generalized from [CrossBeam](https://github.com/...), which won first place at the Claude Code Hackathon (Feb 2026) by applying this architecture to ADU permit processing. See [CROSSBEAM-PATTERNS.md](docs/CROSSBEAM-PATTERNS.md) for the 8 patterns extracted.
+ForgeFlow is generalized from CrossBeam, which won first place at the Claude Code Hackathon (Feb 2026) by applying this architecture to ADU permit processing.
 
 ## Key Features
 
-- **Visual DAG designer** — React Flow canvas with custom node types (Agent, Checkpoint, Merge), breadcrumb drill-down into recursive sub-agents
-- **IDE-like workspace** — Multi-panel tabbed editor (dockview), resizable sidebar, collapsible DAG view, split panes with keyboard shortcuts
-- **Agent editor** — Write agent instructions with slash commands, configure I/O files, budgets, skills, interrupts, and sub-agents
+- **Visual DAG designer** — React Flow canvas with custom node types (Agent, Checkpoint), breadcrumb drill-down into recursive sub-agents
+- **IDE-like workspace** — Multi-panel tabbed editor (dockview), resizable sidebar, collapsible DAG view, split panes with 40+ keyboard shortcuts
+- **Agent editor** — Write agent instructions with slash commands, configure I/O files with artifact schemas, budgets, skills, interrupts, and sub-agents
 - **Skill editor** — Author skills in CodeMirror 6 with slash commands (`/output`, `/input`, `/decision`, `/guardrail`, `//skill:`, `@file`), chip decorations, compiled preview, and raw markdown view
 - **Per-phase execution** — Each node runs in a fresh Docker sandbox. Clean context windows, fault isolation, and natural state serialization between every phase
 - **5 interrupt types** — Approval, Q&A, Selection, Review & Edit, Escalation. Inline mode (agent pauses in place), checkpoint mode (zero cost while waiting), and auto-escalate (inline → checkpoint on timeout)
 - **Budget constraints** — `maxTurns` and `maxBudgetUsd` on every flow and node, enforced by Agent SDK
 - **Checkpoints** — Flow pauses at defined boundaries with zero cost. Resume minutes or days later
-- **Forge AI copilot** — Claude-powered assistant panel for conversational workflow building (UI shell built, API integration coming soon)
+- **Forge AI copilot** — Claude-powered assistant with 13 MCP tools for conversational flow building, skill creation, validation, and debugging
+- **Run dashboard** — Live run observability with SSE progress streaming, interrupt handling, output viewing, and run history
+- **Git version control** — Per-project Git repos with stage, commit, push, pull, branch, and reset. 4-tab GitPanel UI
+- **GitHub integration** — OAuth flow, repo creation, remote linking, push/pull to GitHub
+- **.forge export/import** — Portable project bundles for sharing (magic header + gzip JSON)
+- **Settings & shortcuts** — 40+ remappable keyboard shortcuts, interactive guide overlay
 - **CLI** — `forgeflow run` and `forgeflow resume` for headless execution with mock, local, or Docker runners
+- **Desktop app** — Electron 35 wrapping UI + embedded server, with `.forge` file association
 
 ## Quick Start
 
@@ -43,11 +46,18 @@ cd forgeflow
 pnpm install
 ```
 
-### Run the Visual IDE
+### Set Up API Key
 
 ```bash
-pnpm --filter @forgeflow/ui dev
-# Open http://localhost:5173
+echo "ANTHROPIC_API_KEY=sk-your-key-here" > packages/server/.env
+```
+
+### Run the IDE
+
+```bash
+pnpm dev
+# Server: http://localhost:3001
+# UI:     http://localhost:5173
 ```
 
 ### Run a Flow via CLI
@@ -66,30 +76,44 @@ pnpm --filter @forgeflow/cli start -- run ./examples/contract-review --docker --
 pnpm --filter @forgeflow/cli start -- resume ./examples/contract-review <run-id> --input attorney_decisions.json
 ```
 
+### Run the Desktop App
+
+```bash
+pnpm dev:desktop
+```
+
 ## Architecture Overview
 
-ForgeFlow has two layers: an **IDE** for designing workflows, and a **runtime** for executing them. The IDE produces `FLOW.json` files. The runtime reads them and executes phase-by-phase.
+ForgeFlow has three layers: an **IDE** for designing workflows, a **Server API** for persistence and orchestration, and a **Runtime Engine** for executing them. The IDE produces `FLOW.json` files. The server persists them and manages runs. The engine executes phase-by-phase.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  Visual IDE (React)                                      │
-│  AgentExplorer │ DagMiniView │ Editors │ Forge AI Copilot│
+│  Visual IDE (React 19)                                    │
+│  AgentExplorer │ DagMiniView │ Editors │ Forge Copilot   │
+│  GitPanel │ RunPanel │ Settings                           │
 └───────┬──────────────────────────────────────────────────┘
-        │ saves FLOW.json, triggers runs
+        │ API calls (fetch)
 ┌───────▼──────────────────────────────────────────────────┐
-│  Execution Engine (Node.js)                              │
-│  Validator → Compiler → Orchestrator → Agent Runners     │
+│  Server API (Express 5, port 3001)                        │
+│  ProjectStore │ RunManager │ CopilotManager │ GitManager  │
+│  SSE streaming │ Interrupt bridge │ GitHub OAuth          │
+└───────┬──────────────────────────────────────────────────┘
+        │ orchestrates execution
+┌───────▼──────────────────────────────────────────────────┐
+│  Execution Engine (Node.js)                               │
+│  Validator → Compiler (IR) → Orchestrator → Agent Runners │
 └───────┬──────────────────────────────────────────────────┘
         │ creates/manages per-phase
 ┌───────▼──────────────────────────────────────────────────┐
-│  Sandbox (Docker container per phase)                    │
-│  workspace/input/ ← from state store                     │
-│  workspace/output/ ← agent writes here                   │
-│  workspace/skills/ ← only this phase's skills            │
+│  Sandbox (Docker container per phase)                     │
+│  workspace/input/ ← from state store                      │
+│  workspace/output/ ← agent writes here                    │
+│  workspace/skills/ ← only this phase's skills             │
 └───────┬──────────────────────────────────────────────────┘
         │ reads/writes
 ┌───────▼──────────────────────────────────────────────────┐
-│  State Store (~/.forgeflow/runs/{id}/)                   │
+│  State Store (~/.forgeflow/runs/{id}/)                    │
+│  Git (~/.forgeflow/projects/{id}/.git/)                   │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -115,12 +139,11 @@ Skills are standalone and composable. A "California Tax Code" skill can be used 
 
 ### Nodes — Units of Work
 
-Three types:
+Two types:
 - **Agent** — Claude executes instructions with loaded skills. Can spawn parallel sub-agents and fire interrupts for human input mid-execution.
 - **Checkpoint** — Flow pauses at a phase boundary, presents data to user, waits for input. Zero cost while waiting.
-- **Merge** — Collects outputs from parallel children.
 
-Nodes can contain recursive sub-trees — double-click any node in the DAG to see its parallel children.
+Nodes can contain recursive sub-trees — double-click any node in the DAG to see its parallel children. Children are auto-ordered into waves based on sibling I/O dependencies.
 
 ### Flows — Multi-Phase Agent Workflows
 
@@ -130,7 +153,7 @@ A flow is a DAG of nodes defined in `FLOW.json`:
 [Parse Input] → [Research (3 parallel sub-agents)] → [⛔ Human Review] → [Generate Output]
 ```
 
-Each node declares its inputs, outputs, skills, and budget. The engine resolves dependencies, validates the DAG, and executes phase-by-phase. See [docs/FLOW-FORMAT.md](docs/FLOW-FORMAT.md).
+Each node declares its inputs, outputs (optionally with `ArtifactSchema`), skills, and budget. The engine resolves dependencies, validates the DAG, and executes phase-by-phase. A `flow.artifacts` registry provides shared artifact schemas. See [docs/FLOW-FORMAT.md](docs/FLOW-FORMAT.md).
 
 ### Per-Phase Execution
 
@@ -153,22 +176,22 @@ Default to **inline** mode (agent pauses, sandbox stays alive). Auto-escalate to
 |---------|-------------|--------|
 | `@forgeflow/types` | Pure type declarations (zero runtime) | Stable |
 | `@forgeflow/parser` | Zod schema validation for FLOW.json | Stable |
-| `@forgeflow/validator` | Semantic validation (DAG, dependencies, budgets, interrupts) | Stable |
-| `@forgeflow/compiler` | FlowNode → per-phase markdown prompt + per-child prompt files | Stable |
+| `@forgeflow/validator` | Pluggable 11-rule validation pipeline with FlowGraph symbol table | Stable |
+| `@forgeflow/compiler` | Staged IR pipeline: FlowGraph → PhaseIR → markdown | Stable |
 | `@forgeflow/skill-resolver` | Loads SKILL.md + references from disk, search path resolution | Stable |
 | `@forgeflow/state-store` | StateStore interface + LocalStateStore (filesystem) | Stable |
 | `@forgeflow/engine` | FlowOrchestrator, MockRunner, ClaudeAgentRunner, DockerAgentRunner, InterruptWatcher | Stable |
 | `@forgeflow/cli` | `forgeflow run` + `forgeflow resume` with --mock/--local/--docker | Stable |
-| `@forgeflow/ui` | React IDE (Vite, dockview, React Flow, CodeMirror 6) | Alpha |
-| `@forgeflow/server` | Express API server | Early |
-| `@forgeflow/desktop` | Electron desktop app | Early |
+| `@forgeflow/ui` | React 19 IDE (Vite, dockview, React Flow, CodeMirror 6, copilot, git) | Beta |
+| `@forgeflow/server` | Express 5 API: projects, runs, copilot, git, SSE streaming | Stable |
+| `@forgeflow/desktop` | Electron 35 desktop app with .forge file association | Beta |
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Full system design: runtime execution model, UI architecture, interrupt system, state management |
-| [FLOW-FORMAT.md](docs/FLOW-FORMAT.md) | FLOW.json specification with TypeScript types and validation rules |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Full system design: runtime, server API, UI architecture, interrupt system, git integration, copilot, state management |
+| [FLOW-FORMAT.md](docs/FLOW-FORMAT.md) | FLOW.json specification with TypeScript types, ArtifactSchema, validation rules, and compilation pipeline |
 | [SKILL-FORMAT.md](docs/SKILL-FORMAT.md) | Skill directory structure, conventions, and the visual skill editor |
 
 ## Roadmap
@@ -177,28 +200,28 @@ Default to **inline** mode (agent pauses, sandbox stays alive). Auto-escalate to
 - [x] 5 interrupt types with inline, checkpoint, and auto-escalate modes
 - [x] CLI (`forgeflow run` + `forgeflow resume`) with mock, local, and Docker runners
 - [x] Visual IDE with DAG designer, agent editor, skill editor
-- [x] Forge AI copilot panel (UI shell)
-- [ ] Forge copilot connected to Claude API (conversational flow building)
-- [ ] Server API routes (flow CRUD, run management, real-time progress streaming)
-- [ ] Desktop app packaging and distribution (Electron)
-- [ ] Run viewer with real-time progress, state inspector, and interrupt UI
+- [x] Server API (project CRUD, run management, SSE progress streaming)
+- [x] Forge AI copilot connected to Claude API (conversational flow building with 13 MCP tools)
+- [x] Run dashboard with real-time progress, interrupt UI, and output viewing
+- [x] Desktop app packaging (Electron 35)
+- [x] Git version control and GitHub integration
+- [x] .forge export/import for portable project bundles
 - [ ] Cloud sandbox (Vercel Sandbox + S3 state store)
 - [ ] Skill marketplace
+- [ ] Multi-user collaboration
 
 ## Contributing
 
 ```bash
 pnpm install          # Install all dependencies
-pnpm test             # Run all tests (151 across 8 packages)
+pnpm test             # Run all tests (~234 across 11 packages)
 pnpm build            # Build all packages
-pnpm typecheck        # TypeScript type checking
-pnpm lint             # ESLint
 ```
 
 1. Fork the repo
 2. Create a feature branch
 3. Make your changes
-4. Run `pnpm test && pnpm build && pnpm typecheck`
+4. Run `pnpm test && pnpm build`
 5. Open a pull request
 
 ## License

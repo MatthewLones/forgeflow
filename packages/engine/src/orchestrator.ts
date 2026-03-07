@@ -109,12 +109,12 @@ export class FlowOrchestrator {
 
   /**
    * Resume a flow that was paused at a checkpoint.
-   * Requires the same flow definition and the user's checkpoint answer.
+   * Accepts multiple checkpoint answer files (all expected files must be provided).
    */
   async resume(
     flow: FlowDefinition,
     runId: string,
-    checkpointInput: { fileName: string; content: Buffer },
+    checkpointInputs: Array<{ fileName: string; content: Buffer }>,
   ): Promise<RunResult> {
     const emit = this.options?.onProgress ?? (() => {});
 
@@ -154,18 +154,36 @@ export class FlowOrchestrator {
       };
     }
 
-    // 3. Save checkpoint answer as artifact
-    await this.stateStore.saveCheckpointAnswer(
-      runId,
-      checkpointInput.fileName,
-      checkpointInput.content,
-    );
+    // 3. Validate all expected files are provided
+    const expectedNames = new Set(checkpoint.expectedFiles.map((f) => f.fileName));
+    const providedNames = new Set(checkpointInputs.map((f) => f.fileName));
+    const missing = [...expectedNames].filter((n) => !providedNames.has(n));
+    if (missing.length > 0) {
+      return {
+        success: false,
+        status: 'failed',
+        runId,
+        totalCost: runState.totalCost,
+        outputFiles: [],
+        error: `Missing checkpoint files: ${missing.join(', ')}`,
+      };
+    }
 
-    // 4. Update checkpoint status
+    // 4. Save all checkpoint answers as artifacts
+    for (const input of checkpointInputs) {
+      await this.stateStore.saveCheckpointAnswer(runId, input.fileName, input.content);
+    }
+
+    // 5. Update checkpoint status
     checkpoint.status = 'answered';
+    for (const ef of checkpoint.expectedFiles) {
+      if (providedNames.has(ef.fileName)) {
+        ef.provided = true;
+      }
+    }
     await this.stateStore.saveCheckpoint(runId, checkpoint);
 
-    // 5. Re-validate flow to get execution plan
+    // 6. Re-validate flow to get execution plan
     const validation = validateFlow(flow);
     if (!validation.valid || !validation.executionPlan) {
       return {
@@ -178,7 +196,7 @@ export class FlowOrchestrator {
       };
     }
 
-    // 6. Find checkpoint phase index
+    // 7. Find checkpoint phase index
     const checkpointIndex = validation.executionPlan.phases.findIndex(
       (p) => p.nodeId === checkpoint.checkpointNodeId,
     );
@@ -193,14 +211,14 @@ export class FlowOrchestrator {
       };
     }
 
-    // 7. Update run state to running
+    // 8. Update run state to running
     runState.status = 'running';
     runState.updatedAt = new Date().toISOString();
     await this.stateStore.saveRunState(runId, runState);
 
     emit({ type: 'resume', runId, checkpointNodeId: checkpoint.checkpointNodeId });
 
-    // 8. Execute remaining phases (starting after checkpoint)
+    // 9. Execute remaining phases (starting after checkpoint)
     return this.executePhases({
       runId,
       flow,
@@ -213,8 +231,85 @@ export class FlowOrchestrator {
   }
 
   /**
+   * Retry a failed run from the phase that failed.
+   * Loads state, verifies it's in 'failed' status, and re-executes from the failed phase.
+   */
+  async retryFromFailure(flow: FlowDefinition, runId: string): Promise<RunResult> {
+    const emit = this.options?.onProgress ?? (() => {});
+
+    // 1. Load and verify run state
+    const runState = await this.stateStore.loadRunState(runId);
+    if (!runState) {
+      return { success: false, status: 'failed', runId, totalCost: { turns: 0, usd: 0 }, outputFiles: [], error: `Run ${runId} not found` };
+    }
+    if (runState.status !== 'failed') {
+      return { success: false, status: 'failed', runId, totalCost: runState.totalCost, outputFiles: [], error: `Run ${runId} is not failed (status: ${runState.status})` };
+    }
+
+    // 2. Re-validate flow
+    const validation = validateFlow(flow);
+    if (!validation.valid || !validation.executionPlan) {
+      return { success: false, status: 'failed', runId, totalCost: runState.totalCost, outputFiles: [], error: `Flow re-validation failed: ${validation.errors.map((e) => e.message).join('; ')}` };
+    }
+
+    // 3. Find the failed phase index
+    const failedPhaseId = runState.failedPhaseId;
+    if (!failedPhaseId) {
+      // Fallback: retry from the first phase after the last completed one
+      const lastCompleted = runState.completedPhases[runState.completedPhases.length - 1];
+      const lastIndex = lastCompleted
+        ? validation.executionPlan.phases.findIndex((p) => p.nodeId === lastCompleted)
+        : -1;
+      const retryIndex = lastIndex + 1;
+
+      runState.status = 'running';
+      runState.error = undefined;
+      runState.failedPhaseId = undefined;
+      runState.updatedAt = new Date().toISOString();
+      await this.stateStore.saveRunState(runId, runState);
+
+      emit({ type: 'resume', runId, checkpointNodeId: `retry_from_phase_${retryIndex}` });
+
+      return this.executePhases({
+        runId,
+        flow,
+        executionPlan: validation.executionPlan,
+        runState,
+        startingPhaseIndex: retryIndex,
+        initialCost: { ...runState.totalCost },
+        initialOutputFiles: [],
+      });
+    }
+
+    const failedIndex = validation.executionPlan.phases.findIndex((p) => p.nodeId === failedPhaseId);
+    if (failedIndex === -1) {
+      return { success: false, status: 'failed', runId, totalCost: runState.totalCost, outputFiles: [], error: `Failed phase "${failedPhaseId}" not found in execution plan` };
+    }
+
+    // 4. Update state to running
+    runState.status = 'running';
+    runState.error = undefined;
+    runState.failedPhaseId = undefined;
+    runState.updatedAt = new Date().toISOString();
+    await this.stateStore.saveRunState(runId, runState);
+
+    emit({ type: 'resume', runId, checkpointNodeId: failedPhaseId });
+
+    // 5. Re-execute from the failed phase
+    return this.executePhases({
+      runId,
+      flow,
+      executionPlan: validation.executionPlan,
+      runState,
+      startingPhaseIndex: failedIndex,
+      initialCost: { ...runState.totalCost },
+      initialOutputFiles: [],
+    });
+  }
+
+  /**
    * Execute phases starting from a given index.
-   * Shared by execute() and resume().
+   * Shared by execute(), resume(), and retryFromFailure().
    */
   private async executePhases(ctx: ExecuteContext): Promise<RunResult> {
     const emit = this.options?.onProgress ?? (() => {});
@@ -232,14 +327,31 @@ export class FlowOrchestrator {
       ctx.runState.updatedAt = new Date().toISOString();
       await this.stateStore.saveRunState(ctx.runId, ctx.runState);
 
-      // --- Checkpoint node: pause for user input ---
+      // --- Checkpoint node: pause for user input (no LLM) ---
       if (node.type === 'checkpoint') {
+        // Build multi-file expected files list
+        const expectedFiles = sym.declaredOutputs.map((file) => ({
+          fileName: file,
+          provided: false,
+          schema: sym.outputSchemas.get(file),
+        }));
+
+        // Build present schemas for UI rendering
+        const presentSchemas: Record<string, import('@forgeflow/types').ArtifactSchema> = {};
+        for (const inputName of sym.declaredInputs) {
+          const schema = sym.inputSchemas.get(inputName);
+          if (schema) presentSchemas[inputName] = schema;
+        }
+
         const checkpoint: CheckpointState = {
           runId: ctx.runId,
           checkpointNodeId: node.id,
           status: 'waiting',
           presentFiles: sym.declaredInputs,
-          waitingForFile: sym.declaredOutputs[0] ?? '',
+          presentSchemas,
+          expectedFiles,
+          waitingForFile: sym.declaredOutputs[0] ?? '', // backward compat
+          instructions: node.instructions || undefined,
           completedPhases: [...ctx.runState.completedPhases],
           costSoFar: { ...totalCost },
           presentation: node.config.presentation!,
@@ -324,7 +436,7 @@ export class FlowOrchestrator {
       };
 
       let interruptWatcher: InterruptWatcher | undefined;
-      if (this.options?.interruptHandler && sym.interruptCapable) {
+      if (this.options?.interruptHandler) {
         interruptWatcher = new InterruptWatcher();
         await interruptWatcher.start({
           workspacePath,
@@ -363,12 +475,22 @@ export class FlowOrchestrator {
 
         // Create synthetic checkpoint from escalated interrupt
         const escalatedInterrupt = interruptWatcher.escalatedInterrupt;
+        const escalatedFileName = `escalated_answer_${escalatedInterrupt.interrupt_id}.json`;
+        // Build present schemas for escalated checkpoint outputs
+        const escalatedPresentSchemas: Record<string, import('@forgeflow/types').ArtifactSchema> = {};
+        for (const out of outputs) {
+          const schema = sym.outputSchemas.get(out.name);
+          if (schema) escalatedPresentSchemas[out.name] = schema;
+        }
+
         const checkpoint: CheckpointState = {
           runId: ctx.runId,
           checkpointNodeId: node.id,
           status: 'waiting',
           presentFiles: outputs.map((f) => f.name),
-          waitingForFile: `escalated_answer_${escalatedInterrupt.interrupt_id}.json`,
+          presentSchemas: escalatedPresentSchemas,
+          expectedFiles: [{ fileName: escalatedFileName, provided: false }],
+          waitingForFile: escalatedFileName, // backward compat
           completedPhases: [...ctx.runState.completedPhases],
           costSoFar: { ...totalCost },
           presentation: {
@@ -401,7 +523,23 @@ export class FlowOrchestrator {
       if (!phaseResult.success) {
         emit({ type: 'phase_failed', nodeId: node.id, error: phaseResult.error ?? 'Unknown error' });
 
+        // Save partial outputs from the failed phase (agent may have written files before crashing)
+        try {
+          const partialOutputs = await collectOutputs(workspacePath, node.id);
+          if (partialOutputs.length > 0) {
+            await this.stateStore.savePhaseOutputs(ctx.runId, node.id, partialOutputs);
+            allOutputFiles.push(...partialOutputs.map((f) => f.name));
+          }
+        } catch {
+          // Best-effort — don't let output collection failure mask the real error
+        }
+
+        // Include the failed phase's cost in the total
+        totalCost.turns += phaseResult.cost.turns;
+        totalCost.usd += phaseResult.cost.usd;
+
         ctx.runState.status = 'failed';
+        ctx.runState.failedPhaseId = node.id;
         ctx.runState.error = `Phase "${node.id}" failed: ${phaseResult.error ?? 'Unknown error'}`;
         ctx.runState.totalCost = { ...totalCost };
         ctx.runState.updatedAt = new Date().toISOString();

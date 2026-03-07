@@ -666,6 +666,16 @@ function ArtifactTreeItem({
   const isActive = activeTabId === `artifact:${node.fullPath}`;
   const showNewInput = newArtifactParent === node.fullPath && node.isFolder;
 
+  // Build lineage tooltip for non-folder artifacts (HTML for colored arrows)
+  const lineageTooltip = useMemo(() => {
+    if (node.isFolder || !node.lineage) return undefined;
+    const { producers, consumers } = node.lineage;
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const producerText = producers.length > 0 ? esc(producers.join(', ')) : 'user upload';
+    const consumerText = consumers.length > 0 ? esc(consumers.join(', ')) : 'none';
+    return `<span style="color:#60a5fa">\u2192</span> ${producerText}<br><span style="color:#4ade80">\u2190</span> ${consumerText}`;
+  }, [node.isFolder, node.lineage]);
+
   useEffect(() => {
     if (isRenaming) {
       setRenameValue(node.name);
@@ -737,6 +747,7 @@ function ArtifactTreeItem({
           else onSelect(node.fullPath);
         }}
         onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, node); }}
+        data-tooltip-html={lineageTooltip}
         className={`w-full flex items-center gap-1.5 py-1 text-left text-xs transition-colors relative cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-node-agent)] focus-visible:ring-inset ${
           isActive
             ? 'bg-[var(--color-node-agent)]/8 text-[var(--color-text-primary)] border-l-2 border-l-[var(--color-node-agent)]'
@@ -871,6 +882,7 @@ export function AgentExplorer() {
   const { skills, references, uploadReferences, deleteReference, createReferenceFolder, renameReference, createSkill, renameSkill, deleteSkill } = useProjectStore();
 
   const [agentsExpanded, setAgentsExpanded] = useState(true);
+  const [checkpointsExpanded, setCheckpointsExpanded] = useState(true);
   const [skillsExpanded, setSkillsExpanded] = useState(true);
   const [refsExpanded, setRefsExpanded] = useState(true);
   const [artifactsExpanded, setArtifactsExpanded] = useState(true);
@@ -884,6 +896,8 @@ export function AgentExplorer() {
   const [newRootArtifactValue, setNewRootArtifactValue] = useState('');
 
   const sortedNodes = topologicalOrder(state.flow.nodes, state.flow.edges);
+  const agentNodes = useMemo(() => sortedNodes.filter((n) => n.type !== 'checkpoint'), [sortedNodes]);
+  const checkpointNodes = useMemo(() => sortedNodes.filter((n) => n.type === 'checkpoint'), [sortedNodes]);
   const artifactLineage = useMemo(() => buildArtifactLineage(state.flow.nodes, state.flow.artifacts), [state.flow.nodes, state.flow.artifacts]);
   const artifactTree = useMemo(() => buildArtifactTree(artifactLineage, state.flow.artifactFolders ?? []), [artifactLineage, state.flow.artifactFolders]);
 
@@ -897,6 +911,10 @@ export function AgentExplorer() {
 
   const handleAddAgent = useCallback((_e?: React.MouseEvent) => {
     addNode('agent', { x: 0, y: 0 });
+  }, [addNode]);
+
+  const handleAddCheckpoint = useCallback((_e?: React.MouseEvent) => {
+    addNode('checkpoint', { x: 0, y: 0 });
   }, [addNode]);
 
   const handleAddSkill = useCallback(async (_e?: React.MouseEvent) => {
@@ -940,6 +958,19 @@ export function AgentExplorer() {
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
     [selectAgent, selectNode, removeNode, addChild, handleDuplicateAgent],
+  );
+
+  const handleCheckpointContextMenu = useCallback(
+    (e: React.MouseEvent, node: FlowNode) => {
+      const items: ContextMenuEntry[] = [
+        { label: 'Open', onClick: () => { selectAgent(node.id, node.name); selectNode(node.id); } },
+        { label: 'Rename', onClick: () => setRenamingNodeId(node.id) },
+        { separator: true },
+        { label: 'Delete', onClick: () => { if (window.confirm(`Delete "${node.name}"?`)) removeNode(node.id); }, danger: true },
+      ];
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [selectAgent, selectNode, removeNode],
   );
 
   const handleSkillContextMenu = useCallback(
@@ -1208,12 +1239,15 @@ export function AgentExplorer() {
   );
 
   const handleSectionContextMenu = useCallback(
-    (e: React.MouseEvent, section: 'agents' | 'skills' | 'references' | 'artifacts') => {
+    (e: React.MouseEvent, section: 'agents' | 'checkpoints' | 'skills' | 'references' | 'artifacts') => {
       e.preventDefault();
       let items: ContextMenuEntry[];
       if (section === 'agents') {
         items = [
           { label: 'New Agent', onClick: () => addNode('agent', { x: 0, y: 0 }) },
+        ];
+      } else if (section === 'checkpoints') {
+        items = [
           { label: 'New Checkpoint', onClick: () => addNode('checkpoint', { x: 0, y: 0 }) },
         ];
       } else if (section === 'skills') {
@@ -1264,7 +1298,7 @@ export function AgentExplorer() {
 
       {agentsExpanded && (
         <div>
-          {sortedNodes.length === 0 ? (
+          {agentNodes.length === 0 ? (
             <div className="px-3 py-3 text-center">
               <div className="text-[10px] text-[var(--color-text-muted)] mb-1">No agents yet</div>
               <button
@@ -1277,7 +1311,7 @@ export function AgentExplorer() {
             </div>
           ) : (
             <div className="py-0.5">
-              {sortedNodes.map((node) => (
+              {agentNodes.map((node) => (
                 <AgentTreeItem
                   key={node.id}
                   node={node}
@@ -1288,6 +1322,41 @@ export function AgentExplorer() {
                   onRename={handleInlineRename}
                   onStartRename={setRenamingNodeId}
                   onContextMenu={handleAgentContextMenu}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Checkpoints */}
+      <SectionHeader
+        title="Checkpoints"
+        expanded={checkpointsExpanded}
+        onToggle={() => setCheckpointsExpanded(!checkpointsExpanded)}
+        onAdd={handleAddCheckpoint}
+        onContextMenu={(e) => handleSectionContextMenu(e, 'checkpoints')}
+      />
+
+      {checkpointsExpanded && (
+        <div>
+          {checkpointNodes.length === 0 ? (
+            <div className="px-3 py-3 text-center">
+              <div className="text-[10px] text-[var(--color-text-muted)]">No checkpoints</div>
+            </div>
+          ) : (
+            <div className="py-0.5">
+              {checkpointNodes.map((node) => (
+                <AgentTreeItem
+                  key={node.id}
+                  node={node}
+                  depth={0}
+                  activeTabId={activeTabId}
+                  renamingNodeId={renamingNodeId}
+                  onSelect={handleSelectAgent}
+                  onRename={handleInlineRename}
+                  onStartRename={setRenamingNodeId}
+                  onContextMenu={handleCheckpointContextMenu}
                 />
               ))}
             </div>

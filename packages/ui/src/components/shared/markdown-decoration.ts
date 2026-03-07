@@ -147,13 +147,12 @@ function buildMarkdownDecorations(view: EditorView): DecorationSet {
     }
   }
 
-  // Add line decorations first (sorted by position)
-  lineDecos.sort((a, b) => a.lineFrom - b.lineFrom);
+  // Merge line decorations into ranges so everything is in a single sorted pass
   for (const { lineFrom, deco } of lineDecos) {
-    builder.add(lineFrom, lineFrom, deco);
+    ranges.push({ from: lineFrom, to: lineFrom, deco });
   }
 
-  // Sort mark ranges and add them
+  // Sort all decorations by position (line decos are point ranges at line start)
   ranges.sort((a, b) => a.from - b.from || a.to - b.to);
   for (const { from, to, deco } of ranges) {
     builder.add(from, to, deco);

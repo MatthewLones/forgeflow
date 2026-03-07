@@ -22,6 +22,8 @@ interface GitPanelProps {
 export function GitPanel({ onClose }: GitPanelProps) {
   const git = useGit();
   const [activeTab, setActiveTab] = useState<TabId>('status');
+  // Lifted so commit message persists across tab switches
+  const [commitMessage, setCommitMessage] = useState('');
 
   // Poll status periodically when panel is visible
   useEffect(() => {
@@ -140,7 +142,7 @@ export function GitPanel({ onClose }: GitPanelProps) {
       {git.status?.initialized && (
         <div className="flex-1 overflow-y-auto">
           {activeTab === 'status' && <StatusTab />}
-          {activeTab === 'commit' && <CommitTab />}
+          {activeTab === 'commit' && <CommitTab message={commitMessage} setMessage={setCommitMessage} />}
           {activeTab === 'history' && <HistoryTab />}
           {activeTab === 'branches' && <BranchesTab />}
         </div>
@@ -269,23 +271,31 @@ function FileRow({
 
 /* ── Commit Tab ──────────────────────────────────────── */
 
-function CommitTab() {
+function CommitTab({ message, setMessage }: { message: string; setMessage: (m: string) => void }) {
   const git = useGit();
-  const [message, setMessage] = useState('');
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'warning'; text: string } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const stagedCount = git.status?.files.filter(f => f.staged).length ?? 0;
-  const canCommit = stagedCount > 0 && message.trim().length > 0 && !git.loading;
 
   const handleCommit = useCallback(async () => {
-    if (!canCommit) return;
-    try {
-      await git.commit(message.trim());
-      setMessage('');
-    } catch {
-      // Error handled by context
+    if (git.loading) return;
+    if (stagedCount === 0) {
+      setFeedback({ type: 'warning', text: 'No files staged. Go to Changes tab to stage files.' });
+      setTimeout(() => setFeedback(null), 3000);
+      return;
     }
-  }, [canCommit, message, git.commit]);
+    if (!message.trim()) return;
+    try {
+      // Set success feedback before await so it's visible during the status refresh re-render
+      setFeedback({ type: 'success', text: 'Successfully committed.' });
+      setMessage('');
+      await git.commit(message.trim());
+      setTimeout(() => setFeedback(null), 3000);
+    } catch {
+      setFeedback(null);
+    }
+  }, [stagedCount, message, git.loading, git.commit, setMessage]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -296,13 +306,13 @@ function CommitTab() {
 
   return (
     <div className="p-3 space-y-3">
-      {/* Staged summary */}
+      {/* Feedback / staged summary */}
       <div className="text-xs text-gray-500">
-        {stagedCount === 0 ? (
-          <span className="text-amber-600">No files staged. Go to Changes tab to stage files.</span>
-        ) : (
+        {feedback ? (
+          <span className={feedback.type === 'success' ? 'text-emerald-600' : 'text-amber-600'}>{feedback.text}</span>
+        ) : stagedCount > 0 ? (
           <span>{stagedCount} file{stagedCount !== 1 ? 's' : ''} staged for commit</span>
-        )}
+        ) : null}
       </div>
 
       {/* Commit message */}
@@ -322,7 +332,7 @@ function CommitTab() {
           </span>
           <button
             onClick={handleCommit}
-            disabled={!canCommit}
+            disabled={git.loading || !message.trim()}
             className="px-3 py-1 text-xs font-medium bg-[var(--color-node-agent)] text-white rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {git.loading ? 'Committing...' : 'Commit'}

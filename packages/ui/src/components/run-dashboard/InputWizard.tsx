@@ -72,10 +72,12 @@ export function InputWizard({
   projectId,
   onStartRun,
   onCancel,
+  error,
 }: {
   projectId: string;
   onStartRun: (runner: RunnerType, files: File[], model?: string) => void;
   onCancel: () => void;
+  error?: string | null;
 }) {
   const [requiredInputs, setRequiredInputs] = useState<RequiredInput[]>([]);
   const [loading, setLoading] = useState(true);
@@ -224,6 +226,18 @@ export function InputWizard({
           <AdditionalFiles files={extraFiles} onFilesChange={setExtraFiles} />
         )}
       </div>
+
+      {/* Validation error banner */}
+      {error && (
+        <div className="mx-6 mb-0 px-4 py-3 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-start gap-2">
+            <span className="text-red-600 text-sm font-bold shrink-0">{'\u2717'}</span>
+            <div className="text-xs text-red-700 leading-relaxed">
+              {error}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="px-6 py-4 border-t border-[var(--color-border)] flex items-center justify-end gap-2 shrink-0">

@@ -408,7 +408,6 @@ html, body, #root {
 /* Block type tint overrides */
 .cm-skill-block-output { background: #f0fdf4; }
 .cm-skill-block-input { background: #eff6ff; }
-.cm-skill-block-decision { background: #fefce8; }
 
 /* Widget header bar */
 .skill-widget-header {
@@ -424,7 +423,6 @@ html, body, #root {
 
 .skill-widget-header-output { color: #059669; background: rgba(16, 185, 129, 0.08); }
 .skill-widget-header-input { color: #2563eb; background: rgba(59, 130, 246, 0.08); }
-.skill-widget-header-decision { color: #d97706; background: rgba(245, 158, 11, 0.08); }
 
 .skill-widget-icon {
   font-size: 12px;
@@ -566,7 +564,6 @@ html, body, #root {
 }
 
 tr:hover .skill-widget-remove,
-.skill-widget-decision-row:hover > .skill-widget-remove,
 .skill-widget-field-row:hover > .skill-widget-remove {
   opacity: 1;
 }
@@ -597,123 +594,6 @@ tr:hover .skill-widget-remove,
   background: rgba(59, 130, 246, 0.04);
 }
 
-/* Decision tree widget */
-.skill-widget-decision-rows {
-  padding: 4px 0;
-}
-
-.skill-widget-decision-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 6px 12px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
-  position: relative;
-  flex-wrap: wrap;
-}
-
-.skill-widget-decision-row:last-child {
-  border-bottom: none;
-}
-
-.skill-widget-decision-condition,
-.skill-widget-decision-action {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-}
-
-.skill-widget-decision-label {
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-text-muted);
-  padding: 2px 4px;
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-.skill-widget-decision-arrow {
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-  padding-top: 4px;
-}
-
-.skill-widget-decision-refs {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  width: 100%;
-  padding-left: 32px;
-  margin-top: 2px;
-}
-
-.skill-widget-ref-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 1px 6px;
-  background: rgba(16, 185, 129, 0.1);
-  color: #059669;
-  border-radius: 4px;
-  font-size: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.skill-widget-ref-pill-remove {
-  background: none;
-  border: none;
-  color: #059669;
-  cursor: pointer;
-  font-size: 11px;
-  line-height: 1;
-  padding: 0 1px;
-  opacity: 0.6;
-}
-
-.skill-widget-ref-pill-remove:hover {
-  opacity: 1;
-  color: #ef4444;
-}
-
-.skill-widget-decision-ref-add {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  width: 100%;
-  padding-left: 32px;
-  margin-top: 2px;
-}
-
-.skill-widget-ref-add-btn {
-  background: none;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.skill-widget-ref-add-btn:hover {
-  border-color: var(--color-node-merge);
-  color: var(--color-node-merge);
-}
-
-.skill-widget-decision-remove {
-  position: absolute;
-  right: 4px;
-  top: 4px;
-}
 
 .skill-widget-title-input {
   border: none;

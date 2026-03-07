@@ -55,6 +55,35 @@ export const nodeTypeRulesRule: ValidationRule = {
           ),
         );
       }
+
+      // Checkpoint-specific warnings
+      if (node.type === 'checkpoint') {
+        // Checkpoints must expect at least one file from the user
+        if (sym.declaredOutputs.length === 0) {
+          diagnostics.push(
+            createDiagnostic(
+              'CHECKPOINT_NO_OUTPUTS',
+              'warning',
+              `Checkpoint "${nodeId}" has no expected outputs. It should expect at least one file from the user.`,
+              { nodeId, field: 'config.outputs' },
+              'Add outputs that the user must provide at this checkpoint.',
+            ),
+          );
+        }
+
+        // Checkpoints should not have interrupts (they ARE the human interaction)
+        if (node.config.interrupts?.length) {
+          diagnostics.push(
+            createDiagnostic(
+              'CHECKPOINT_HAS_INTERRUPTS',
+              'warning',
+              `Checkpoint "${nodeId}" has interrupt configs. Checkpoints are already human interaction points.`,
+              { nodeId, field: 'config.interrupts' },
+              'Remove interrupt configs from checkpoint nodes.',
+            ),
+          );
+        }
+      }
     }
 
     return diagnostics;

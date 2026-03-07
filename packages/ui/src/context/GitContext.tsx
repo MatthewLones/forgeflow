@@ -59,9 +59,10 @@ export function useGit(): GitContextValue {
 interface GitProviderProps {
   projectId: string;
   children: ReactNode;
+  onFlowChanged?: () => void;
 }
 
-export function GitProvider({ projectId, children }: GitProviderProps) {
+export function GitProvider({ projectId, children, onFlowChanged }: GitProviderProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [branches, setBranches] = useState<GitBranch[]>([]);
@@ -167,12 +168,13 @@ export function GitProvider({ projectId, children }: GitProviderProps) {
       clearError();
       await api.git.pull(projectId);
       await refresh();
+      onFlowChanged?.();
     } catch (err: any) {
       setError(err.message || 'Failed to pull');
     } finally {
       setLoading(false);
     }
-  }, [projectId, refresh, clearError]);
+  }, [projectId, refresh, clearError, onFlowChanged]);
 
   // ── Reset ──
   const resetToCommit = useCallback(async (hash: string) => {
@@ -182,12 +184,13 @@ export function GitProvider({ projectId, children }: GitProviderProps) {
       await api.git.reset(projectId, hash);
       await refresh();
       await fetchLog();
+      onFlowChanged?.();
     } catch (err: any) {
       setError(err.message || 'Failed to reset');
     } finally {
       setLoading(false);
     }
-  }, [projectId, refresh, clearError]);
+  }, [projectId, refresh, clearError, onFlowChanged]);
 
   // ── Log ──
   const fetchLog = useCallback(async () => {
@@ -240,12 +243,13 @@ export function GitProvider({ projectId, children }: GitProviderProps) {
       await api.git.switchBranch(projectId, name);
       await refresh();
       await fetchBranches();
+      onFlowChanged?.();
     } catch (err: any) {
       setError(err.message || 'Failed to switch branch');
     } finally {
       setLoading(false);
     }
-  }, [projectId, refresh, fetchBranches, clearError]);
+  }, [projectId, refresh, fetchBranches, clearError, onFlowChanged]);
 
   // ── Remote ──
   const setRemote = useCallback(async (url: string) => {

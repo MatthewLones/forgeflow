@@ -57,7 +57,7 @@ describe('resolvePhaseIR', () => {
     expect(ir.outputs[0].file).toBe('parsed.json');
     expect(ir.skills).toHaveLength(2); // global-skill + extractor
     expect(ir.budget).toBeDefined();
-    expect(ir.rules).toHaveLength(4);
+    expect(ir.rules).toBeUndefined();
     expect(ir.children).toHaveLength(0);
   });
 

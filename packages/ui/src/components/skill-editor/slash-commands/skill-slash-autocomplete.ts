@@ -10,7 +10,6 @@ interface SkillBlockOption {
 
 const BLOCK_OPTIONS: SkillBlockOption[] = [
   { name: 'input', label: 'input', detail: 'Input file requirements' },
-  { name: 'decision', label: 'decision', detail: 'Decision tree / routing logic' },
 ];
 
 const INTERRUPT_TYPES = [
@@ -25,6 +24,7 @@ export interface SkillSlashOptions {
   skills: string[];
   files: string[];
   artifacts: string[];
+  artifactFolders?: string[];
   currentSkill: string;
   onCreateSkill?: (name: string) => void;
 }
@@ -37,8 +37,9 @@ export interface SkillSlashOptions {
  * - `@`  → file reference (inserts `@path/to/file.md`)
  * - `/`  → block commands (inserts fenced code block template)
  */
-export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills: [], files: [], artifacts: [], currentSkill: '' }) {
+export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills: [], files: [], artifacts: [], artifactFolders: [], currentSkill: '' }) {
   const { onCreateSkill } = opts;
+  const artifactFolders = opts.artifactFolders ?? [];
 
   return function skillSlashAutocomplete(context: CompletionContext): CompletionResult | null {
     // 0. Check for \ (artifact output declaration)
@@ -59,6 +60,19 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
             apply: `\\${a}`,
             detail: 'output artifact',
           }));
+
+        // Add folder options
+        for (const folder of artifactFolders) {
+          if (folder.toLowerCase().includes(query)) {
+            const count = opts.artifacts.filter((a) => a.startsWith(folder + '/')).length;
+            options.push({
+              label: folder,
+              type: 'property',
+              apply: `\\${folder}`,
+              detail: `folder (${count} artifact${count !== 1 ? 's' : ''})`,
+            });
+          }
+        }
 
         if (options.length > 0) {
           return { from: backslash.from, options, filter: false };
@@ -125,6 +139,19 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
         });
       }
 
+      // Artifact folder references (@folder_name → all artifacts in folder)
+      for (const folder of artifactFolders) {
+        if (folder.toLowerCase().includes(query)) {
+          const count = opts.artifacts.filter((a) => a.startsWith(folder + '/')).length;
+          options.push({
+            label: folder,
+            type: 'variable',
+            apply: `@${folder}`,
+            detail: `folder (${count} artifact${count !== 1 ? 's' : ''})`,
+          });
+        }
+      }
+
       if (options.length === 0) return null;
 
       return {
@@ -148,7 +175,7 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
 
     const options: Array<{ label: string; type: string; detail: string; apply: string | ((view: EditorView, _completion: Completion, from: number, to: number) => void) }> = [];
 
-    // Block commands (/output, /input, /decision)
+    // Block commands (/output, /input)
     for (const opt of BLOCK_OPTIONS) {
       if (opt.name.includes(query)) {
         options.push({

@@ -1,6 +1,5 @@
 import type {
   InputBlock,
-  DecisionBlock,
   SkillBlockType,
 } from './skill-block-types';
 
@@ -26,8 +25,6 @@ export function compileSkillContent(content: string): string {
     switch (type as SkillBlockType) {
       case 'input':
         return compileInputBlock(data as InputBlock);
-      case 'decision':
-        return compileDecisionBlock(data as DecisionBlock);
       default:
         return _match;
     }
@@ -43,20 +40,3 @@ function compileInputBlock(block: InputBlock): string {
 
   return `| Input | Format | Required | Description |\n|-------|--------|----------|-------------|\n${rows}`;
 }
-
-function compileDecisionBlock(block: DecisionBlock): string {
-  if (!block.rows?.length) return '';
-
-  const header = block.title ? `**${block.title}**\n\n` : '';
-  const rows = block.rows
-    .map((r) => {
-      const refs = r.references.length > 0
-        ? r.references.map((ref) => `\`${ref}\``).join(', ')
-        : '—';
-      return `| ${r.condition} | ${r.action} | ${refs} |`;
-    })
-    .join('\n');
-
-  return `${header}| Condition | Action | References |\n|-----------|--------|------------|\n${rows}`;
-}
-

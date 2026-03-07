@@ -109,15 +109,22 @@ export function PreRunPanel(props: IDockviewPanelProps<EditorTab>) {
     [],
   );
 
+  const [runError, setRunError] = useState<string | null>(null);
+
   const handleStartRun = useCallback(async () => {
     const allFiles = [
       ...Object.values(fileMap),
       ...extraFiles,
     ];
-    // Close pre-run tab, open run tab, start run
-    closeTab('pre-run');
-    openTab({ id: 'run', type: 'run', label: 'Run' });
-    await startRun(projectId, runner, allFiles);
+    setRunError(null);
+    try {
+      await startRun(projectId, runner, allFiles);
+      // Only close pre-run and open run tab on success
+      closeTab('pre-run');
+      openTab({ id: 'run', type: 'run', label: 'Run' });
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : 'Failed to start run');
+    }
   }, [fileMap, extraFiles, closeTab, openTab, startRun, projectId, runner]);
 
   const allRequiredFilled = resolvedInputs.every((input) => fileMap[input.name]);
@@ -185,6 +192,16 @@ export function PreRunPanel(props: IDockviewPanelProps<EditorTab>) {
           />
         )}
       </div>
+
+      {/* Validation error */}
+      {runError && (
+        <div className="mx-5 mb-0 px-4 py-3 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-start gap-2">
+            <span className="text-red-600 text-sm font-bold shrink-0">{'\u2717'}</span>
+            <div className="text-xs text-red-700 leading-relaxed">{runError}</div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-end gap-2 shrink-0">

@@ -1,4 +1,4 @@
-import type { CheckpointPresentation } from './node.js';
+import type { ArtifactSchema, CheckpointPresentation } from './node.js';
 import type { Interrupt } from './interrupt.js';
 
 // --- State Store ---
@@ -24,14 +24,35 @@ export interface RunState {
   startedAt: string;
   updatedAt: string;
   error?: string;
+  /** The phase that failed (set when status === 'failed') */
+  failedPhaseId?: string;
+}
+
+/** An individual file expected from the user at a checkpoint */
+export interface CheckpointExpectedFile {
+  /** Artifact filename expected from user */
+  fileName: string;
+  /** Whether this file has been provided */
+  provided: boolean;
+  /** ArtifactSchema for validation (if available) */
+  schema?: ArtifactSchema;
+  /** Validation errors for the provided content (empty = valid) */
+  validationErrors?: string[];
 }
 
 export interface CheckpointState {
   runId: string;
   checkpointNodeId: string;
-  status: 'waiting' | 'answered';
+  status: 'waiting' | 'partially_filled' | 'answered';
   presentFiles: string[];
-  waitingForFile: string;
+  /** Schemas for presented files (input artifacts), keyed by filename */
+  presentSchemas?: Record<string, ArtifactSchema>;
+  /** Ordered list of files expected from user */
+  expectedFiles: CheckpointExpectedFile[];
+  /** @deprecated Use expectedFiles instead. Kept for backward compat with old checkpoint.json. */
+  waitingForFile?: string;
+  /** Instructions text to display to the user at this checkpoint */
+  instructions?: string;
   completedPhases: string[];
   costSoFar: { turns: number; usd: number };
   presentation: CheckpointPresentation;
@@ -66,6 +87,8 @@ export type ProgressEvent =
   | { type: 'child_started'; childId: string; childName: string; parentPath: string[] }
   | { type: 'child_completed'; childId: string; childName: string; parentPath: string[]; outputFiles: string[] }
   | { type: 'file_written'; fileName: string; fileSize: number; nodeId: string }
+  // Subtask progress (agent reports via __PROGRESS__.json)
+  | { type: 'subtask_update'; nodeId: string; subtasks: Array<{ id: string; label: string; status: 'pending' | 'in_progress' | 'completed' }> }
   // Verbose: runner-level (emitted by AgentRunner implementations)
   | { type: 'tool_call'; nodeId: string; toolName: string; toolUseId: string; inputSummary: string; truncated: boolean; sequence: number }
   | { type: 'tool_result'; nodeId: string; toolName: string; toolUseId: string; outputSummary: string; truncated: boolean; isError: boolean; sequence: number }

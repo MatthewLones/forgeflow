@@ -12,9 +12,7 @@ export interface SlashAutocompleteOptions {
   onCreateSkill?: (name: string) => void;
 }
 
-const BLOCK_OPTIONS = [
-  { name: 'decision', label: 'decision', detail: 'Decision tree / routing logic' },
-];
+const BLOCK_OPTIONS: Array<{ name: string; label: string; detail: string }> = [];
 
 const INTERRUPT_TYPES = [
   { name: 'approval', detail: 'yes/no decision gate' },
@@ -170,7 +168,7 @@ export function createSlashAutocomplete({ skills, agents, artifacts, artifactFol
       const query = singleSlash.text.slice(1).toLowerCase();
       const options: Array<{ label: string; type: string; detail: string; apply: string | ((view: EditorView, _completion: Completion, from: number, to: number) => void) }> = [];
 
-      // Block commands (/decision)
+      // Block commands
       for (const opt of BLOCK_OPTIONS) {
         if (opt.name.includes(query)) {
           options.push({

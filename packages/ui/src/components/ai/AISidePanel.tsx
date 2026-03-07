@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { marked } from 'marked';
-import { useCopilot, type CopilotMessage, type CopilotToolCall, type TodoItem, type PendingQuestion, type ChatMeta } from '../../context/CopilotContext';
+import { useCopilot, type CopilotMessage, type CopilotToolCall, type PendingQuestion, type ChatMeta } from '../../context/CopilotContext';
+import { TodoWidget, type TodoItem } from '../shared/TodoWidget';
 import { useFlow } from '../../context/FlowContext';
 import { useProjectStore } from '../../context/ProjectStore';
 import { useLayout, type WorkspaceSelection } from '../../context/LayoutContext';
@@ -509,104 +510,6 @@ function ToolCallList({ toolCalls, verbosity }: { toolCalls: CopilotToolCall[]; 
           )}
         </div>
       ))}
-    </div>
-  );
-}
-
-/* ── Todo Widget ──────────────────────────────────────── */
-
-function TodoWidget({ todos, isActive }: { todos: TodoItem[]; isActive: boolean }) {
-  const completed = todos.filter((t) => t.status === 'completed').length;
-  const total = todos.length;
-  const allDone = completed === total;
-  const [collapsed, setCollapsed] = useState(false);
-
-  // Auto-collapse when all tasks complete and agent is idle
-  useEffect(() => {
-    if (allDone && !isActive) {
-      const timer = setTimeout(() => setCollapsed(true), 1200);
-      return () => clearTimeout(timer);
-    }
-    // Re-expand if new tasks arrive
-    if (!allDone) setCollapsed(false);
-  }, [allDone, isActive]);
-
-  return (
-    <div className={`rounded-lg border bg-[var(--color-canvas-bg)] transition-colors duration-300 ${
-      allDone ? 'border-green-200' : 'border-[var(--color-border)]'
-    }`}>
-      {/* Header — always visible, clickable to toggle */}
-      <button
-        type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50/50 transition-colors rounded-lg"
-      >
-        {/* Progress ring */}
-        <svg width="16" height="16" viewBox="0 0 16 16" className="shrink-0">
-          <circle
-            cx="8" cy="8" r="6" fill="none"
-            stroke="var(--color-border)" strokeWidth="2"
-          />
-          <circle
-            cx="8" cy="8" r="6" fill="none"
-            stroke={allDone ? '#16a34a' : '#2563eb'}
-            strokeWidth="2"
-            strokeDasharray={`${2 * Math.PI * 6}`}
-            strokeDashoffset={`${2 * Math.PI * 6 * (1 - completed / total)}`}
-            strokeLinecap="round"
-            className="transition-all duration-500"
-            style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%' }}
-          />
-          {allDone && (
-            <path d="M5 8l2 2 4-4" fill="none" stroke="#16a34a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          )}
-        </svg>
-        <span className="text-[10px] font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
-          Tasks
-        </span>
-        <span className={`text-[10px] font-mono ${allDone ? 'text-green-600' : 'text-[var(--color-text-muted)]'}`}>
-          {completed}/{total}
-        </span>
-        <span className={`ml-auto text-[9px] text-[var(--color-text-muted)] transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}>
-          ▾
-        </span>
-      </button>
-
-      {/* Task list — collapsible */}
-      {!collapsed && (
-        <div className="px-3 pb-2 space-y-0.5">
-          {todos.map((todo, i) => (
-            <div
-              key={i}
-              className={`flex items-start gap-1.5 text-[11px] py-0.5 transition-opacity duration-300 ${
-                todo.status === 'completed' ? 'opacity-60' : 'opacity-100'
-              }`}
-            >
-              <span className="shrink-0 mt-0.5 w-3 flex items-center justify-center">
-                {todo.status === 'completed' ? (
-                  <svg width="12" height="12" viewBox="0 0 12 12">
-                    <circle cx="6" cy="6" r="5" fill="#dcfce7" stroke="#16a34a" strokeWidth="1" />
-                    <path d="M3.5 6l2 2 3-3.5" fill="none" stroke="#16a34a" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                ) : todo.status === 'in_progress' ? (
-                  <span className="w-3 h-3 inline-block border-[1.5px] border-blue-500 border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <span className="w-2.5 h-2.5 inline-block rounded-full border border-gray-300" />
-                )}
-              </span>
-              <span className={`leading-snug ${
-                todo.status === 'completed'
-                  ? 'text-[var(--color-text-muted)] line-through'
-                  : todo.status === 'in_progress'
-                    ? 'text-[var(--color-text-primary)] font-medium'
-                    : 'text-[var(--color-text-secondary)]'
-              }`}>
-                {todo.status === 'in_progress' ? todo.activeForm : todo.content}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

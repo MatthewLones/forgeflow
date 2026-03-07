@@ -22,13 +22,16 @@ import { useParams } from 'react-router-dom';
 import { ValidationPanel } from './ValidationPanel';
 import { CompilePreviewPanel } from './CompilePreviewPanel';
 import { OutputViewer } from './OutputViewer';
+import { ReviewPanel } from './ReviewPanel';
+import { RunPanel } from './RunPanel';
+import { PreRunPanel } from './PreRunInputDialog';
 import { SkillBottomPanel } from './SkillBottomPanel';
 
 /* ── Panel components ─────────────────────────────────────── */
 
 function AgentEditorPanel(props: IDockviewPanelProps<EditorTab>) {
   const params = props.params;
-  const { selectNode } = useFlow();
+  const { selectNode, state } = useFlow();
 
   // Sync flow selection when this panel becomes active
   useEffect(() => {
@@ -41,13 +44,15 @@ function AgentEditorPanel(props: IDockviewPanelProps<EditorTab>) {
   }, [props.api, params.nodeId, selectNode]);
 
   if (!params.nodeId) return null;
-  return <AgentEditor key={params.nodeId} nodeId={params.nodeId} />;
+  // flowVersion in key forces remount when flow is replaced (e.g. git reset/pull)
+  return <AgentEditor key={`${params.nodeId}-v${state.flowVersion}`} nodeId={params.nodeId} />;
 }
 
 function SkillEditorPanel(props: IDockviewPanelProps<EditorTab>) {
   const params = props.params;
   const { id: projectId } = useParams<{ id: string }>();
   const { skillData, loadSkill } = useProjectStore();
+  const { state: flowState } = useFlow();
   const [loading, setLoading] = useState(false);
 
   const skillName = params.skillName;
@@ -84,7 +89,8 @@ function SkillEditorPanel(props: IDockviewPanelProps<EditorTab>) {
   }
 
   return (
-    <SkillProvider initialState={{ ...data, selectedFilePath: 'SKILL.md', dirty: false }}>
+    // flowVersion in key forces remount when flow is replaced (e.g. git reset/pull)
+    <SkillProvider key={`${skillName}-v${flowState.flowVersion}`} initialState={{ ...data, selectedFilePath: 'SKILL.md', dirty: false }}>
       <SkillEditorContent skillName={skillName} projectId={projectId} />
     </SkillProvider>
   );
@@ -148,6 +154,19 @@ function SkillEditorContent({ skillName, projectId }: { skillName: string; proje
   const skillNames = useMemo(() => skills.map((s) => s.name), [skills]);
   const filePaths = useMemo(() => state.files.map((f) => f.path), [state.files]);
   const artifactNames = useMemo(() => Object.keys(flowState.flow.artifacts ?? {}), [flowState.flow.artifacts]);
+  const artifactFolders = useMemo(() => {
+    const folders = new Set<string>();
+    for (const name of artifactNames) {
+      const parts = name.split('/');
+      for (let i = 1; i < parts.length; i++) {
+        folders.add(parts.slice(0, i).join('/'));
+      }
+    }
+    for (const f of flowState.flow.artifactFolders ?? []) {
+      folders.add(f);
+    }
+    return [...folders];
+  }, [artifactNames, flowState.flow.artifactFolders]);
 
   const handleClickArtifact = useCallback(
     (name: string) => selectArtifact(name),
@@ -292,6 +311,7 @@ function SkillEditorContent({ skillName, projectId }: { skillName: string; proje
             skills={skillNames}
             files={filePaths}
             artifacts={artifactNames}
+            artifactFolders={artifactFolders}
             currentSkill={skillName}
             onCreateSkill={handleCreateSkill}
             onClickSkill={handleClickSkill}
@@ -373,6 +393,9 @@ const components = {
   'validation-panel': ValidationPanel,
   'compile-panel': CompilePreviewPanel,
   'output-viewer': OutputViewer,
+  'review-panel': ReviewPanel,
+  'run-panel': RunPanel,
+  'pre-run-panel': PreRunPanel,
   'empty': EmptyPanel,
 };
 
@@ -380,6 +403,7 @@ const components = {
 
 const TYPE_DOT_COLORS: Record<string, string> = {
   agent: 'bg-[var(--color-node-agent)]',
+  checkpoint: 'bg-[var(--color-node-checkpoint)]',
   skill: 'bg-emerald-500',
   reference: 'bg-[var(--color-node-checkpoint)]',
   artifact: 'bg-purple-500',
@@ -389,16 +413,34 @@ const TYPE_DOT_COLORS: Record<string, string> = {
   output: 'bg-gray-500',
   'run-history': 'bg-blue-400',
   'pre-run': 'bg-emerald-500',
+  review: 'bg-amber-500',
 };
 
 function ForgeFlowTab(props: IDockviewPanelHeaderProps<EditorTab>) {
   const params = props.params;
   const tabType = params?.type ?? 'agent';
-  const dotColor = TYPE_DOT_COLORS[tabType] ?? TYPE_DOT_COLORS.agent;
 
-  // Build tooltip from available context
+  // Build tooltip from available context and resolve node type for dot color
   const { state } = useFlow();
   const { skills } = useProjectStore();
+
+  const nodeType = useMemo(() => {
+    if (tabType === 'agent' && params?.nodeId) {
+      const findNode = (nodes: FlowNode[], id: string): FlowNode | null => {
+        for (const n of nodes) {
+          if (n.id === id) return n;
+          const found = findNode(n.children, id);
+          if (found) return found;
+        }
+        return null;
+      };
+      return findNode(state.flow.nodes, params.nodeId)?.type ?? 'agent';
+    }
+    return tabType;
+  }, [tabType, params?.nodeId, state.flow.nodes]);
+
+  const dotColor = TYPE_DOT_COLORS[nodeType] ?? TYPE_DOT_COLORS.agent;
+
   const tooltip = useMemo(() => {
     if (tabType === 'agent' && params?.nodeId) {
       const findNode = (nodes: FlowNode[], id: string): FlowNode | null => {

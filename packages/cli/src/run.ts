@@ -6,8 +6,8 @@ import {
   FlowOrchestrator,
   MockRunner,
   ClaudeAgentRunner,
-  DockerAgentRunner,
 } from '@forgeflow/engine';
+import { DockerAgentRunner } from '@forgeflow/engine/docker';
 import type { AgentRunner, MockBehavior } from '@forgeflow/engine';
 import type { StateFile, ProgressEvent } from '@forgeflow/types';
 import { createCliInterruptHandler } from './interrupt-handler.js';

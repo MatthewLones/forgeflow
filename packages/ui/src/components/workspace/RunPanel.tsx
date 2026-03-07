@@ -1,12 +1,13 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import type { EditorTab } from '../../context/LayoutContext';
 import { useLayout } from '../../context/LayoutContext';
-import type { ProgressEvent, CheckpointState } from '@forgeflow/types';
+import type { ProgressEvent, ReviewInterrupt } from '@forgeflow/types';
 import { useRun } from '../../context/RunContext';
 import { useParams } from 'react-router-dom';
 import { InterruptBanner } from './InterruptBanner';
-import { CheckpointBanner } from './CheckpointBanner';
+import { TodoWidget } from '../shared/TodoWidget';
+import { derivePhaseTodos } from '../../lib/derive-phase-todos';
 
 /* ── Status config ─────────────────────────────────────── */
 
@@ -22,8 +23,11 @@ const STATUS_CONFIG = {
 /* ── Main panel ────────────────────────────────────────── */
 
 export function RunPanel(_props: IDockviewPanelProps<EditorTab>) {
-  const { run, answerInterrupt } = useRun();
+  const { run, answerInterrupt, pendingCheckpoint } = useRun();
+  const { openTab } = useLayout();
   const { id: projectId } = useParams<{ id: string }>();
+
+  const phaseTodos = useMemo(() => derivePhaseTodos(run.events), [run.events]);
 
   if (run.status === 'idle') {
     return (
@@ -33,19 +37,51 @@ export function RunPanel(_props: IDockviewPanelProps<EditorTab>) {
     );
   }
 
-  // Find the latest checkpoint event for the checkpoint banner
-  const lastCheckpoint = run.status === 'awaiting_input'
-    ? [...run.events].reverse().find((e): e is ProgressEvent & { type: 'checkpoint' } => e.type === 'checkpoint')
-    : null;
+  const isReviewInterrupt = run.pendingInterrupt?.type === 'review';
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <RunHeader />
-      {run.pendingInterrupt && (
-        <InterruptBanner interrupt={run.pendingInterrupt} onSubmit={answerInterrupt} />
+      {phaseTodos.length > 0 && (
+        <div className="shrink-0 px-3 py-2 border-b border-[var(--color-border)]">
+          <TodoWidget todos={phaseTodos} isActive={run.status === 'running'} />
+        </div>
       )}
-      {lastCheckpoint && !run.pendingInterrupt && projectId && (
-        <CheckpointBanner projectId={projectId} checkpoint={lastCheckpoint.checkpoint} />
+      {run.pendingInterrupt && isReviewInterrupt && run.runId && (
+        <ReviewNotificationBar
+          interrupt={run.pendingInterrupt as ReviewInterrupt}
+          runId={run.runId}
+          onOpenReview={() => {
+            openTab({
+              id: `review-${run.pendingInterrupt!.interrupt_id}`,
+              type: 'review',
+              label: `Review: ${run.pendingInterrupt!.title}`,
+              interruptData: {
+                interrupt: run.pendingInterrupt as ReviewInterrupt,
+                runId: run.runId!,
+              },
+            });
+          }}
+        />
+      )}
+      {run.pendingInterrupt && !isReviewInterrupt && (
+        <InterruptBanner interrupt={run.pendingInterrupt} onSubmit={answerInterrupt} runId={run.runId ?? undefined} />
+      )}
+      {pendingCheckpoint && !run.pendingInterrupt && projectId && run.runId && (
+        <a
+          href={`/projects/${projectId}/runs/${run.runId}/checkpoint`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-amber-300 bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer"
+        >
+          <span className="animate-pulse w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+          <span className="text-[11px] font-semibold text-amber-800 truncate">
+            Checkpoint: {pendingCheckpoint.checkpoint.presentation?.title ?? pendingCheckpoint.checkpoint.checkpointNodeId}
+          </span>
+          <span className="ml-auto text-[10px] text-amber-600 shrink-0">
+            Open &rarr;
+          </span>
+        </a>
       )}
       <EventList events={run.events} runId={run.runId} />
     </div>
@@ -55,9 +91,23 @@ export function RunPanel(_props: IDockviewPanelProps<EditorTab>) {
 /* ── Header ────────────────────────────────────────────── */
 
 function RunHeader() {
-  const { run } = useRun();
+  const { run, retryRun } = useRun();
+  const { id: projectId } = useParams<{ id: string }>();
+  const [retrying, setRetrying] = useState(false);
   const config = STATUS_CONFIG[run.status];
   const phaseCount = run.completedPhases.length + (run.currentPhaseId ? 1 : 0);
+
+  const handleRetry = useCallback(async () => {
+    if (!projectId || retrying) return;
+    setRetrying(true);
+    try {
+      await retryRun(projectId, 'local');
+    } catch (err) {
+      console.error('[RunPanel] retry failed:', err);
+    } finally {
+      setRetrying(false);
+    }
+  }, [projectId, retrying, retryRun]);
 
   return (
     <div className="shrink-0 flex items-center gap-3 px-4 py-2.5 border-b border-[var(--color-border)] bg-white">
@@ -67,6 +117,17 @@ function RunHeader() {
           {config.label}
         </span>
       </div>
+
+      {run.status === 'failed' && projectId && (
+        <button
+          type="button"
+          onClick={handleRetry}
+          disabled={retrying}
+          className="px-2.5 py-1 text-[10px] font-medium bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 transition-colors"
+        >
+          {retrying ? 'Retrying...' : 'Retry Failed Phase'}
+        </button>
+      )}
 
       {run.reconnecting && (
         <span className="text-[10px] font-medium text-amber-500 animate-pulse">
@@ -277,6 +338,37 @@ function EventItem({ event, onFileClick }: { event: ProgressEvent; onFileClick: 
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ── Review notification bar ───────────────────────────── */
+
+function ReviewNotificationBar({
+  interrupt,
+  runId: _runId,
+  onOpenReview,
+}: {
+  interrupt: ReviewInterrupt;
+  runId: string;
+  onOpenReview: () => void;
+}) {
+  return (
+    <div className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-amber-300 bg-amber-50">
+      <div className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+      <span className="text-xs font-medium text-amber-800 truncate">
+        Review requested: {interrupt.title}
+      </span>
+      <span className="text-[10px] font-mono text-amber-600 truncate">
+        {interrupt.draftFile}
+      </span>
+      <button
+        type="button"
+        onClick={onOpenReview}
+        className="ml-auto shrink-0 text-xs font-medium px-3 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+      >
+        Open Review
+      </button>
     </div>
   );
 }

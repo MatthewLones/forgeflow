@@ -9,7 +9,7 @@ const nodeBudgetSchema = z.object({
 
 const checkpointPresentationSchema = z.object({
   title: z.string().min(1),
-  sections: z.array(z.string().min(1)).min(1),
+  sections: z.array(z.string().min(1)),
 });
 
 const interruptConfigSchema = z.object({

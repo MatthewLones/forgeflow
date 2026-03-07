@@ -157,6 +157,19 @@ export function EventStream({
     }
   }, [events.length, pinToBottom]);
 
+  // Re-pin to bottom when container is resized (e.g. dragging panel handle)
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      if (pinToBottom) {
+        el.scrollTop = el.scrollHeight;
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [pinToBottom]);
+
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;

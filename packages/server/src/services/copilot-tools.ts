@@ -37,7 +37,20 @@ Each node runs in its **own isolated container**. State is serialized between ev
 ### 1. Nodes (Work Units)
 Two types:
 - **agent** (default, 95% of nodes): Runs Claude Code in a sandbox. Does actual work. Can have children, skills, interrupts, budgets.
-- **checkpoint** (rare, ~5%): Pauses execution for human input. Use ONLY for major decision gates where a human must review and provide structured input before proceeding. Checkpoints have zero cost while waiting. Requires \`presentation\` config. NEVER use checkpoint as a default — almost all nodes should be \`agent\`.
+- **checkpoint** (rare, ~5%): A formal human handoff point in the DAG. Checkpoints can expect **multiple files** from the user, each with schema validation. When the orchestrator reaches a checkpoint:
+  1. **Optional LLM generation**: If the checkpoint has non-empty \`instructions\`, the LLM runs first to generate presentation content (summaries, reports, forms) from those instructions + available input artifacts. This step is optional — leave instructions empty for a simple pass-through pause.
+  2. **Presents** the checkpoint's input files (from prior phases) to the human user
+  3. **Pauses** with status \`awaiting_input\` — zero cost while waiting
+  4. **Waits** for the human to provide ALL expected output files. Each file is validated against its schema before resume is allowed.
+  5. **Resumes** the DAG from the next phase once all files are submitted and valid
+
+  Checkpoint \`instructions\` serve two purposes depending on content:
+  - **If non-empty**: LLM prompt for generating checkpoint content (treated like agent instructions)
+  - **If empty**: No LLM runs, checkpoint is a pure pause point
+
+  Checkpoints can expect **multiple output files** (not just one). Each output can have an artifact schema with format and field validation. The user must provide ALL expected files before resume is allowed.
+
+  Requires \`presentation\` config with a \`title\` string. Can be placed mid-flow (between agents) or as a terminal deliverable. NEVER use checkpoint as a default — almost all nodes should be \`agent\`.
 
 ### 2. Skills (Reusable Knowledge — Composable Abstraction Tree)
 Directory structure: \`skills/{name}/SKILL.md\` + optional \`references/\` folder.
@@ -109,21 +122,23 @@ Hovering over any chip (agent, skill, artifact, interrupt) in the IDE shows a to
 \`\`\`
 
 ### Checkpoint Node (rare — for major gates only)
+A checkpoint pauses execution and shows data to a human. The \`instructions\` field is displayed to the USER — write it for a human reader, not an AI.
 \`\`\`json
 {
   "id": "partner_review",
   "type": "checkpoint",
   "name": "Partner Review",
-  "instructions": "Present risk assessment to investment partner for go/no-go decision.",
+  "instructions": "The risk assessment is complete. Review the risk matrix and provide your investment decision.\\n\\nPlease provide a JSON file with: decision (go/no_go/conditional), conditions (if any), and notes.",
   "config": {
     "inputs": ["risk_matrix"],
     "outputs": ["partner_decisions"],
     "skills": [],
-    "presentation": { "title": "Risk Assessment Complete", "sections": ["financial_risk", "legal_risk", "recommendation"] }
+    "presentation": { "title": "Risk Assessment Complete — Review Required", "sections": [] }
   },
   "children": []
 }
 \`\`\`
+**Note:** \`presentation.title\` is shown as the checkpoint header in the UI. \`presentation.sections\` is reserved for future use (e.g., structured review panels) — leave it as an empty array for now.
 
 ### Parent with Children (Parallel Sub-agents)
 Use children when a node needs to coordinate parallel research streams. The parent aggregates; children do focused work.
@@ -198,8 +213,8 @@ Types:
 - Just writing \`/interrupt:review\` alone on a line with no context
 
 **When to use interrupts vs checkpoints:**
-- **Interrupts**: Lightweight pause within an agent's work. The agent can continue after the human responds. Use for quality checks, approvals, decisions mid-workflow.
-- **Checkpoints**: Full execution stop. The sandbox is torn down. Use for major handoff points where a human needs time to review thoroughly before the workflow proceeds to a completely different phase.
+- **Interrupts**: Lightweight pause INSIDE an agent's sandbox. The agent's container stays alive while the human responds, then the agent continues working. Written as slash commands in agent instructions (\`/interrupt:type\`). The AGENT decides when to fire them. Use for quality checks, approvals, and quick decisions mid-work.
+- **Checkpoints**: A separate node in the DAG — NO agent runs, no sandbox, no LLM. The orchestrator pauses the entire workflow and shows data to the human. The human provides a file, then the next phase starts in a fresh container. Use for major handoff points where a human needs time (hours/days) to review before the workflow continues. Checkpoint \`instructions\` are written for the HUMAN USER to read.
 
 ## Artifact Naming & Schemas
 - Artifact names are plain snake_case (NO file extensions): \`risk_matrix\`, \`investment_memo\`, \`clauses_parsed\`
@@ -241,12 +256,13 @@ Types:
 
 ## Artifact Folders
 Artifacts can be organized into folders using \`/\` in the name: \`reports/risk_matrix\`, \`analysis/financial/projections\`.
-- In agent instructions, \`\\folder_name\` produces ALL artifacts in that folder, \`@folder_name\` consumes ALL
+- **Folder references expand automatically at runtime**: \`\\reports\` in instructions expands to produce ALL artifacts inside \`reports/\` (e.g., \`reports/risk_matrix\`, \`reports/executive_summary\`). Same for \`@reports\` — consumes ALL artifacts in the folder.
 - Individual artifacts within folders work normally: \`\\reports/risk_matrix\`, \`@reports/summary\`
 - Folder names cannot collide with artifact names (e.g., you cannot have both \`reports\` and \`reports/risk_matrix\`)
 - At runtime, folder artifacts map to real filesystem directories: \`\\reports/risk_matrix\` → \`workspace/output/reports/risk_matrix\`
 - Use folders to group related artifacts (e.g., all financial reports, all research data tables)
 - Folders are created in the sidebar, not via slash commands. The slash command autocomplete shows both individual artifacts and folders.
+- When the user references a folder with \`@folder\` or \`\\folder\`, the system automatically expands it to all individual artifacts in that folder for config.inputs/config.outputs. This means a single folder reference handles all contained artifacts — no need to list each one.
 
 Example with folders:
 \`\`\`json
@@ -258,6 +274,7 @@ Example with folders:
 \`\`\`
 
 In instructions: "Consume all research data using @data and produce the final deliverables in \\reports"
+This expands to config.inputs: ["data/financials"] and config.outputs: ["reports/risk_matrix", "reports/executive_summary"]
 
 ## Budget Guidelines
 - Flow-level budget is required (sum of all phases)

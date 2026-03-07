@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { validateFlow, validateFlowDetailed, buildFlowGraph } from '@forgeflow/validator';
-import { compilePhase, compileChildPrompts } from '@forgeflow/compiler';
+import { compilePhase, compileChildPrompts, FORGEFLOW_PHASE_SYSTEM_PROMPT } from '@forgeflow/compiler';
 import type { FlowDefinition, ArtifactSchema } from '@forgeflow/types';
 import { ProjectStore } from '../services/project-store.js';
 
@@ -23,9 +23,13 @@ router.post('/validate', (req, res) => {
 });
 
 // POST /api/compile/preview — preview compiled prompts for all phases
-router.post('/compile/preview', (req, res) => {
+router.post('/compile/preview', async (req, res) => {
   try {
-    const flow = req.body as FlowDefinition;
+    // Accept { flow, projectId? } or bare FlowDefinition for backward compat
+    const body = req.body as { flow?: FlowDefinition; projectId?: string } | FlowDefinition;
+    const flow = ('flow' in body && body.flow) ? body.flow : body as FlowDefinition;
+    const projectId = ('projectId' in body) ? body.projectId : undefined;
+
     if (!flow || !flow.id || !flow.nodes) {
       res.status(400).json({ error: 'Valid FlowDefinition is required' });
       return;
@@ -69,7 +73,31 @@ router.post('/compile/preview', (req, res) => {
       };
     });
 
-    res.json({ valid: true, phases });
+    // Resolve skill content if projectId is provided
+    let skills: Array<{ name: string; files: Array<{ path: string; content: string }> }> | undefined;
+    if (projectId) {
+      const allSkillNames = [...new Set([...flow.skills, ...flow.nodes.flatMap((n) => n.config.skills)])];
+      if (allSkillNames.length > 0) {
+        skills = [];
+        for (const name of allSkillNames) {
+          try {
+            const skillState = await store.getSkill(projectId, name);
+            if (skillState) {
+              skills.push({ name: skillState.skillName, files: skillState.files });
+            }
+          } catch {
+            // Skip skills that fail to load
+          }
+        }
+      }
+    }
+
+    res.json({
+      valid: true,
+      systemPrompt: FORGEFLOW_PHASE_SYSTEM_PROMPT,
+      skills,
+      phases,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Compilation failed unexpectedly' });
   }

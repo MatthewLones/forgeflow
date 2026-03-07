@@ -3,7 +3,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { WidgetType, type EditorView } from '@codemirror/view';
 import type { SkillBlockType, SkillBlockData } from '../../../lib/skill-block-types';
 import { InputTableWidget } from './InputTableWidget';
-import { DecisionTreeWidget } from './DecisionTreeWidget';
 import { buildFencedBlock } from './block-templates';
 
 const FENCED_BLOCK_RE = /```forgeflow:([\w-]+)\n([\s\S]*?)```/g;
@@ -147,5 +146,4 @@ export class SkillBlockWidget extends WidgetType {
 /** Map block types to their React widget components. */
 const WIDGET_MAP: Partial<Record<SkillBlockType, React.FC<{ data: any; onChange: (data: any) => void }>>> = {
   input: InputTableWidget,
-  decision: DecisionTreeWidget,
 };

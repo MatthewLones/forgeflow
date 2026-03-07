@@ -7,13 +7,25 @@ import {
   useMemo,
   type ReactNode,
 } from 'react';
-import type { ProgressEvent, Interrupt, InterruptAnswer } from '@forgeflow/types';
+import type { ProgressEvent, Interrupt, InterruptAnswer, CheckpointState } from '@forgeflow/types';
 import { api } from '../lib/api-client';
 
 /* ── Types ─────────────────────────────────────────────── */
 
 export type NodeRunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'waiting';
 type RunnerType = 'mock' | 'local' | 'docker';
+
+export interface InterruptHistoryEntry {
+  interrupt: Interrupt;
+  answer?: InterruptAnswer;
+  status: 'pending' | 'answered' | 'escalated';
+}
+
+export interface CheckpointHistoryEntry {
+  checkpoint: CheckpointState;
+  answeredFiles?: Array<{ fileName: string }>;
+  status: 'pending' | 'answered';
+}
 
 interface RunState {
   status: 'idle' | 'starting' | 'running' | 'awaiting_input' | 'completed' | 'failed';
@@ -25,6 +37,10 @@ interface RunState {
   totalCost: { turns: number; usd: number };
   error: string | null;
   pendingInterrupt: Interrupt | null;
+  /** Stored answers keyed by interrupt_id, for history display */
+  interruptAnswers: Record<string, InterruptAnswer>;
+  /** Stored checkpoint answers keyed by checkpointNodeId */
+  checkpointAnswers: Record<string, Array<{ fileName: string }>>;
   reconnecting: boolean;
   /** Timestamp (ms) when the run started, used for elapsed timer */
   startedAt: number | null;
@@ -36,7 +52,8 @@ type RunAction =
   | { type: 'RUN_STARTED'; runId: string }
   | { type: 'SSE_EVENT'; event: ProgressEvent }
   | { type: 'RUN_FINISHED'; status: 'completed' | 'failed' }
-  | { type: 'INTERRUPT_ANSWERED' }
+  | { type: 'INTERRUPT_ANSWERED'; interruptId: string; answer: InterruptAnswer }
+  | { type: 'CHECKPOINT_ANSWERED'; checkpointNodeId: string; fileNames: string[] }
   | { type: 'SSE_DISCONNECTED' }
   | { type: 'SSE_RECONNECTED' }
   | { type: 'RESET' };
@@ -53,6 +70,8 @@ const initialState: RunState = {
   totalCost: { turns: 0, usd: 0 },
   error: null,
   pendingInterrupt: null,
+  interruptAnswers: {},
+  checkpointAnswers: {},
   reconnecting: false,
   startedAt: null,
 };
@@ -131,7 +150,20 @@ function runReducer(state: RunState, action: RunAction): RunState {
       };
 
     case 'INTERRUPT_ANSWERED':
-      return { ...state, pendingInterrupt: null };
+      return {
+        ...state,
+        pendingInterrupt: null,
+        interruptAnswers: { ...state.interruptAnswers, [action.interruptId]: action.answer },
+      };
+
+    case 'CHECKPOINT_ANSWERED':
+      return {
+        ...state,
+        checkpointAnswers: {
+          ...state.checkpointAnswers,
+          [action.checkpointNodeId]: action.fileNames.map((f) => ({ fileName: f })),
+        },
+      };
 
     case 'SSE_DISCONNECTED':
       return { ...state, reconnecting: true };
@@ -152,7 +184,7 @@ function runReducer(state: RunState, action: RunAction): RunState {
 const SSE_EVENT_TYPES = [
   'phase_started', 'phase_completed', 'phase_failed',
   'checkpoint', 'interrupt', 'cost_update', 'run_completed',
-  'child_started', 'child_completed', 'file_written',
+  'child_started', 'child_completed', 'file_written', 'subtask_update',
   'message', 'resume', 'escalation_timeout', 'interrupt_answered',
   // Verbose events
   'tool_call', 'tool_result', 'text_block',
@@ -164,11 +196,16 @@ const SSE_EVENT_TYPES = [
 
 interface RunContextValue {
   run: RunState;
+  interruptHistory: InterruptHistoryEntry[];
+  checkpointHistory: CheckpointHistoryEntry[];
+  pendingCheckpoint: (ProgressEvent & { type: 'checkpoint' }) | null;
   startRun: (projectId: string, runner?: RunnerType, files?: File[], model?: string) => Promise<void>;
   stopRun: () => void;
   resetRun: () => void;
   answerInterrupt: (answer: InterruptAnswer) => Promise<void>;
-  resumeFromCheckpoint: (projectId: string, fileName: string, content: string, runner?: RunnerType) => Promise<void>;
+  resumeFromCheckpoint: (projectId: string, files: Array<{ fileName: string; content: string }>, runner?: RunnerType) => Promise<void>;
+  /** Retry a failed run from the phase that failed */
+  retryRun: (projectId: string, runner?: RunnerType) => Promise<void>;
   /** Attach to an existing run (replays events via SSE) */
   connectToRun: (runId: string) => void;
 }
@@ -297,10 +334,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
   }, [cleanupSSE]);
 
   const answerInterrupt = useCallback(async (answer: InterruptAnswer) => {
-    if (!state.runId) return;
+    if (!state.runId || !state.pendingInterrupt) return;
+    const interruptId = state.pendingInterrupt.id;
     await api.runs.answerInterrupt(state.runId, answer);
-    dispatch({ type: 'INTERRUPT_ANSWERED' });
-  }, [state.runId]);
+    dispatch({ type: 'INTERRUPT_ANSWERED', interruptId, answer });
+  }, [state.runId, state.pendingInterrupt]);
 
   const connectToRun = useCallback((runId: string) => {
     cleanupSSE();
@@ -312,22 +350,80 @@ export function RunProvider({ children }: { children: ReactNode }) {
 
   const resumeFromCheckpoint = useCallback(async (
     projectId: string,
-    fileName: string,
-    content: string,
+    files: Array<{ fileName: string; content: string }>,
     runner: RunnerType = 'mock',
   ) => {
+    if (!state.runId) return;
+    // Find the checkpoint node ID from the last checkpoint event before dispatching
+    const lastCpEvent = [...state.events].reverse().find((e) => e.type === 'checkpoint');
+    const checkpointNodeId = lastCpEvent?.type === 'checkpoint' ? lastCpEvent.checkpoint.checkpointNodeId : null;
+
+    cleanupSSE();
+    eventCountRef.current = 0;
+    doneReceivedRef.current = false;
+    const { runId } = await api.runs.resume(state.runId, projectId, files, runner);
+
+    if (checkpointNodeId) {
+      dispatch({ type: 'CHECKPOINT_ANSWERED', checkpointNodeId, fileNames: files.map((f) => f.fileName) });
+    }
+    dispatch({ type: 'RUN_STARTED', runId });
+    subscribeSSE(runId);
+  }, [state.runId, state.events, cleanupSSE, subscribeSSE]);
+
+  const retryRun = useCallback(async (projectId: string, runner: RunnerType = 'mock') => {
     if (!state.runId) return;
     cleanupSSE();
     eventCountRef.current = 0;
     doneReceivedRef.current = false;
-    const { runId } = await api.runs.resume(state.runId, projectId, fileName, content, runner);
+    const { runId } = await api.runs.retry(state.runId, projectId, runner);
     dispatch({ type: 'RUN_STARTED', runId });
     subscribeSSE(runId);
   }, [state.runId, cleanupSSE, subscribeSSE]);
 
+  const interruptHistory = useMemo<InterruptHistoryEntry[]>(() => {
+    const entries: InterruptHistoryEntry[] = [];
+    for (const event of state.events) {
+      if (event.type === 'interrupt') {
+        const interrupt = event.interrupt;
+        const answer = state.interruptAnswers[interrupt.id];
+        if (!answer) continue; // Only include answered interrupts in history
+        entries.push({
+          interrupt,
+          answer,
+          status: 'answered',
+        });
+      }
+    }
+    return entries;
+  }, [state.events, state.interruptAnswers]);
+
+  const checkpointHistory = useMemo<CheckpointHistoryEntry[]>(() => {
+    const entries: CheckpointHistoryEntry[] = [];
+    for (const event of state.events) {
+      if (event.type === 'checkpoint') {
+        const cp = event.checkpoint;
+        const answered = state.checkpointAnswers[cp.checkpointNodeId];
+        if (!answered) continue; // Only include answered checkpoints in history
+        entries.push({
+          checkpoint: cp,
+          answeredFiles: answered,
+          status: 'answered',
+        });
+      }
+    }
+    return entries;
+  }, [state.events, state.checkpointAnswers]);
+
+  const pendingCheckpoint = useMemo(() => {
+    if (state.status !== 'awaiting_input') return null;
+    return [...state.events].reverse().find(
+      (e): e is ProgressEvent & { type: 'checkpoint' } => e.type === 'checkpoint',
+    ) ?? null;
+  }, [state.status, state.events]);
+
   const value = useMemo<RunContextValue>(
-    () => ({ run: state, startRun, stopRun, resetRun, answerInterrupt, resumeFromCheckpoint, connectToRun }),
-    [state, startRun, stopRun, resetRun, answerInterrupt, resumeFromCheckpoint, connectToRun],
+    () => ({ run: state, interruptHistory, checkpointHistory, pendingCheckpoint, startRun, stopRun, resetRun, answerInterrupt, resumeFromCheckpoint, retryRun, connectToRun }),
+    [state, interruptHistory, checkpointHistory, pendingCheckpoint, startRun, stopRun, resetRun, answerInterrupt, resumeFromCheckpoint, retryRun, connectToRun],
   );
 
   return (

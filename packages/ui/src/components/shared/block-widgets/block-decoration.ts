@@ -7,7 +7,7 @@ import { StateField, type Transaction, RangeSetBuilder } from '@codemirror/state
 import type { SkillBlockType, SkillBlockData } from '../../../lib/skill-block-types';
 import { SkillBlockWidget } from './WidgetPortal';
 
-const BLOCK_TYPES = new Set<string>(['input', 'decision']);
+const BLOCK_TYPES = new Set<string>(['input']);
 
 /**
  * Regex matching a forgeflow fenced code block across multiple lines.

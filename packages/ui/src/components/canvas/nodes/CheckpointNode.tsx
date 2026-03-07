@@ -50,9 +50,19 @@ export const CheckpointNode = memo(function CheckpointNode({ data, selected }: N
       </div>
 
       {/* Body */}
-      <div className="px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+      <div className="px-3 py-2 text-xs text-[var(--color-text-secondary)] space-y-1">
         {title && <div className="truncate">{title}</div>}
         {!title && <div className="text-[var(--color-text-muted)] italic">Human review point</div>}
+
+        {/* I/O summary */}
+        <div className="flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
+          {node.config.inputs.length > 0 && (
+            <span>Shows {node.config.inputs.length} file{node.config.inputs.length !== 1 ? 's' : ''}</span>
+          )}
+          {node.config.outputs.length > 0 && (
+            <span>Expects {node.config.outputs.length} file{node.config.outputs.length !== 1 ? 's' : ''}</span>
+          )}
+        </div>
       </div>
 
       <Handle type="target" position={Position.Left} className="!w-3 !h-3 !bg-[var(--color-node-checkpoint)] !border-2 !border-white" />

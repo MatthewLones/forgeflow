@@ -12,6 +12,11 @@ export default defineConfig({
       lib: {
         entry: resolve(__dirname, 'src/main.ts'),
       },
+      rollupOptions: {
+        // Externalize native addons that cause NODE_MODULE_VERSION mismatches.
+        // ssh2/cpu-features come from dockerode (Docker sandbox) — not needed at startup.
+        external: ['ssh2', 'cpu-features', 'dockerode', 'docker-modem'],
+      },
     },
   },
   preload: {

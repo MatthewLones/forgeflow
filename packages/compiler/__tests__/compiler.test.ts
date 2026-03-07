@@ -46,14 +46,15 @@ describe('compilePhasePrompt', () => {
     expect(prompt).toContain('# Phase: Parse Document');
     expect(prompt).toContain('## Your Task');
     expect(prompt).toContain('Read the document and extract content.');
-    expect(prompt).toContain('## Input Files');
+    expect(prompt).toContain('## Inputs');
     expect(prompt).toContain('input/doc.pdf (user upload)');
-    expect(prompt).toContain('## Output Files (you MUST produce these)');
+    expect(prompt).toContain('## Required Outputs');
     expect(prompt).toContain('output/parsed.json');
     expect(prompt).toContain('## Budget');
     expect(prompt).toContain('Max turns: 25');
     expect(prompt).toContain('$3.00');
-    expect(prompt).toContain('## Rules');
+    // Rules now in system prompt only
+    expect(prompt).not.toContain('## Rules');
   });
 
   it('includes input source attribution from prior node', () => {
@@ -126,11 +127,9 @@ describe('compilePhasePrompt', () => {
     expect(prompt).toContain('| 2 | Researcher B | child_b |');
     expect(prompt).toContain('Launch all subagents concurrently');
 
-    // Progress markers still present in parent prompt
-    expect(prompt).toContain('__CHILD_START__child_a.json');
-    expect(prompt).toContain('__CHILD_DONE__child_a.json');
-    expect(prompt).toContain('__CHILD_START__child_b.json');
-    expect(prompt).toContain('__CHILD_DONE__child_b.json');
+    // Progress markers as template pattern
+    expect(prompt).toContain('__CHILD_START__ID.json');
+    expect(prompt).toContain('__CHILD_DONE__ID.json');
 
     // Child instructions NOT inlined in parent prompt
     expect(prompt).not.toContain('Analyze liability.');
@@ -178,7 +177,7 @@ describe('compilePhasePrompt', () => {
     });
     const prompt = compilePhasePrompt(node, makeContext());
 
-    expect(prompt).toContain('## Interrupt Protocol');
+    expect(prompt).toContain('## Interrupts — MANDATORY');
     expect(prompt).toContain('__INTERRUPT__');
     expect(prompt).toContain('__ANSWER__');
   });
@@ -202,13 +201,13 @@ describe('compilePhasePrompt', () => {
       ],
     });
     const prompt = compilePhasePrompt(node, makeContext());
-    expect(prompt).toContain('## Interrupt Protocol');
+    expect(prompt).toContain('## Interrupts — MANDATORY');
   });
 
   it('omits interrupt protocol when no interrupts configured', () => {
     const node = makeNode();
     const prompt = compilePhasePrompt(node, makeContext());
-    expect(prompt).not.toContain('## Interrupt Protocol');
+    expect(prompt).not.toContain('## Interrupts — MANDATORY');
   });
 
   it('merges and deduplicates global + node skills', () => {
@@ -222,7 +221,7 @@ describe('compilePhasePrompt', () => {
     });
     const prompt = compilePhasePrompt(node, context);
 
-    expect(prompt).toContain('## Skills Available');
+    expect(prompt).toContain('## Skills');
     expect(prompt).toContain('common-skill');
     expect(prompt).toContain('shared-skill');
     expect(prompt).toContain('node-specific');
@@ -288,7 +287,7 @@ describe('compilePhasePrompt', () => {
     // Parent prompt references child_a via table
     expect(prompt).toContain('## Subagents — Launch All 1 Concurrently');
     expect(prompt).toContain('prompts/child_a.md');
-    expect(prompt).toContain('__CHILD_START__child_a.json');
+    expect(prompt).toContain('__CHILD_START__ID.json');
 
     // Parent prompt does NOT contain grandchild details (those are in child_a.md)
     expect(prompt).not.toContain('grandchild_x');
@@ -298,9 +297,15 @@ describe('compilePhasePrompt', () => {
   });
 
   it('exports FORGEFLOW_PHASE_SYSTEM_PROMPT constant', () => {
-    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('ForgeFlow workflow');
-    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('output/ directory');
-    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('input/ directory');
+    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('ForgeFlow phase agent');
+    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('input/');
+    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('output/');
+    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('skills/');
+    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('Task tool');
+    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('WORKSPACE LAYOUT');
+    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('INTERRUPT PROTOCOL');
+    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('ARTIFACT FORMAT RULES');
+    expect(FORGEFLOW_PHASE_SYSTEM_PROMPT).toContain('ERROR HANDLING');
   });
 });
 
@@ -412,8 +417,8 @@ describe('compileChildPromptFiles', () => {
     expect(childPrompt).toContain('## Subagents — Launch All 2 Concurrently');
     expect(childPrompt).toContain('prompts/grandchild_x.md');
     expect(childPrompt).toContain('prompts/grandchild_y.md');
-    expect(childPrompt).toContain('__CHILD_START__grandchild_x.json');
-    expect(childPrompt).toContain('__CHILD_DONE__grandchild_y.json');
+    expect(childPrompt).toContain('__CHILD_START__ID.json');
+    expect(childPrompt).toContain('__CHILD_DONE__ID.json');
     // Child's prompt does NOT inline grandchild instructions
     expect(childPrompt).not.toContain('Analyze subsection X.');
     expect(childPrompt).not.toContain('Analyze subsection Y.');

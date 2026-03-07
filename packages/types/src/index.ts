@@ -52,6 +52,7 @@ export type {
   StateFile,
   RunStatus,
   RunState,
+  CheckpointExpectedFile,
   CheckpointState,
   PhaseResult,
   ProgressEvent,

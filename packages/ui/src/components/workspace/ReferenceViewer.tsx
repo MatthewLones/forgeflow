@@ -1,16 +1,11 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { marked } from 'marked';
-import { Document, Page, pdfjs } from 'react-pdf';
+import { Document, Page } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
+import '../../lib/pdf-worker';
 import { api } from '../../lib/api-client';
-
-// Configure pdf.js worker
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
 
 interface ReferenceViewerProps {
   refPath: string;

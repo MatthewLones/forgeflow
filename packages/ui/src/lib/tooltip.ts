@@ -24,9 +24,13 @@ function getTooltipEl(): HTMLDivElement {
   return tooltipEl;
 }
 
-function show(text: string, x: number, y: number) {
+function show(text: string, x: number, y: number, html?: boolean) {
   const el = getTooltipEl();
-  el.textContent = text;
+  if (html) {
+    el.innerHTML = text;
+  } else {
+    el.textContent = text;
+  }
   el.classList.add('visible');
   position(el, x, y);
 }
@@ -68,9 +72,10 @@ function hide() {
 }
 
 function onMouseOver(e: MouseEvent) {
-  const target = (e.target as Element)?.closest?.('[data-tooltip]');
+  const target = (e.target as Element)?.closest?.('[data-tooltip],[data-tooltip-html]');
   if (!target) return;
-  const text = target.getAttribute('data-tooltip');
+  const htmlContent = target.getAttribute('data-tooltip-html');
+  const text = htmlContent ?? target.getAttribute('data-tooltip');
   if (!text) return;
 
   if (target === currentTarget) return;
@@ -80,20 +85,22 @@ function onMouseOver(e: MouseEvent) {
   if (showTimer) clearTimeout(showTimer);
 
   showTimer = setTimeout(() => {
-    show(text, e.clientX, e.clientY);
+    show(text, e.clientX, e.clientY, !!htmlContent);
   }, DELAY_MS);
 }
 
+const TOOLTIP_SELECTOR = '[data-tooltip],[data-tooltip-html]';
+
 function onMouseMove(e: MouseEvent) {
-  const target = (e.target as Element)?.closest?.('[data-tooltip]');
+  const target = (e.target as Element)?.closest?.(TOOLTIP_SELECTOR);
   if (!target || target !== currentTarget) {
     if (currentTarget) hide();
   }
 }
 
 function onMouseOut(e: MouseEvent) {
-  const target = (e.target as Element)?.closest?.('[data-tooltip]');
-  const related = (e.relatedTarget as Element)?.closest?.('[data-tooltip]');
+  const target = (e.target as Element)?.closest?.(TOOLTIP_SELECTOR);
+  const related = (e.relatedTarget as Element)?.closest?.(TOOLTIP_SELECTOR);
   if (target === currentTarget && related !== currentTarget) {
     hide();
   }

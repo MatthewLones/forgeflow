@@ -1,80 +1,27 @@
-import { useState, useCallback, useEffect, Component, type ErrorInfo, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ReactFlowProvider } from '@xyflow/react';
-import { RunProvider, useRun } from '../context/RunContext';
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import { useRun } from '../context/RunContext';
 import { useProjectStore } from '../context/ProjectStore';
 import { DashboardToolbar } from '../components/run-dashboard/DashboardToolbar';
 import { DashboardDAG } from '../components/run-dashboard/DashboardDAG';
 import { EventStream } from '../components/run-dashboard/EventStream';
 import { WorkspaceExplorer } from '../components/run-dashboard/WorkspaceExplorer';
 import { PreviewDrawer, type PreviewTarget } from '../components/run-dashboard/PreviewDrawer';
+import { NodePromptDrawer } from '../components/run-dashboard/NodePromptDrawer';
 import { RunSummary } from '../components/run-dashboard/RunSummary';
 import { InputWizard } from '../components/run-dashboard/InputWizard';
-import { InterruptBanner } from '../components/workspace/InterruptBanner';
-import { CheckpointBanner } from '../components/workspace/CheckpointBanner';
-import type { FlowDefinition, ProgressEvent } from '@forgeflow/types';
+import { TodoWidget } from '../components/shared/TodoWidget';
+import { derivePhaseTodos } from '../lib/derive-phase-todos';
+import type { FlowDefinition } from '@forgeflow/types';
 import { api } from '../lib/api-client';
-
-/* ── Error boundary ────────────────────────────────────── */
-
-class DashboardErrorBoundary extends Component<
-  { children: ReactNode },
-  { error: Error | null }
-> {
-  state: { error: Error | null } = { error: null };
-
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('[RunDashboard] CRASH:', error, info.componentStack);
-  }
-
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="h-screen flex flex-col items-center justify-center bg-red-50 p-8">
-          <h2 className="text-lg font-bold text-red-700 mb-2">Dashboard Error</h2>
-          <pre className="text-xs text-red-600 bg-white border border-red-200 rounded p-4 max-w-2xl overflow-auto whitespace-pre-wrap">
-            {this.state.error.message}
-            {'\n\n'}
-            {this.state.error.stack}
-          </pre>
-          <button
-            type="button"
-            onClick={() => this.setState({ error: null })}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700"
-          >
-            Retry
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-/* ── Page wrapper ─────────────────────────────────────── */
-
-export function RunDashboardPage() {
-  return (
-    <DashboardErrorBoundary>
-      <RunProvider>
-        <ReactFlowProvider>
-          <RunDashboardContent />
-        </ReactFlowProvider>
-      </RunProvider>
-    </DashboardErrorBoundary>
-  );
-}
 
 /* ── Main content ─────────────────────────────────────── */
 
-function RunDashboardContent() {
+export function RunDashboardPage() {
   const { projectId, runId } = useParams<{ projectId: string; runId: string }>();
   const navigate = useNavigate();
-  const { run, startRun, stopRun, resetRun, answerInterrupt, connectToRun } = useRun();
+  const { run, interruptHistory, checkpointHistory, pendingCheckpoint, startRun, stopRun, resetRun, connectToRun } = useRun();
   const { projects } = useProjectStore();
 
   // Flow data for the DAG
@@ -85,6 +32,7 @@ function RunDashboardContent() {
   // Dashboard state
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
+  const [promptNodeId, setPromptNodeId] = useState<string | null>(null);
   const [showSummary, setShowSummary] = useState(false);
 
   // Wizard mode (runId === 'new')
@@ -116,15 +64,20 @@ function RunDashboardContent() {
   // This prevents the "run disappearing" issue where the event stream
   // gets hidden and the summary fetch might fail.
 
+  // Wizard error state (e.g. validation failures)
+  const [wizardError, setWizardError] = useState<string | null>(null);
+
   // Handle wizard start
   const handleWizardStart = useCallback(async (runner: 'mock' | 'local' | 'docker', files: File[], model?: string) => {
     if (!projectId) return;
+    setWizardError(null);
     console.log('[RunDashboard] handleWizardStart:', { runner, fileCount: files.length, model });
     try {
       await startRun(projectId, runner, files, model);
       console.log('[RunDashboard] startRun resolved, run state:', run.status, run.runId);
     } catch (err) {
       console.error('[RunDashboard] startRun FAILED:', err);
+      setWizardError(err instanceof Error ? err.message : 'Failed to start run');
     }
   }, [projectId, startRun, run.status, run.runId]);
 
@@ -173,6 +126,9 @@ function RunDashboardContent() {
     });
   }, [run.runId, projectId]);
 
+  // Hooks must be called before any early returns
+  const phaseTodos = useMemo(() => derivePhaseTodos(run.events), [run.events]);
+
   // Debug logging
   console.log('[RunDashboard] render:', {
     projectId,
@@ -205,6 +161,7 @@ function RunDashboardContent() {
             projectId={projectId}
             onStartRun={handleWizardStart}
             onCancel={() => navigate(`/workspace/${projectId}`)}
+            error={wizardError}
           />
         </div>
       </div>
@@ -222,10 +179,7 @@ function RunDashboardContent() {
   const isRunning = run.status === 'running' || run.status === 'starting';
   const isDone = run.status === 'completed' || run.status === 'failed';
 
-  // Find checkpoint for banner
-  const lastCheckpoint = run.status === 'awaiting_input'
-    ? [...run.events].reverse().find((e): e is ProgressEvent & { type: 'checkpoint' } => e.type === 'checkpoint')
-    : null;
+  const checkpointTotal = checkpointHistory.length + (pendingCheckpoint ? 1 : 0);
 
   return (
     <div className="h-screen flex flex-col bg-[var(--color-canvas-bg)]">
@@ -237,107 +191,144 @@ function RunDashboardContent() {
         reconnecting={run.reconnecting}
         onStop={stopRun}
         onRerun={handleRerun}
+        interruptCount={interruptHistory.length}
+        onInterrupts={() => navigate('interrupts')}
+        checkpointCount={checkpointTotal}
+        onCheckpoints={() => navigate('checkpoint')}
       />
 
-      {/* Interrupt / checkpoint overlay */}
+      {/* Interrupt notification bar */}
       {run.pendingInterrupt && (
-        <div className="shrink-0 border-b border-amber-200">
-          <InterruptBanner interrupt={run.pendingInterrupt} onSubmit={answerInterrupt} />
-        </div>
+        <button
+          type="button"
+          onClick={() => navigate('interrupts')}
+          className="shrink-0 flex items-center gap-3 px-4 py-2.5 border-b border-amber-300 bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer w-full text-left"
+        >
+          <span className="animate-pulse w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+          <span className="text-xs font-semibold text-amber-800 truncate">
+            Interrupt: {run.pendingInterrupt.title}
+          </span>
+          <span className="text-[10px] font-mono text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded shrink-0">
+            {run.pendingInterrupt.type}
+          </span>
+          <span className="ml-auto text-[10px] text-amber-600 shrink-0">
+            Click to respond &rarr;
+          </span>
+        </button>
       )}
-      {lastCheckpoint && !run.pendingInterrupt && (
-        <div className="shrink-0 border-b border-amber-200">
-          <CheckpointBanner projectId={projectId} checkpoint={lastCheckpoint.checkpoint} />
-        </div>
+      {/* Checkpoint notification bar */}
+      {pendingCheckpoint && !run.pendingInterrupt && run.runId && (
+        <button
+          type="button"
+          onClick={() => navigate('checkpoint')}
+          className="shrink-0 flex items-center gap-3 px-4 py-2.5 border-b border-amber-300 bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer w-full text-left"
+        >
+          <span className="animate-pulse w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+          <span className="text-xs font-semibold text-amber-800 truncate">
+            Checkpoint: {pendingCheckpoint.checkpoint.presentation?.title ?? pendingCheckpoint.checkpoint.checkpointNodeId}
+          </span>
+          <span className="text-[10px] font-mono text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded shrink-0">
+            {pendingCheckpoint.checkpoint.expectedFiles?.length ?? 0} files expected
+          </span>
+          <span className="ml-auto text-[10px] text-amber-600 shrink-0">
+            Click to respond &rarr;
+          </span>
+        </button>
       )}
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* DAG (top ~40%) */}
-        {flow ? (
-          <div className="h-[40%] min-h-[160px] border-b border-[var(--color-border)]">
-            <DashboardDAG
-              nodes={flow.nodes}
-              edges={flow.edges}
-              nodeStatuses={run.nodeStatuses}
-              selectedNodeId={selectedNodeId}
-              onNodeClick={setSelectedNodeId}
-            />
-          </div>
-        ) : !loadingFlow && flowError ? (
-          <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[var(--color-border)] bg-amber-50">
-            <span className="text-xs text-amber-600">Could not load flow graph: {flowError}</span>
-            <button
-              type="button"
-              onClick={loadFlow}
-              className="text-[10px] px-2 py-0.5 rounded border border-amber-300 text-amber-700 hover:bg-amber-100"
-            >
-              Retry
-            </button>
-          </div>
-        ) : null}
+      {/* Main content — resizable panels */}
+      <div className="flex-1 overflow-hidden">
+        <PanelGroup orientation="vertical">
+          {/* Phase progress todos — resizable panel */}
+          {phaseTodos.length > 0 && (
+            <>
+              <Panel defaultSize={20} minSize={3} maxSize={50}>
+                <div className="h-full px-4 py-2 bg-white">
+                  <TodoWidget todos={phaseTodos} isActive={run.status === 'running'} fillHeight />
+                </div>
+              </Panel>
+              <PanelResizeHandle className="h-1.5 bg-transparent hover:bg-blue-200/60 transition-colors cursor-row-resize flex items-center justify-center group border-y border-[var(--color-border)]">
+                <div className="w-8 h-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+              </PanelResizeHandle>
+            </>
+          )}
 
-        {/* Bottom split: Event Stream + Workspace Explorer / Summary */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left: Event Stream or Summary */}
-          <div className="flex-1 min-w-0 border-r border-[var(--color-border)]">
-            {showSummary && isDone && run.runId ? (
-              <div className="h-full flex flex-col">
-                <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--color-border)] bg-white">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Summary</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowSummary(false)}
-                    className="ml-auto text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-                  >
-                    Show Events
-                  </button>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <RunSummary runId={run.runId} onArtifactClick={handleArtifactClick} />
-                </div>
+          {/* DAG panel */}
+          <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 30 : 40) : 0} minSize={flow ? 15 : 0}>
+            {flow ? (
+              <div className="h-full">
+                <DashboardDAG
+                  nodes={flow.nodes}
+                  edges={flow.edges}
+                  nodeStatuses={run.nodeStatuses}
+                  selectedNodeId={selectedNodeId}
+                  onNodeClick={setSelectedNodeId}
+                  onNodeDoubleClick={setPromptNodeId}
+                />
               </div>
-            ) : (
-              <div className="h-full flex flex-col">
-                {isDone && run.runId && (
-                  <div className="shrink-0 flex justify-end px-3 py-1 bg-white border-b border-[var(--color-border)]">
-                    <button
-                      type="button"
-                      onClick={() => setShowSummary(true)}
-                      className="text-[10px] text-[var(--color-node-agent)] hover:underline"
-                    >
-                      View Summary
-                    </button>
-                  </div>
-                )}
-                <div className="flex-1 overflow-hidden">
-                  <EventStream
-                    events={run.events}
-                    nodeFilter={selectedNodeId}
-                    isRunning={isRunning}
+            ) : !loadingFlow && flowError ? (
+              <div className="flex items-center gap-2 px-4 py-3 bg-amber-50">
+                <span className="text-xs text-amber-600">Could not load flow graph: {flowError}</span>
+                <button
+                  type="button"
+                  onClick={loadFlow}
+                  className="text-[10px] px-2 py-0.5 rounded border border-amber-300 text-amber-700 hover:bg-amber-100"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
+          </Panel>
+
+          {flow && (
+            <PanelResizeHandle className="h-1.5 bg-transparent hover:bg-blue-200/60 transition-colors cursor-row-resize flex items-center justify-center group border-y border-[var(--color-border)]">
+              <div className="w-8 h-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+            </PanelResizeHandle>
+          )}
+
+          {/* Bottom panel: EventStream + WorkspaceExplorer */}
+          <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 50 : 60) : (phaseTodos.length > 0 ? 80 : 100)} minSize={20}>
+            {run.runId ? (
+              <PanelGroup orientation="horizontal">
+                <Panel defaultSize={70} minSize={30}>
+                  <EventStreamPanel
+                    showSummary={showSummary}
                     isDone={isDone}
-                    startedAt={run.startedAt}
-                    currentPhase={run.currentPhaseId}
+                    isRunning={isRunning}
+                    run={run}
+                    selectedNodeId={selectedNodeId}
+                    onSetShowSummary={setShowSummary}
                     onNodeClick={setSelectedNodeId}
                     onFileClick={handleEventFileClick}
-                    onViewSummary={() => setShowSummary(true)}
+                    onArtifactClick={handleArtifactClick}
                   />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Right: Workspace Explorer */}
-          {run.runId && (
-            <div className="w-[300px] min-w-[200px]">
-              <WorkspaceExplorer
-                runId={run.runId}
+                </Panel>
+                <PanelResizeHandle className="w-1.5 bg-transparent hover:bg-blue-200/60 transition-colors cursor-col-resize flex items-center justify-center group border-x border-[var(--color-border)]">
+                  <div className="h-8 w-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+                </PanelResizeHandle>
+                <Panel defaultSize={30} minSize={15}>
+                  <WorkspaceExplorer
+                    runId={run.runId}
+                    isRunning={isRunning}
+                    onFileClick={handleWorkspaceFileClick}
+                  />
+                </Panel>
+              </PanelGroup>
+            ) : (
+              <EventStreamPanel
+                showSummary={showSummary}
+                isDone={isDone}
                 isRunning={isRunning}
-                onFileClick={handleWorkspaceFileClick}
+                run={run}
+                selectedNodeId={selectedNodeId}
+                onSetShowSummary={setShowSummary}
+                onNodeClick={setSelectedNodeId}
+                onFileClick={handleEventFileClick}
+                onArtifactClick={handleArtifactClick}
               />
-            </div>
-          )}
-        </div>
+            )}
+          </Panel>
+        </PanelGroup>
       </div>
 
       {/* Preview drawer */}
@@ -345,6 +336,88 @@ function RunDashboardContent() {
         target={previewTarget}
         onClose={() => setPreviewTarget(null)}
       />
+
+      {/* Node prompt drawer (double-click) */}
+      <NodePromptDrawer
+        nodeId={promptNodeId}
+        projectId={projectId}
+        flow={flow}
+        onClose={() => setPromptNodeId(null)}
+      />
     </div>
   );
 }
+
+/* ── Event Stream Panel (extracted to avoid duplication) ── */
+
+function EventStreamPanel({
+  showSummary,
+  isDone,
+  isRunning,
+  run,
+  selectedNodeId,
+  onSetShowSummary,
+  onNodeClick,
+  onFileClick,
+  onArtifactClick,
+}: {
+  showSummary: boolean;
+  isDone: boolean;
+  isRunning: boolean;
+  run: ReturnType<typeof useRun>['run'];
+  selectedNodeId: string | null;
+  onSetShowSummary: (v: boolean) => void;
+  onNodeClick: (nodeId: string | null) => void;
+  onFileClick: (fileName: string, nodeId?: string) => void;
+  onArtifactClick: (fileName: string) => void;
+}) {
+  if (showSummary && isDone && run.runId) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--color-border)] bg-white">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Summary</span>
+          <button
+            type="button"
+            onClick={() => onSetShowSummary(false)}
+            className="ml-auto text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+          >
+            Show Events
+          </button>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <RunSummary runId={run.runId} onArtifactClick={onArtifactClick} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      {isDone && run.runId && (
+        <div className="shrink-0 flex justify-end px-3 py-1 bg-white border-b border-[var(--color-border)]">
+          <button
+            type="button"
+            onClick={() => onSetShowSummary(true)}
+            className="text-[10px] text-[var(--color-node-agent)] hover:underline"
+          >
+            View Summary
+          </button>
+        </div>
+      )}
+      <div className="flex-1 overflow-hidden">
+        <EventStream
+          events={run.events}
+          nodeFilter={selectedNodeId}
+          isRunning={isRunning}
+          isDone={isDone}
+          startedAt={run.startedAt}
+          currentPhase={run.currentPhaseId}
+          onNodeClick={onNodeClick}
+          onFileClick={onFileClick}
+          onViewSummary={() => onSetShowSummary(true)}
+        />
+      </div>
+    </div>
+  );
+}
+

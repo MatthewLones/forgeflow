@@ -18,6 +18,10 @@ export function DashboardToolbar({
   reconnecting,
   onStop,
   onRerun,
+  interruptCount = 0,
+  onInterrupts,
+  checkpointCount = 0,
+  onCheckpoints,
 }: {
   projectId: string;
   status: 'idle' | 'starting' | 'running' | 'awaiting_input' | 'completed' | 'failed';
@@ -26,10 +30,15 @@ export function DashboardToolbar({
   reconnecting: boolean;
   onStop: () => void;
   onRerun: () => void;
+  interruptCount?: number;
+  onInterrupts?: () => void;
+  checkpointCount?: number;
+  onCheckpoints?: () => void;
 }) {
   const navigate = useNavigate();
   const config = STATUS_CONFIG[status];
   const isRunning = status === 'running' || status === 'starting';
+  const canStop = isRunning || status === 'awaiting_input';
   const isDone = status === 'completed' || status === 'failed';
 
   return (
@@ -76,7 +85,33 @@ export function DashboardToolbar({
           </span>
         )}
 
-        {isRunning && (
+        {onCheckpoints && checkpointCount > 0 && (
+          <button
+            type="button"
+            onClick={onCheckpoints}
+            className="text-[10px] px-3 py-1 rounded border border-amber-200 text-amber-700 hover:bg-amber-50 font-medium flex items-center gap-1.5"
+          >
+            Checkpoints
+            <span className="text-[9px] px-1 rounded-full bg-amber-100 text-amber-600 font-mono">
+              {checkpointCount}
+            </span>
+          </button>
+        )}
+
+        {onInterrupts && interruptCount > 0 && (
+          <button
+            type="button"
+            onClick={onInterrupts}
+            className="text-[10px] px-3 py-1 rounded border border-amber-200 text-amber-700 hover:bg-amber-50 font-medium flex items-center gap-1.5"
+          >
+            Interrupts
+            <span className="text-[9px] px-1 rounded-full bg-amber-100 text-amber-600 font-mono">
+              {interruptCount}
+            </span>
+          </button>
+        )}
+
+        {canStop && (
           <button
             type="button"
             onClick={onStop}

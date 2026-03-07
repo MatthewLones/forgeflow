@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { FlowProvider, useFlow } from '../context/FlowContext';
 import { DagProvider, useDag } from '../context/DagContext';
 import { LayoutProvider, useLayout } from '../context/LayoutContext';
-import { RunProvider } from '../context/RunContext';
+import { RunProvider, useRun } from '../context/RunContext';
 import { CopilotProvider } from '../context/CopilotContext';
 import { useProjectStore } from '../context/ProjectStore';
 import { AgentExplorer } from '../components/workspace/AgentExplorer';
@@ -11,7 +11,8 @@ import { WorkspaceToolbar } from '../components/workspace/WorkspaceToolbar';
 import { DagMiniView } from '../components/workspace/DagMiniView';
 import { EditorLayout } from '../components/workspace/EditorLayout';
 import { AISidePanel } from '../components/ai/AISidePanel';
-import { ShortcutHelpOverlay } from '../components/workspace/ShortcutHelpOverlay';
+import { SettingsOverlay } from '../components/workspace/SettingsOverlay';
+import { ExportDialog } from '../components/workspace/ExportDialog';
 import { GitPanel } from '../components/workspace/GitPanel';
 import { GitHubConnectDialog } from '../components/workspace/GitHubConnectDialog';
 import { GitProvider } from '../context/GitContext';
@@ -20,7 +21,7 @@ import { api } from '../lib/api-client';
 import { useSyncFlow, type SaveStatus } from '../hooks/useSyncFlow';
 import { useAutoEdges } from '../hooks/useAutoEdges';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import type { ShortcutBinding } from '../lib/keyboard-shortcuts';
+import { applyRemaps, type ShortcutBinding } from '../lib/keyboard-shortcuts';
 
 /* ── Resize hook ────────────────────────────────────────── */
 
@@ -87,7 +88,7 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
   const { dagCollapsed, toggleDag } = useDag();
   const { state, dispatch, addNode, removeNode, selectedNode } = useFlow();
   const layout = useLayout();
-  const { loadSkills } = useProjectStore();
+  const { loadSkills, clearSkillDataCache } = useProjectStore();
   const sidebar = useResize('x', SIDEBAR_DEFAULT, SIDEBAR_MIN, SIDEBAR_MAX);
   const dag = useResize('y', DAG_DEFAULT, DAG_MIN, DAG_MAX);
   const aiPanel = useResize('x', AI_PANEL_DEFAULT, AI_PANEL_MIN, AI_PANEL_MAX, true);
@@ -95,7 +96,9 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
   const [gitPanelOpen, setGitPanelOpen] = useState(false);
   const [githubDialogOpen, setGithubDialogOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [remapVersion, setRemapVersion] = useState(0);
 
   // Toolbar action state (lifted from WorkspaceToolbar)
   const [validating, setValidating] = useState(false);
@@ -128,10 +131,67 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
     }
   }, [state.flow]);
 
+  const handleRun = useCallback(async () => {
+    setValidating(true);
+    try {
+      const result = await api.flows.validate(state.flow);
+      if (!result.valid) {
+        // Show validation errors instead of navigating to run
+        layoutRef.current.openTab({
+          id: 'validation',
+          type: 'validation',
+          label: 'Invalid',
+          validationResult: result,
+        });
+        return;
+      }
+      navigate(`/projects/${projectId}/runs/new`);
+    } finally {
+      setValidating(false);
+    }
+  }, [state.flow, projectId, navigate]);
+
+  const { startRun } = useRun();
+
+  const handleRunInWorkspace = useCallback(async () => {
+    setValidating(true);
+    try {
+      const result = await api.flows.validate(state.flow);
+      if (!result.valid) {
+        layoutRef.current.openTab({
+          id: 'validation',
+          type: 'validation',
+          label: 'Invalid',
+          validationResult: result,
+        });
+        return;
+      }
+      // Fetch required inputs to decide whether to show pre-run panel
+      const { requiredInputs } = await api.projects.requiredInputs(projectId);
+      if (requiredInputs.length > 0) {
+        // Open pre-run tab for file uploads
+        layoutRef.current.openTab({
+          id: 'pre-run',
+          type: 'pre-run',
+          label: 'Run Config',
+          projectId,
+          requiredInputs,
+          fetchingInputs: false,
+        });
+      } else {
+        // No inputs needed — start run directly and open run tab
+        await startRun(projectId, 'local', []);
+        layoutRef.current.openTab({ id: 'run', type: 'run', label: 'Run' });
+      }
+    } finally {
+      setValidating(false);
+    }
+  }, [state.flow, projectId, startRun]);
+
   const handleCompile = useCallback(async () => {
     setCompiling(true);
     try {
-      const result = await api.flows.compilePreview(state.flow);
+      const result = await api.flows.compilePreview(state.flow, projectId);
       layoutRef.current.openTab({
         id: 'compile-preview',
         type: 'compile',
@@ -143,10 +203,15 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
     }
   }, [state.flow]);
 
-  const handleExport = useCallback(async () => {
+  const handleExport = useCallback(() => {
+    setExportDialogOpen(true);
+  }, []);
+
+  const handleExportConfirm = useCallback(async (fileName: string) => {
+    setExportDialogOpen(false);
     setExporting(true);
     try {
-      await api.projects.exportBundle(projectId);
+      await api.projects.exportBundle(projectId, fileName);
     } catch {
       // silent
     } finally {
@@ -158,22 +223,22 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
 
   // ── Keyboard shortcuts ─────────────────────────────────
 
-  // Use a ref for helpOpen to avoid re-creating bindings array on every toggle
-  const helpOpenRef = useRef(helpOpen);
-  helpOpenRef.current = helpOpen;
+  // Use a ref for settingsOpen to avoid re-creating bindings array on every toggle
+  const settingsOpenRef = useRef(settingsOpen);
+  settingsOpenRef.current = settingsOpen;
 
   const bindings = useMemo<ShortcutBinding[]>(() => [
     // ── General ──
     {
       id: 'help.toggle', label: 'Keyboard shortcuts', category: 'general',
       key: '/', mod: true, global: true,
-      handler: () => setHelpOpen((v) => !v),
+      handler: () => setSettingsOpen((v) => !v),
     },
     {
       id: 'escape', label: 'Dismiss', category: 'general',
       key: 'Escape', global: true,
       handler: () => {
-        if (helpOpenRef.current) setHelpOpen(false);
+        if (settingsOpenRef.current) setSettingsOpen(false);
         // Other Escape handlers (DAG fullscreen, rename cancel) are component-local
       },
     },
@@ -286,7 +351,7 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
     {
       id: 'toolbar.run', label: 'Run flow', category: 'toolbar',
       key: 'r', mod: true, shift: true,
-      handler: () => navigate(`/projects/${projectId}/runs/new`),
+      handler: () => handleRun(),
     },
     {
       id: 'toolbar.export', label: 'Export .forge', category: 'toolbar',
@@ -363,11 +428,15 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
       key: 'y', mod: true, shift: true,
       handler: () => navigate(`/projects/${projectId}/runs`),
     },
-  ], [toggleDag, handleToggleAI, handleValidate, handleCompile, handleExport, addNode, removeNode, selectedNode, navigate, projectId]);
+  ], [toggleDag, handleToggleAI, handleValidate, handleCompile, handleRun, handleExport, addNode, removeNode, selectedNode, navigate, projectId]);
 
-  useKeyboardShortcuts(bindings);
+  // Apply any custom remaps from localStorage
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const activeBindings = useMemo(() => applyRemaps(bindings), [bindings, remapVersion]);
 
-  // Reload flow from server when copilot mutates it
+  useKeyboardShortcuts(activeBindings);
+
+  // Reload flow from server when copilot mutates it or after git operations
   const handleFlowChanged = useCallback(async () => {
     try {
       const flow = await api.projects.getFlow(projectId);
@@ -391,6 +460,9 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
         newPositions = await autoLayout(flow.nodes, flow.edges);
       }
 
+      // Clear cached skill data so open skill tabs re-fetch from server
+      clearSkillDataCache();
+
       dispatch({ type: 'SET_FLOW', flow, positions: newPositions });
 
       // Also reload skills — copilot may have created/updated skills
@@ -398,11 +470,11 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
     } catch (err) {
       console.error('Failed to reload flow after copilot change:', err);
     }
-  }, [projectId, dispatch, loadSkills]);
+  }, [projectId, dispatch, loadSkills, clearSkillDataCache]);
 
   return (
     <CopilotProvider projectId={projectId} onFlowChanged={handleFlowChanged}>
-      <GitProvider projectId={projectId}>
+      <GitProvider projectId={projectId} onFlowChanged={handleFlowChanged}>
       <div className="h-screen flex flex-col">
         <WorkspaceToolbar
           projectId={projectId}
@@ -411,8 +483,10 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
           saveStatus={saveStatus}
           onValidate={handleValidate}
           onCompile={handleCompile}
+          onRun={handleRun}
+          onRunInWorkspace={handleRunInWorkspace}
           onExport={handleExport}
-          onShowHelp={() => setHelpOpen(true)}
+          onShowSettings={() => setSettingsOpen(true)}
           validating={validating}
           compiling={compiling}
           exporting={exporting}
@@ -504,8 +578,21 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
         </div>
 
         {/* Keyboard shortcut help overlay */}
-        {helpOpen && (
-          <ShortcutHelpOverlay bindings={bindings} onClose={() => setHelpOpen(false)} />
+        {settingsOpen && (
+          <SettingsOverlay
+            bindings={activeBindings}
+            onClose={() => setSettingsOpen(false)}
+            onRemapChange={() => setRemapVersion((v) => v + 1)}
+          />
+        )}
+
+        {/* Export dialog */}
+        {exportDialogOpen && (
+          <ExportDialog
+            defaultName={state.flow.name || projectId}
+            onExport={handleExportConfirm}
+            onClose={() => setExportDialogOpen(false)}
+          />
         )}
 
         {/* GitHub connect dialog */}

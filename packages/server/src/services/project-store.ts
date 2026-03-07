@@ -79,7 +79,9 @@ export interface ReferenceEntry {
  * Layout:
  *   {basePath}/{projectId}/
  *   ├── project.json    ← ProjectMeta
- *   ├── FLOW.json       ← FlowDefinition
+ *   ├── FLOW.json       ← FlowDefinition (graph shell: edges, skills, budget — no nodes)
+ *   ├── nodes/          ← Individual node files for per-agent git tracking
+ *   │   └── {nodeId}.json
  *   ├── references/     ← Project-level reference files
  *   └── skills/         ← Skill directories
  *       └── {skillName}/
@@ -97,12 +99,16 @@ export class ProjectStore {
     return join(this.basePath, id);
   }
 
-  private skillsDir(projectId: string): string {
+  public skillsDir(projectId: string): string {
     return join(this.projectDir(projectId), 'skills');
   }
 
   private refsDir(projectId: string): string {
     return join(this.projectDir(projectId), 'references');
+  }
+
+  private nodesDir(projectId: string): string {
+    return join(this.projectDir(projectId), 'nodes');
   }
 
   async ensureBaseDir(): Promise<void> {
@@ -138,11 +144,12 @@ export class ProjectStore {
       let hasCheckpoints = false;
 
       try {
-        const flowRaw = await readFile(join(dir, 'FLOW.json'), 'utf-8');
-        const flow: FlowDefinition = JSON.parse(flowRaw);
-        nodeCount = flow.nodes.length;
-        skillCount = flow.skills.length;
-        hasCheckpoints = flow.nodes.some((n) => n.type === 'checkpoint');
+        const flow = await this.getFlow(id);
+        if (flow) {
+          nodeCount = flow.nodes.length;
+          skillCount = flow.skills.length;
+          hasCheckpoints = flow.nodes.some((n) => n.type === 'checkpoint');
+        }
       } catch {
         // No flow yet
       }
@@ -158,15 +165,7 @@ export class ProjectStore {
     try {
       const metaRaw = await readFile(join(dir, 'project.json'), 'utf-8');
       const meta: ProjectMeta = JSON.parse(metaRaw);
-
-      let flow: FlowDefinition | null = null;
-      try {
-        const flowRaw = await readFile(join(dir, 'FLOW.json'), 'utf-8');
-        flow = JSON.parse(flowRaw);
-      } catch {
-        // No flow yet
-      }
-
+      const flow = await this.getFlow(id);
       return { meta, flow };
     } catch {
       return null;
@@ -256,8 +255,37 @@ export class ProjectStore {
 
   async saveFlow(projectId: string, flow: FlowDefinition): Promise<boolean> {
     const dir = this.projectDir(projectId);
+    const nodesDir = this.nodesDir(projectId);
     try {
-      await writeFile(join(dir, 'FLOW.json'), JSON.stringify(flow, null, 2));
+      // Ensure nodes/ directory exists
+      await mkdir(nodesDir, { recursive: true });
+
+      // Write each node as a separate file
+      const currentNodeIds = new Set<string>();
+      for (const node of flow.nodes) {
+        currentNodeIds.add(node.id);
+        await writeFile(
+          join(nodesDir, `${node.id}.json`),
+          JSON.stringify(node, null, 2),
+        );
+      }
+
+      // Remove node files that no longer exist in the flow
+      try {
+        const existing = await readdir(nodesDir);
+        for (const file of existing) {
+          if (!file.endsWith('.json')) continue;
+          const nodeId = file.replace(/\.json$/, '');
+          if (!currentNodeIds.has(nodeId)) {
+            await rm(join(nodesDir, file), { force: true });
+          }
+        }
+      } catch { /* nodesDir might not exist yet */ }
+
+      // Write FLOW.json without nodes (graph shell only)
+      const shell = { ...flow, nodes: [] };
+      await writeFile(join(dir, 'FLOW.json'), JSON.stringify(shell, null, 2));
+
       // Update the project meta timestamp
       await this.updateProject(projectId, {});
       return true;
@@ -269,7 +297,27 @@ export class ProjectStore {
   async getFlow(projectId: string): Promise<FlowDefinition | null> {
     try {
       const raw = await readFile(join(this.projectDir(projectId), 'FLOW.json'), 'utf-8');
-      return JSON.parse(raw);
+      const flow: FlowDefinition = JSON.parse(raw);
+
+      // If FLOW.json already has nodes (old format), return as-is
+      if (flow.nodes.length > 0) return flow;
+
+      // Load nodes from individual files
+      const nodesDir = this.nodesDir(projectId);
+      try {
+        const files = await readdir(nodesDir);
+        const nodes = [];
+        for (const file of files) {
+          if (!file.endsWith('.json')) continue;
+          const nodeRaw = await readFile(join(nodesDir, file), 'utf-8');
+          nodes.push(JSON.parse(nodeRaw));
+        }
+        flow.nodes = nodes;
+      } catch {
+        // No nodes/ directory — project has no nodes yet
+      }
+
+      return flow;
     } catch {
       return null;
     }
@@ -810,6 +858,7 @@ Describe this skill's purpose and how it should be used.
             outputs: ['market_analysis'],
             skills: ['venture-analysis'],
             budget: { maxTurns: 40, maxBudgetUsd: 5.0 },
+            interrupts: [{ type: 'review' as const }],
           },
           children: [],
         },
@@ -839,6 +888,7 @@ Describe this skill's purpose and how it should be used.
             outputs: ['risk_matrix'],
             skills: [],
             budget: { maxTurns: 120, maxBudgetUsd: 15.0 },
+            interrupts: [{ type: 'qa' as const }],
           },
           children: [
             {
@@ -925,19 +975,24 @@ Describe this skill's purpose and how it should be used.
           type: 'checkpoint',
           name: 'Partner Review',
           instructions: [
-            'Present the complete risk assessment to the investment partner for review.',
+            'The risk assessment phase is complete. Review the risk matrix below and provide your investment decision.',
             '',
-            'The partner will review @risk_matrix and make a go/no-go decision with any conditions or questions that need to be addressed before proceeding.',
+            'You will see the aggregated risk scores across financial, legal, team, and market dimensions. Each score is rated 1-5 (1 = critical risk, 5 = exceptional strength).',
             '',
-            'Output: \\partner_decisions',
+            'Please provide your decision as a JSON file with:',
+            '- **decision**: "go", "no_go", or "conditional"',
+            '- **conditions**: any terms or follow-up items required before proceeding',
+            '- **notes**: your reasoning and any concerns',
+            '',
+            'If conditional, specify what must be resolved before the final report is generated.',
           ].join('\n'),
           config: {
             inputs: ['risk_matrix'],
             outputs: ['partner_decisions'],
             skills: [],
             presentation: {
-              title: 'Investment Risk Assessment Complete',
-              sections: ['financial_risk', 'legal_risk', 'team_risk', 'market_risk'],
+              title: 'Investment Risk Assessment Complete — Review Required',
+              sections: [],
             },
           },
           children: [],
@@ -953,7 +1008,7 @@ Describe this skill's purpose and how it should be used.
             '',
             '1. **Investment Memo** — Executive summary, thesis, risks, recommendation, and proposed terms. Apply /skill:venture-analysis for valuation frameworks.',
             '',
-            '2. **Term Sheet Draft** — If the partner decision is "go", draft a term sheet with proposed valuation, investment amount, and key terms.',
+            '2. **Term Sheet Draft** — If the partner decision is "go" or "conditional", draft a term sheet with proposed valuation, investment amount, and key terms. Address any conditions noted in @partner_decisions.',
             '',
             'Before delivering the final documents, require /interrupt:approval from a senior partner. They should confirm the investment thesis holds, the proposed valuation is defensible, and the term sheet terms are within fund guidelines.',
             '',
@@ -964,6 +1019,7 @@ Describe this skill's purpose and how it should be used.
             outputs: ['investment_memo', 'term_sheet_draft'],
             skills: ['venture-analysis'],
             budget: { maxTurns: 60, maxBudgetUsd: 8.0 },
+            interrupts: [{ type: 'approval' as const }],
           },
           children: [],
         },
@@ -1003,7 +1059,14 @@ Describe this skill's purpose and how it should be used.
             { key: 'overall_risk', type: 'number' as const, description: 'Overall risk score (1-5)' },
           ],
         },
-        partner_decisions: { name: 'partner_decisions', format: 'json' as const, description: 'Partner go/no-go decision with conditions' },
+        partner_decisions: {
+          name: 'partner_decisions', format: 'json' as const, description: 'Investment partner review decision with conditions',
+          fields: [
+            { key: 'decision', type: 'string' as const, description: 'go, no_go, or conditional' },
+            { key: 'conditions', type: 'array' as const, description: 'Required conditions before proceeding (if conditional)', required: false },
+            { key: 'notes', type: 'string' as const, description: 'Partner reasoning and concerns' },
+          ],
+        },
         investment_memo: { name: 'investment_memo', format: 'markdown' as const, description: 'Final investment recommendation with thesis, risks, and proposed terms' },
         term_sheet_draft: { name: 'term_sheet_draft', format: 'markdown' as const, description: 'Draft term sheet with valuation and key terms' },
       },

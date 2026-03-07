@@ -351,17 +351,16 @@ describe('FlowOrchestrator', () => {
     const runStateBeforeResume = await store.loadRunState(firstResult.runId);
     expect(runStateBeforeResume!.completedPhases).toEqual(['parse_claim', 'coverage_check']);
 
-    // Phase 2: Resume with adjuster input
+    // Phase 2: Resume with adjuster input (multi-file array format)
     events.length = 0;
-    const resumeResult = await orchestrator.resume(flow, firstResult.runId, {
-      fileName: 'adjuster_input.json',
-      content: Buffer.from('{"approved":true,"notes":"looks good"}'),
-    });
+    const resumeResult = await orchestrator.resume(flow, firstResult.runId, [
+      { fileName: 'adjuster_input.json', content: Buffer.from('{"approved":true,"notes":"looks good"}') },
+    ]);
 
     expect(resumeResult.success).toBe(true);
     expect(resumeResult.status).toBe('completed');
 
-    // Cost should combine pre-checkpoint + post-checkpoint
+    // Cost should combine pre-checkpoint + post-checkpoint (checkpoints don't run LLMs)
     expect(resumeResult.totalCost.turns).toBe(28 + 15); // (8+20) + 15
     expect(resumeResult.totalCost.usd).toBeCloseTo(4.0 + 2.5); // (1+3) + 2.5
 
@@ -403,10 +402,9 @@ describe('FlowOrchestrator', () => {
     expect(result.status).toBe('completed');
 
     // Try to resume a completed run
-    const resumeResult = await orchestrator.resume(flow, result.runId, {
-      fileName: 'answer.json',
-      content: Buffer.from('{}'),
-    });
+    const resumeResult = await orchestrator.resume(flow, result.runId, [
+      { fileName: 'answer.json', content: Buffer.from('{}') },
+    ]);
 
     expect(resumeResult.success).toBe(false);
     expect(resumeResult.error).toContain('not awaiting input');
@@ -420,10 +418,9 @@ describe('FlowOrchestrator', () => {
       workspaceBasePath: workspaceDir,
     });
 
-    const resumeResult = await orchestrator.resume(flow, 'nonexistent-run-id', {
-      fileName: 'answer.json',
-      content: Buffer.from('{}'),
-    });
+    const resumeResult = await orchestrator.resume(flow, 'nonexistent-run-id', [
+      { fileName: 'answer.json', content: Buffer.from('{}') },
+    ]);
 
     expect(resumeResult.success).toBe(false);
     expect(resumeResult.error).toContain('not found');

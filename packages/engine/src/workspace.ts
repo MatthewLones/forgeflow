@@ -89,7 +89,7 @@ export async function collectOutputs(
   const outputDir = join(workspacePath, 'output');
   const results: StateFile[] = [];
 
-  const SIGNAL_PREFIXES = ['__INTERRUPT__', '__ANSWER__', '__CHILD_START__', '__CHILD_DONE__'];
+  const SIGNAL_PREFIXES = ['__INTERRUPT__', '__ANSWER__', '__CHILD_START__', '__CHILD_DONE__', '__PROGRESS__'];
 
   async function walkDir(dir: string, prefix: string) {
     let entries;
@@ -142,11 +142,25 @@ export function validateOutputs(
   expectedOutputs: string[],
 ): { valid: boolean; missing: string[]; found: string[] } {
   const collectedNames = new Set(collectedOutputs.map((f) => f.name));
+
+  // Build a map of base names (without extension) to collected filenames.
+  // This handles agents writing "company_profile.json" when the flow declares "company_profile".
+  const baseNameMap = new Map<string, string>();
+  for (const name of collectedNames) {
+    const dotIdx = name.lastIndexOf('.');
+    if (dotIdx > 0) {
+      baseNameMap.set(name.slice(0, dotIdx), name);
+    }
+  }
+
   const found: string[] = [];
   const missing: string[] = [];
 
   for (const expected of expectedOutputs) {
     if (collectedNames.has(expected)) {
+      found.push(expected);
+    } else if (baseNameMap.has(expected)) {
+      // Match with extension (e.g., "company_profile" → "company_profile.json")
       found.push(expected);
     } else {
       missing.push(expected);

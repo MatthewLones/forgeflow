@@ -14,12 +14,6 @@ function makeAgentIR(overrides: Partial<AgentPhaseIR> = {}): AgentPhaseIR {
     outputs: [],
     skills: [],
     budget: { maxTurns: 100, maxBudgetUsd: 10 },
-    rules: [
-      'Write all output files to the output/ directory',
-      'Read input files from the input/ directory',
-      'Verify each output file exists before finishing',
-      'Stay within budget constraints',
-    ],
     children: [],
     interrupt: { enabled: false },
     ...overrides,
@@ -40,17 +34,18 @@ describe('generateMarkdown', () => {
     expect(md).toContain('# Phase: Parse Document');
     expect(md).toContain('You are executing one phase of the "Test Flow" workflow.');
     expect(md).toContain('## Your Task');
-    expect(md).toContain('## Input Files');
+    expect(md).toContain('## Inputs');
     expect(md).toContain('input/doc.pdf (user upload)');
-    expect(md).toContain('## Output Files (you MUST produce these)');
+    expect(md).toContain('## Required Outputs');
     expect(md).toContain('output/result.json');
-    expect(md).toContain('## Skills Available');
+    expect(md).toContain('## Skills');
     expect(md).toContain('my-skill (in skills/my-skill/)');
     expect(md).toContain('## Budget');
     expect(md).toContain('Max turns: 25');
     expect(md).toContain('$3.00');
-    expect(md).toContain('## Rules');
-    expect(md).not.toContain('## Interrupt Protocol');
+    // Rules are now in system prompt only, not in per-phase markdown
+    expect(md).not.toContain('## Rules');
+    expect(md).not.toContain('## Interrupts — MANDATORY');
   });
 
   it('generates child markdown with Subagent header', () => {
@@ -103,7 +98,7 @@ describe('generateMarkdown', () => {
     const ir = makeAgentIR({ interrupt: { enabled: true } });
     const md = generateMarkdown(ir);
 
-    expect(md).toContain('## Interrupt Protocol');
+    expect(md).toContain('## Interrupts — MANDATORY');
     expect(md).toContain('__INTERRUPT__');
     expect(md).toContain('__ANSWER__');
   });
@@ -127,7 +122,7 @@ describe('generateMarkdown', () => {
     expect(md).toContain('$4.00');
   });
 
-  it('includes subagent reference table with progress markers', () => {
+  it('includes subagent reference table with progress tracking template', () => {
     const ir = makeAgentIR({
       children: [
         { index: 1, id: 'child_a', name: 'Researcher A', promptFile: 'prompts/child_a.md', outputs: ['a.json'], wave: 0 },
@@ -139,10 +134,9 @@ describe('generateMarkdown', () => {
     expect(md).toContain('## Subagents — Launch All 2 Concurrently');
     expect(md).toContain('| 1 | Researcher A | child_a | prompts/child_a.md |');
     expect(md).toContain('| 2 | Researcher B | child_b | prompts/child_b.md |');
-    expect(md).toContain('__CHILD_START__child_a.json');
-    expect(md).toContain('__CHILD_DONE__child_a.json');
-    expect(md).toContain('__CHILD_START__child_b.json');
-    expect(md).toContain('__CHILD_DONE__child_b.json');
+    // Progress markers are now template-based
+    expect(md).toContain('__CHILD_START__ID.json');
+    expect(md).toContain('__CHILD_DONE__ID.json');
   });
 
   it('generates wave-structured prompt for multi-wave children', () => {
@@ -163,5 +157,107 @@ describe('generateMarkdown', () => {
     expect(md).toContain('| 2 | Validator | validator |');
     expect(md).toContain('| 3 | Synthesizer | synthesizer |');
     expect(md).toContain('IMPORTANT:** Wait for each wave to fully complete');
+  });
+
+  it('renders artifact schema for inputs with format and fields', () => {
+    const ir = makeAgentIR({
+      inputs: [{
+        file: 'company_profile',
+        source: 'ingest_materials',
+        sourceLabel: 'from ingest_materials',
+        schema: {
+          name: 'company_profile',
+          format: 'json',
+          description: 'Company overview: founders, product, traction',
+          fields: [
+            { key: 'company_name', type: 'string', description: 'Company legal name' },
+            { key: 'sector', type: 'string', description: 'Industry sector' },
+            { key: 'founded_year', type: 'number', description: 'Year founded' },
+          ],
+        },
+      }],
+    });
+    const md = generateMarkdown(ir);
+
+    expect(md).toContain('Format: json — Company overview: founders, product, traction');
+    expect(md).toContain('Fields: company_name (string), sector (string), founded_year (number)');
+  });
+
+  it('renders artifact schema for outputs with format only (no fields)', () => {
+    const ir = makeAgentIR({
+      outputs: [{
+        file: 'investment_memo',
+        schema: {
+          name: 'investment_memo',
+          format: 'markdown',
+          description: 'Final investment recommendation',
+        },
+      }],
+    });
+    const md = generateMarkdown(ir);
+
+    expect(md).toContain('output/investment_memo');
+    expect(md).toContain('Format: markdown — Final investment recommendation');
+    expect(md).not.toContain('Fields:');
+  });
+
+  it('renders no schema detail when schema is undefined', () => {
+    const ir = makeAgentIR({
+      outputs: [{ file: 'result.json' }],
+    });
+    const md = generateMarkdown(ir);
+
+    expect(md).toContain('output/result.json');
+    expect(md).not.toContain('Format:');
+  });
+
+  it('marks optional fields in schema', () => {
+    const ir = makeAgentIR({
+      inputs: [{
+        file: 'data.json',
+        source: 'user_upload',
+        sourceLabel: 'user upload',
+        schema: {
+          name: 'data',
+          format: 'json',
+          description: 'Test data',
+          fields: [
+            { key: 'required_field', type: 'string', description: 'Required' },
+            { key: 'optional_field', type: 'number', description: 'Optional', required: false },
+          ],
+        },
+      }],
+    });
+    const md = generateMarkdown(ir);
+
+    expect(md).toContain('required_field (string)');
+    expect(md).toContain('optional_field (number?)');
+  });
+
+  it('renders schema in checkpoint filesToPresent', () => {
+    const ir: CheckpointIR = {
+      kind: 'checkpoint',
+      nodeId: 'review',
+      name: 'Review',
+      instructions: 'Review.',
+      filesToPresent: [{
+        file: 'risk_matrix',
+        source: 'assessment',
+        sourceLabel: 'from assessment',
+        schema: {
+          name: 'risk_matrix',
+          format: 'json',
+          description: 'Risk scores',
+          fields: [
+            { key: 'financial_risk', type: 'number', description: 'Risk 1-5' },
+          ],
+        },
+      }],
+      expectedInputs: [],
+    };
+    const md = generateMarkdown(ir);
+
+    expect(md).toContain('Format: json — Risk scores');
+    expect(md).toContain('Fields: financial_risk (number)');
   });
 });

@@ -15,7 +15,6 @@ import {
   FlowOrchestrator,
   MockRunner,
   ClaudeAgentRunner,
-  DockerAgentRunner,
 } from '@forgeflow/engine';
 import type { AgentRunner, MockBehavior } from '@forgeflow/engine';
 import { LocalStateStore } from '@forgeflow/state-store';
@@ -108,7 +107,7 @@ export class RunManager {
     options?: { model?: string; apiKey?: string; skillPaths?: string[]; userUploads?: StateFile[] },
   ): Promise<string> {
     log(`startRun: project=${projectId} runner=${runnerType} uploads=${options?.userUploads?.length ?? 0}`);
-    const runner = this.createRunner(runnerType, options);
+    const runner = await this.createRunner(runnerType, options);
 
     // Generate runId up front so we can register the ActiveRun before execution starts.
     // This avoids a race where fast runs (mock) complete before the map entry exists.
@@ -124,10 +123,8 @@ export class RunManager {
         if (run) {
           run.pendingInterrupt = { interrupt, resolve, reject };
         }
-
-        // Emit interrupt event to SSE clients
-        const event: ProgressEvent = { type: 'interrupt', interrupt };
-        this.broadcastEvent(runId, event);
+        // NOTE: Do NOT broadcast here — InterruptWatcher already emits the
+        // interrupt event via onProgress, which handles persistence + SSE.
       });
     };
 
@@ -198,12 +195,12 @@ export class RunManager {
   async resumeRun(
     runId: string,
     flow: FlowDefinition,
-    checkpointInput: { fileName: string; content: Buffer },
+    checkpointInputs: Array<{ fileName: string; content: Buffer }>,
     runnerType: RunnerType,
     options?: { model?: string; apiKey?: string; skillPaths?: string[] },
   ): Promise<string> {
-    log(`resumeRun: runId=${runId} runner=${runnerType}`);
-    const runner = this.createRunner(runnerType, options);
+    log(`resumeRun: runId=${runId} runner=${runnerType} files=${checkpointInputs.length}`);
+    const runner = await this.createRunner(runnerType, options);
     const events: ProgressEvent[] = [];
     const sseClients = new Set<Response>();
 
@@ -213,8 +210,8 @@ export class RunManager {
         if (run) {
           run.pendingInterrupt = { interrupt, resolve, reject };
         }
-        const event: ProgressEvent = { type: 'interrupt', interrupt };
-        this.broadcastEvent(runId, event);
+        // NOTE: Do NOT broadcast here — InterruptWatcher already emits the
+        // interrupt event via onProgress, which handles persistence + SSE.
       });
     };
 
@@ -230,7 +227,7 @@ export class RunManager {
       preserveWorkspace: true,
     });
 
-    const resultPromise = orchestrator.resume(flow, runId, checkpointInput).then((result) => {
+    const resultPromise = orchestrator.resume(flow, runId, checkpointInputs).then((result) => {
       const run = this.runs.get(runId);
       if (run) {
         run.result = result;
@@ -241,6 +238,26 @@ export class RunManager {
         run.sseClients.clear();
       }
       return result;
+    }).catch((err) => {
+      logError(`resume ${runId} crashed:`, err);
+      const run = this.runs.get(runId);
+      const failResult: RunResult = {
+        runId,
+        success: false,
+        status: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+        outputFiles: [],
+        totalCost: { turns: 0, usd: 0 },
+      };
+      if (run) {
+        run.result = failResult;
+        for (const client of run.sseClients) {
+          client.write(`event: done\ndata: ${JSON.stringify({ status: 'failed' })}\n\n`);
+          client.end();
+        }
+        run.sseClients.clear();
+      }
+      return failResult;
     });
 
     const activeRun: ActiveRun = {
@@ -256,6 +273,113 @@ export class RunManager {
     this.runs.set(runId, activeRun);
 
     return runId;
+  }
+
+  /**
+   * Retry a failed run from the phase that failed.
+   * Re-uses the same runId — the orchestrator picks up from the failed phase.
+   */
+  async retryRun(
+    runId: string,
+    flow: FlowDefinition,
+    runnerType: RunnerType,
+    options?: { model?: string; apiKey?: string; skillPaths?: string[] },
+  ): Promise<string> {
+    log(`retryRun: runId=${runId} runner=${runnerType}`);
+    const runner = await this.createRunner(runnerType, options);
+    const events: ProgressEvent[] = [];
+    const sseClients = new Set<Response>();
+
+    const interruptHandler = async (interrupt: Interrupt): Promise<InterruptAnswer> => {
+      return new Promise<InterruptAnswer>((resolve, reject) => {
+        const run = this.runs.get(runId);
+        if (run) {
+          run.pendingInterrupt = { interrupt, resolve, reject };
+        }
+      });
+    };
+
+    const orchestrator = new FlowOrchestrator(runner, this.stateStore, {
+      onProgress: (event: ProgressEvent) => {
+        events.push(event);
+        this.persistEvent(runId, event);
+        this.broadcastEvent(runId, event);
+      },
+      skillSearchPaths: options?.skillPaths ?? [],
+      interruptHandler,
+      workspaceBasePath: this.workspaceBasePath,
+      preserveWorkspace: true,
+    });
+
+    const resultPromise = orchestrator.retryFromFailure(flow, runId).then((result) => {
+      log(`retry ${runId} completed: status=${result.status}`);
+      const run = this.runs.get(runId);
+      if (run) {
+        run.result = result;
+        for (const client of run.sseClients) {
+          client.write(`event: done\ndata: ${JSON.stringify({ status: result.status })}\n\n`);
+          client.end();
+        }
+        run.sseClients.clear();
+      }
+      return result;
+    }).catch((err) => {
+      logError(`retry ${runId} crashed:`, err);
+      const run = this.runs.get(runId);
+      const failResult: RunResult = {
+        runId,
+        success: false,
+        status: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+        outputFiles: [],
+        totalCost: { turns: 0, usd: 0 },
+      };
+      if (run) {
+        run.result = failResult;
+        for (const client of run.sseClients) {
+          client.write(`event: done\ndata: ${JSON.stringify({ status: 'failed' })}\n\n`);
+          client.end();
+        }
+        run.sseClients.clear();
+      }
+      return failResult;
+    });
+
+    const activeRun: ActiveRun = {
+      runId,
+      projectId: flow.id,
+      orchestrator,
+      sseClients,
+      pendingInterrupt: null,
+      events,
+      resultPromise,
+      result: null,
+    };
+    this.runs.set(runId, activeRun);
+
+    return runId;
+  }
+
+  /**
+   * Validate a checkpoint file without resuming the run.
+   */
+  async validateCheckpointFile(
+    runId: string,
+    fileName: string,
+    content: Buffer,
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const checkpoint = await this.stateStore.loadCheckpoint(runId);
+    if (!checkpoint) {
+      return { valid: false, errors: ['No checkpoint found for this run'] };
+    }
+
+    const expected = checkpoint.expectedFiles?.find((f) => f.fileName === fileName);
+    if (!expected) {
+      return { valid: false, errors: [`File "${fileName}" is not expected at this checkpoint`] };
+    }
+
+    const { validateCheckpointContent } = await import('@forgeflow/engine');
+    return validateCheckpointContent(fileName, content, expected.schema);
   }
 
   answerInterrupt(runId: string, answer: InterruptAnswer): boolean {
@@ -383,11 +507,11 @@ export class RunManager {
     return results;
   }
 
-  async listArtifacts(runId: string): Promise<Array<{ name: string; size: number }>> {
+  async listArtifacts(runId: string): Promise<Array<{ name: string; size: number; format: string }>> {
     return this.stateStore.listArtifacts(runId);
   }
 
-  async readArtifact(runId: string, fileName: string): Promise<Buffer | null> {
+  async readArtifact(runId: string, fileName: string): Promise<{ content: Buffer; resolvedName: string } | null> {
     return this.stateStore.readArtifact(runId, fileName);
   }
 
@@ -590,6 +714,7 @@ export class RunManager {
       artifacts: artifacts.map((a) => ({
         name: a.name,
         size: a.size,
+        format: a.format,
         producedBy: artifactProducers.get(a.name) ?? 'unknown',
       })),
       errors,
@@ -651,10 +776,10 @@ export class RunManager {
     }
   }
 
-  private createRunner(
+  private async createRunner(
     type: RunnerType,
     options?: { model?: string; apiKey?: string },
-  ): AgentRunner {
+  ): Promise<AgentRunner> {
     switch (type) {
       case 'mock':
         return new MockRunner(new Map<string, MockBehavior>());
@@ -663,11 +788,15 @@ export class RunManager {
           model: options?.model,
           apiKey: options?.apiKey,
         });
-      case 'docker':
+      case 'docker': {
+        // Lazy-load from subpath to avoid pulling in dockerode/ssh2 native
+        // modules at startup — they cause NODE_MODULE_VERSION crashes in Electron.
+        const { DockerAgentRunner } = await import('@forgeflow/engine/docker');
         return new DockerAgentRunner({
           model: options?.model,
           apiKey: options?.apiKey,
         });
+      }
     }
   }
 }

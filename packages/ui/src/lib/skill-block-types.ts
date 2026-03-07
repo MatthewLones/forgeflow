@@ -1,6 +1,6 @@
 /** JSON schemas for structured skill blocks stored as ```forgeflow:TYPE fenced code blocks. */
 
-export type SkillBlockType = 'output' | 'input' | 'decision';
+export type SkillBlockType = 'output' | 'input';
 
 export interface InputFile {
   name: string;
@@ -13,18 +13,7 @@ export interface InputBlock {
   files: InputFile[];
 }
 
-export interface DecisionRow {
-  condition: string;
-  action: string;
-  references: string[];
-}
-
-export interface DecisionBlock {
-  title: string;
-  rows: DecisionRow[];
-}
-
-export type SkillBlockData = InputBlock | DecisionBlock;
+export type SkillBlockData = InputBlock;
 
 /** A parsed skill block with its position in the source document. */
 export interface ParsedSkillBlock {

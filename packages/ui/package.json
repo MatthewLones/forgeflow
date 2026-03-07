@@ -25,6 +25,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-pdf": "^10.4.1",
+    "react-resizable-panels": "^4.7.1",
     "react-router-dom": "^7.6.0"
   },
   "devDependencies": {

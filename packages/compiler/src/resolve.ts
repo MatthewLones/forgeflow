@@ -13,12 +13,6 @@ import type {
 } from '@forgeflow/types';
 import { artifactName } from '@forgeflow/types';
 
-const DEFAULT_RULES = [
-  'Write all output files to the output/ directory',
-  'Read input files from the input/ directory',
-  'Verify each output file exists before finishing',
-  'Stay within budget constraints',
-];
 
 /**
  * Resolve a FlowNode into a structured PhaseIR using FlowGraph data.
@@ -132,7 +126,6 @@ function resolveAgentIR(
     outputs,
     skills,
     budget,
-    rules: DEFAULT_RULES,
     children,
     interrupt: { enabled: sym.interruptCapable },
   };

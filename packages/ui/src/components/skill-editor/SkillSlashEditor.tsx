@@ -18,6 +18,7 @@ interface SkillSlashEditorProps {
   skills?: string[];
   files?: string[];
   artifacts?: string[];
+  artifactFolders?: string[];
   currentSkill?: string;
   onCreateSkill?: (name: string) => void;
   onClickSkill?: (name: string) => void;
@@ -81,7 +82,7 @@ function splitFrontmatter(content: string): {
  * Structured skill editor with slash command support and widget decorations.
  *
  * - Strips YAML frontmatter and only shows the body for editing
- * - `/output`, `/input`, `/decision` trigger block autocomplete
+ * - `/output`, `/input` trigger block autocomplete
  * - `//` triggers sub-skill autocomplete (inserts `//skill:NAME`)
  * - `@` triggers file reference autocomplete (inserts `@path/to/file.md`)
  * - Forgeflow fenced blocks render as interactive widgets
@@ -103,6 +104,7 @@ export function SkillSlashEditor({
   skills = [],
   files = [],
   artifacts = [],
+  artifactFolders = [],
   currentSkill = '',
   onCreateSkill,
   onClickSkill,
@@ -226,6 +228,7 @@ export function SkillSlashEditor({
       skills,
       files,
       artifacts,
+      artifactFolders,
       currentSkill,
       onCreateSkill: (name: string) => onCreateSkillRef.current?.(name),
     };

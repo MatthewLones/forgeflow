@@ -79,8 +79,8 @@ export interface AgentPhaseIR {
   skills: SkillEntry[];
   /** Budget constraints (always set for top-level; optional for children) */
   budget?: NodeBudget;
-  /** Static rules text entries */
-  rules: string[];
+  /** @deprecated Operational rules now live in system prompt only */
+  rules?: string[];
   /** Children (subagents) grouped into waves by dependency order */
   children: ChildReference[];
   /** Interrupt protocol */

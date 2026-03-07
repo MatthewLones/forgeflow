@@ -105,15 +105,31 @@ export function DagMiniView(props: { height?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
 
-  // Close fullscreen on Escape
+  // Escape: drill out breadcrumb first, then exit fullscreen at root
   useEffect(() => {
-    if (!fullscreen) return;
+    if (!fullscreen && dagBreadcrumb.length === 0) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setFullscreen(false);
+      if (e.key !== 'Escape') return;
+      if (dagBreadcrumb.length > 0) {
+        dagDrillOut();
+      } else if (fullscreen) {
+        setFullscreen(false);
+      }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [fullscreen]);
+  }, [fullscreen, dagBreadcrumb.length, dagDrillOut]);
+
+  // Auto-reset breadcrumb if referenced nodes no longer exist
+  useEffect(() => {
+    if (dagBreadcrumb.length === 0) return;
+    let current = state.flow.nodes;
+    for (const id of dagBreadcrumb) {
+      const found = current.find((n) => n.id === id);
+      if (!found) { dagDrillRoot(); return; }
+      current = found.children;
+    }
+  }, [state.flow.nodes, dagBreadcrumb, dagDrillRoot]);
 
   // Resolve which nodes/edges to display based on breadcrumb
   const displayData = useMemo(() => {
@@ -122,10 +138,14 @@ export function DagMiniView(props: { height?: number }) {
     }
     let current = state.flow.nodes;
     let targetNode: FlowNode | null = null;
+    let breadcrumbValid = true;
     for (const id of dagBreadcrumb) {
       targetNode = current.find((n) => n.id === id) ?? null;
-      if (!targetNode) break;
+      if (!targetNode) { breadcrumbValid = false; break; }
       current = targetNode.children;
+    }
+    if (!breadcrumbValid) {
+      return { nodes: state.flow.nodes, edges: state.flow.edges, isChildren: false };
     }
     if (targetNode && targetNode.children.length > 0) {
       return { nodes: targetNode.children, edges: [], isChildren: true };
@@ -139,9 +159,11 @@ export function DagMiniView(props: { height?: number }) {
       return childrenLayout(displayData.nodes, state.positions);
     }
     // At root level, positions come from FlowReducer state (loaded from flow.layout or auto-computed)
+    // Fallback spreads nodes in a grid instead of stacking at (0,0) which makes fitView compute a zero-size bounding box
     const result: Record<string, { x: number; y: number }> = {};
-    for (const node of displayData.nodes) {
-      result[node.id] = state.positions[node.id] ?? { x: 0, y: 0 };
+    for (let i = 0; i < displayData.nodes.length; i++) {
+      const node = displayData.nodes[i];
+      result[node.id] = state.positions[node.id] ?? { x: 300 * i, y: 100 };
     }
     return result;
   }, [displayData, state.positions]);
@@ -163,6 +185,14 @@ export function DagMiniView(props: { height?: number }) {
       })),
     );
   }, [displayData.nodes, positions, activeTabId, run.nodeStatuses]);
+
+  // Re-fit view when display data or fullscreen changes (replaces key-based remounting)
+  useEffect(() => {
+    if (!rfInstance) return;
+    requestAnimationFrame(() => {
+      rfInstance.fitView({ padding: fullscreen ? 0.4 : 0.3, duration: 200 });
+    });
+  }, [rfInstance, displayData, fullscreen]);
 
   // Apply node changes (drag, select) in real-time
   const handleNodesChange = useCallback(
@@ -436,7 +466,6 @@ export function DagMiniView(props: { height?: number }) {
       </div>
 
       <ReactFlow
-        key={`${dagBreadcrumb.join('/')}:${fullscreen}`}
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}

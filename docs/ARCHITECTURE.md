@@ -33,13 +33,14 @@ ForgeFlow is a domain-specific language for agent orchestration. This framing cl
 | Compiler | Phase Compiler (node config → executable per-phase prompt) |
 | Linker | Skill Dependency Resolver (resolves sub-skill trees) |
 | Runtime / VM | Execution Engine (per-phase orchestrator) |
-| Process / address space | Sandbox (Docker container or Vercel Sandbox) |
+| Process / address space | Sandbox (Docker container per phase) |
 | Memory / heap | State Store (artifacts between phases) |
 | System calls / signals | Interrupts (approval, Q&A, selection, review, escalation) |
 | IPC / pipes | Bidirectional Sandbox Channel (filesystem watcher) |
 | Libraries / imports | Skills (SKILL.md + references/) |
-| Debugger | State Inspector + interrupt trace |
-| stdout / stderr | Progress Streamer |
+| Debugger | Run Dashboard + state inspector |
+| stdout / stderr | Progress Streamer (SSE) |
+| Version control | Per-project Git repos + GitHub integration |
 
 ## System Overview
 
@@ -54,21 +55,30 @@ ForgeFlow is a domain-specific language for agent orchestration. This framing cl
 │  │ Agents   │  AgentEditor │ SkillEditor │ RefView │            │    │
 │  │ Skills   │  with ConfigBottomPanel              │            │    │
 │  │ Refs     │  (I/O, Budget, Skills, Interrupts)   │            │    │
+│  │          ├─────────────────────────────────────┤            │    │
+│  │          │  GitPanel │ RunPanel │ Validation    │            │    │
 │  └──────────┴─────────────────────────────────────┴────────────┘    │
+│  WorkspaceToolbar │ SettingsOverlay │ ExportDialog                   │
 └──────────────────┬───────────────────────────────────────────────────┘
-                   │ saves FLOW.json, triggers runs
+                   │ API calls (fetch) to localhost:3001
+┌──────────────────▼───────────────────────────────────────────────────┐
+│  Server API (Express 5, port 3001)                                   │
+│  Routes: projects, skills, flows, runs, references, copilot, git,   │
+│          github, health                                              │
+│  Services: ProjectStore, RunManager, CopilotManager, GitManager,    │
+│            GitHubService, WorkspaceCleaner                           │
+│  SSE: run progress streaming, copilot token streaming               │
+└──────────────────┬───────────────────────────────────────────────────┘
+                   │ orchestrates execution
 ┌──────────────────▼───────────────────────────────────────────────────┐
 │  Execution Engine (Node.js)                                          │
-│  - Flow Validator: compiler-style type checking on FLOW.json         │
-│  - Phase Compiler: node config → per-phase prompt + child prompts    │
-│  - Sandbox Manager: create/teardown Docker containers per phase      │
-│  - Agent Runner: prompt → Agent SDK query()                          │
-│  - State Store: serialize between phases                             │
-│  - Checkpoint Manager: pause/resume at boundaries                    │
+│  - Flow Validator: pluggable 11-rule pipeline on FlowGraph           │
+│  - Phase Compiler: staged IR pipeline (FlowGraph → PhaseIR → md)    │
+│  - Agent Runner: MockRunner / ClaudeAgentRunner / DockerAgentRunner  │
 │  - InterruptWatcher: real-time interrupt + output streaming          │
-│  - Progress Streamer: events → frontend                              │
+│  - Progress Streamer: events → server → SSE → frontend              │
 └──────────────────┬───────────────────────────────────────────────────┘
-                   │ creates/manages
+                   │ creates/manages per-phase
 ┌──────────────────▼───────────────────────────────────────────────────┐
 │  Sandbox (one per phase)                                             │
 │  ┌────────────────────────────────────────────┐                      │
@@ -82,9 +92,9 @@ ForgeFlow is a domain-specific language for agent orchestration. This framing cl
 └──────────────────┬───────────────────────────────────────────────────┘
                    │ reads/writes
 ┌──────────────────▼───────────────────────────────────────────────────┐
-│  State Store                                                         │
-│  Local:  ~/.forgeflow/runs/{id}/ on disk                             │
-│  Cloud:  Postgres + S3/object storage                                │
+│  State Store + Git                                                   │
+│  Runs:     ~/.forgeflow/runs/{id}/    (artifacts, state, checkpoints)│
+│  Projects: ~/.forgeflow/projects/{id}/ (FLOW.json, skills, .git/)   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -100,15 +110,14 @@ skill-name/
 └── scripts/          ← Optional deterministic code
 ```
 
-Skills are standalone. Multiple flows can reference the same skill. A "California Tax Code" skill can be used by both a "Tax Prep" flow and a "Tax Audit" flow. Skills compose other skills — a skill's `SKILL.md` can reference sub-skills. See [SKILL-FORMAT.md](SKILL-FORMAT.md).
+Skills are standalone. Multiple flows can reference the same skill. Skills compose other skills — a skill's `SKILL.md` can reference sub-skills. See [SKILL-FORMAT.md](SKILL-FORMAT.md).
 
-**Node** — A unit of work in a flow. Three types:
+**Node** — A unit of work in a flow. Two types:
 
 | Type | Purpose | Example |
 |------|---------|---------|
 | **Agent** | Claude executes instructions with loaded skills | "Parse the contract and extract each clause" |
 | **Checkpoint** | Flow pauses, presents data to user, waits for input | "Show risk analysis to attorney, wait for decisions" |
-| **Merge** | Collects outputs from parallel children | "Combine research from 3 subagents" |
 
 Each node has structured config (inputs, outputs, skills, budget) plus free-text instructions. Nodes can contain recursive sub-trees.
 
@@ -128,58 +137,44 @@ Drill into "Research":
 │  ┌────────┐  ┌────────┐  ┌────────┐   │
 │  │State   │  │City    │  │Doc     │   │
 │  │Law     │  │Rules   │  │Viewer  │   │
-│  └───┬────┘  └───┬────┘  └───┬────┘   │
-│      └───────────┼───────────┘         │
-│           ┌──────▼──────┐              │
-│           │   Merge     │              │
-│           └─────────────┘              │
+│  └────────┘  └────────┘  └────────┘   │
+│       (all wave 0 — concurrent)        │
 └─────────────────────────────────────────┘
 ```
 
-Children run in parallel by default. Parent nodes declare all children's outputs in their own `config.outputs`.
+Children run concurrently by default. Parent nodes declare all children's outputs in their own `config.outputs`.
+
+### Wave-Based Child Ordering
+
+When children have sibling I/O dependencies, the engine automatically groups them into **waves** via topological sort:
+
+- **Wave 0** — children with no sibling dependencies (run concurrently)
+- **Wave N** — children whose inputs depend on Wave N-1 outputs (wait, then run)
+- Cycles between siblings are rejected with `CHILD_CYCLE`
+
+No annotations needed — wave assignment is computed from `config.inputs` and `config.outputs` declarations. The compiler generates wave-aware instructions: single wave = "Launch All N Concurrently", multiple waves = sequential wave execution with wait instructions.
 
 ---
 
 ## Execution Model
 
-### Phase Compiler
+### Phase Compiler (Staged IR Pipeline)
 
-**Input:** A single `FlowNode` from `FLOW.json` + resolved inputs from the state store
-**Output:** A per-phase markdown prompt that Claude follows for one phase
+The compiler uses a staged intermediate representation (IR) to generate per-phase prompts:
 
-The compiler generates a focused prompt for each node as it's about to execute:
-
-```markdown
-# Phase: Parse Contract
-
-You are executing one phase of a ForgeFlow workflow.
-
-## Your Task
-Read the contract PDF. Extract every clause as a structured object with:
-clause number, title, full text, clause type. Identify all defined terms.
-
-## Input Files
-- input/contract.pdf
-
-## Output Files (you MUST produce these)
-- output/clauses_parsed.json
-
-## Budget
-- Max turns: 25
-- Max cost: $3.00
-
-## Rules
-- Write all output files to the output/ directory
-- Read input files from the input/ directory
-- Verify each output file exists before finishing
-- Stay within budget constraints
+```
+FlowGraph → resolvePhaseIR() → PhaseIR → generateMarkdown() → markdown
 ```
 
-#### Per-Child Prompt Files
+**Stage 1: Build FlowGraph** — The validator builds a symbol table from `FlowDefinition` in a single O(N+E) pass. Each `FlowSymbol` contains: depth, parentId, childIds, descendantIds, topoIndex, predecessors/successors, declared inputs/outputs, schemas, child topo order, and child cycle detection. The `FlowGraph` is the single source of truth consumed by all downstream passes.
 
-When a node has children, the compiler generates **per-child prompt files** instead of inlining all child instructions into the parent prompt. This keeps token usage O(n) per nesting level instead of O(n^depth).
+**Stage 2: Resolve PhaseIR** — `resolvePhaseIR(node, graph)` produces a structured IR:
+- `AgentPhaseIR` for agent nodes: resolved inputs (with source attribution), outputs, skills, budget, children (with wave assignments), interrupt section
+- `CheckpointIR` for checkpoint nodes: files to present, expected inputs, presentation config
 
-The parent prompt gets a reference table:
+**Stage 3: Generate Markdown** — `generateMarkdown(ir)` converts the IR into executable prompt text. Includes the system prompt (execution environment instructions), task instructions, I/O declarations with schema details, budget constraints, skill references, and children sections.
+
+**Per-child prompt files:** When a node has children, `compileChildPrompts(nodeId, graph)` generates individual markdown files. The parent prompt gets a reference table:
 
 ```markdown
 ## Subagents — Launch All Concurrently
@@ -188,13 +183,11 @@ The parent prompt gets a reference table:
 |-------|-------------|---------|
 | Liability Analyst | prompts/analyze_liability.md | output/liability_findings.json |
 | IP Analyst | prompts/analyze_ip.md | output/ip_findings.json |
-| Termination Analyst | prompts/analyze_termination.md | output/termination_findings.json |
 
-Launch all subagents concurrently using the Task tool. Pass each the contents of its prompt file.
-After all complete, verify all output files exist.
+Launch all subagents concurrently using the Task tool.
 ```
 
-Each child prompt file is self-contained with its own instructions, inputs, outputs, budget, and skills. If a child has its own children, those are referenced the same way — prompt files all the way down.
+Each child prompt file is self-contained. If a child has its own children, those are referenced the same way — prompt files all the way down. Token usage is O(n) per nesting level, not O(n^depth).
 
 Workspace layout:
 ```
@@ -208,31 +201,37 @@ workspace/
     └── analyze_termination.md
 ```
 
-Subagents run **within** a phase (inside the same sandbox), spawned by Claude via the Task tool. Phase boundaries are managed by the engine.
+### Flow Validator (Pluggable Pipeline)
 
-### Flow Validator
+Before any phase runs, the engine validates the entire FLOW.json using a **pluggable rule pipeline**:
 
-Before any phase runs, the engine validates the entire FLOW.json — like a compiler's type-checking pass. This catches errors at design time, not runtime.
+**FlowGraph** — A semantic symbol table built once from `FlowDefinition`:
+- `FlowSymbol` per node: depth, parentId, childIds, descendantIds, topoIndex, predecessors/successors, declaredInputs/Outputs, inputSchemas/outputSchemas, childTopoOrder, childCycle
+- `ArtifactEntry` per artifact: producerId, consumerIds, schema (from inline `ArtifactSchema` or `flow.artifacts` registry)
+- Derived: topoOrder, hasCycle, cycleNodes, availableAtPhase, userUploadFiles
+
+**11 rules** in 4 categories, topologically sorted by dependencies:
+
+| Category | Rules | Dependencies |
+|----------|-------|-------------|
+| Structural | node-id-format, node-id-unique, edge-validity, dag-acyclic, connectivity, node-type-rules | connectivity depends on dag-acyclic |
+| Type System | output-uniqueness, schema-compatibility | schema-compatibility depends on output-uniqueness |
+| Dataflow | dependency-resolution | depends on dag-acyclic + connectivity + output-uniqueness |
+| Resource | budget-check | none |
+| Runtime | interrupt-validity | none |
+
+**Rule runner:** Sorts rules by dependencies, executes in order, skips rules whose dependencies failed. Returns per-rule diagnostics and timing.
 
 ```typescript
-interface ValidationResult {
-  valid: boolean;
-  errors: FlowDiagnostic[];     // Fatal — can't run
-  warnings: FlowDiagnostic[];   // Suspicious — will run but might fail
-  suggestions: FlowDiagnostic[];// Optimization hints
-  executionPlan: ExecutionPlan;  // Resolved execution order (if valid)
-}
+// Simple validation
+const result = validateFlow(flowDefinition);
+
+// Detailed pipeline introspection
+const detailed = validateFlowDetailed(flowDefinition, options);
+// detailed.ruleResults: per-rule diagnostics, timing, skip reasons
 ```
 
-**Structural checks:** DAG validation (no cycles), unique node IDs (including nested children), valid edge references, orphan/dead-end detection, checkpoint nodes require `presentation` config, only agent nodes have children.
-
-**Dependency resolution:** Every input file must trace back to a source — either a user upload or a prior node's output. Helpful error messages with closest-match suggestions.
-
-**Budget checks:** Sum of node budgets vs. flow budget, oversized budgets for simple tasks.
-
-**Interrupt validation:** Review interrupts reference existing files, depth-2+ interrupts have interrupt-aware parent instructions.
-
-**Output:** If valid, produces an `ExecutionPlan` with resolved execution order, fully resolved skill dependencies, estimated costs, and critical path.
+If valid, produces an `ExecutionPlan` with resolved execution order, input sources per phase, estimated costs, and critical path.
 
 ### Flow Orchestrator
 
@@ -253,7 +252,7 @@ class FlowOrchestrator {
 }
 ```
 
-**Execute flow:** Validates FLOW.json → initializes run state → saves user uploads → calls `executePhases()` from phase 0.
+**Execute flow:** Validates FLOW.json → builds FlowGraph → initializes run state → saves user uploads → calls `executePhases()` from phase 0.
 
 **Resume flow:** Loads saved RunState (verifies `awaiting_input`) → loads CheckpointState → saves user's answer as artifact → finds checkpoint in execution plan → calls `executePhases()` from checkpoint+1 with accumulated cost.
 
@@ -264,8 +263,8 @@ for (const phase of executionPlan.phases) {
     // Save checkpoint state, return { status: 'awaiting_input' }
   }
 
-  // Compile prompt, resolve skills, prepare workspace
-  const prompt = compilePhasePrompt(node, context);
+  // Compile prompt via IR pipeline, resolve skills, prepare workspace
+  const { markdown } = compilePhase(nodeId, graph);
 
   // Start InterruptWatcher if node has interrupts
   if (interruptHandler && nodeHasInterrupts(node)) {
@@ -283,7 +282,7 @@ for (const phase of executionPlan.phases) {
     // Save outputs, create synthetic checkpoint, return { status: 'awaiting_input' }
   }
 
-  // Collect outputs → state store → cleanup workspace
+  // Collect outputs → validate against expected → state store → cleanup workspace
 }
 ```
 
@@ -306,8 +305,13 @@ interface AgentRunner {
 | Runner | Use case | How it works |
 |--------|----------|-------------|
 | `MockRunner` | Testing | Writes predefined output files, returns configured costs. No API calls. |
-| `ClaudeAgentRunner` | Local development | Runs Claude Agent SDK `query()` directly on the host. Uses `permissionMode: 'bypassPermissions'`. |
-| `DockerAgentRunner` | Production (local) | Builds a Docker image with Claude Code CLI, runs agent inside a container with mounted workspace volume. |
+| `ClaudeAgentRunner` | Local development | Runs Claude Agent SDK `query()` directly on the host. Uses `permissionMode: 'bypassPermissions'`. Exponential backoff retry (5 attempts) for rate limits. |
+| `DockerAgentRunner` | Production (sandboxed) | Runs agent inside a Docker container with mounted workspace volume. Uses `dockerode` for container management. Streams JSONL progress events from stdout. Auto-builds image if missing. |
+
+Docker runner is imported separately to avoid pulling in native dependencies at startup:
+```typescript
+import { DockerAgentRunner } from '@forgeflow/engine/docker';
+```
 
 ### State Store
 
@@ -328,8 +332,6 @@ interface StateStore {
 
 **Local implementation:** `~/.forgeflow/runs/{runId}/` — `state.json`, `checkpoint.json`, `uploads/`, `artifacts/`. All JSON and filesystem-backed.
 
-**Cloud implementation** (deferred): Postgres for metadata + S3 for artifacts. Same interface, different adapter.
-
 ### Sandbox Manager
 
 Each phase runs in an isolated Docker container:
@@ -338,9 +340,10 @@ Each phase runs in an isolated Docker container:
 ┌────────────────────────────────────┐
 │  Docker Container (Phase N)        │
 │  ├── workspace/                    │
-│  │   ├── input/   ← from state store           │
-│  │   ├── output/  ← agent writes here          │
-│  │   └── skills/  ← only skills this node needs│
+│  │   ├── input/   ← from state    │
+│  │   ├── output/  ← agent writes  │
+│  │   ├── skills/  ← phase skills  │
+│  │   └── prompts/ ← child prompts │
 │  ├── Claude Agent SDK              │
 │  └── per-phase prompt (.md)        │
 └────────────────────────────────────┘
@@ -410,6 +413,8 @@ type ProgressEvent =
   | { type: 'run_completed'; success: boolean; totalCost: { turns: number; usd: number } }
   | { type: 'message'; content: string };
 ```
+
+Events flow: Engine → RunManager → SSE → Frontend. The `RunManager` stores events in memory and replays them on SSE reconnect.
 
 ### State Machine
 
@@ -545,6 +550,216 @@ The `InterruptWatcher` monitors `output/` via chokidar and handles:
 
 ---
 
+## Server API
+
+The server is an Express 5 application that bridges the UI with the execution engine, copilot, and version control.
+
+### Configuration
+
+- Port 3001 (configurable via `PORT` env)
+- CORS enabled for cross-origin UI access
+- JSON body limit 50mb
+- `ANTHROPIC_API_KEY` loaded from `packages/server/.env` (gitignored)
+
+### Route Modules
+
+| Module | Base Path | Purpose |
+|--------|-----------|---------|
+| health | `/api/health` | Server status |
+| projects | `/api/projects` | Project CRUD, flow save/load, export/import |
+| skills | `/api/projects/:id/skills` | Skill CRUD per project |
+| flows | `/api/validate`, `/api/compile` | Validation and compile preview |
+| runs | `/api/projects/:id/run`, `/api/runs/:id` | Execution, SSE progress, interrupt bridge |
+| references | `/api/projects/:id/references` | Reference file management |
+| copilot | `/api/copilot` | Forge AI copilot sessions |
+| git | `/api/projects/:id/git` | Git operations per project |
+| github | `/api/github` | GitHub OAuth and repo management |
+
+### Key Services
+
+**ProjectStore** — Filesystem CRUD at `~/.forgeflow/projects/{id}/`:
+- `project.json` — project metadata
+- `FLOW.json` — flow definition
+- `skills/` — skill directories
+- `references/` — reference files
+- Seeds default "Legal Contract Review" project on first access
+
+**RunManager** — Singleton managing active runs:
+- Maps runId → active orchestrator + SSE clients + pending interrupt Promise
+- SSE streaming with event replay on reconnect
+- Interrupt bridge: engine's InterruptHandler → RunManager stores Promise → SSE emits interrupt → POST resolves Promise
+- Startup cleanup: marks orphaned runs as failed
+
+**CopilotManager** — Agent SDK sessions per project (see Forge AI Copilot section)
+
+**GitManager** — Per-project Git operations (see Git Version Control section)
+
+**GitHubService** — GitHub OAuth and repository management (see Git Version Control section)
+
+**WorkspaceCleaner** — Background cleanup of old workspace directories (24h TTL by default, configurable via `WORKSPACE_TTL_HOURS`)
+
+### SSE Streaming
+
+Two SSE endpoints for real-time updates:
+
+- `GET /api/runs/:runId/progress` — Run events (phase start/complete, interrupts, file writes, cost updates, completion)
+- `GET /api/copilot/:sessionId/progress` — Copilot token-level streaming (content_block_delta, text_delta)
+
+Both support reconnection: events are stored in memory and replayed when a new connection is established.
+
+---
+
+## Git Version Control & GitHub Integration
+
+ForgeFlow provides per-project Git version control and GitHub remote hosting directly in the IDE.
+
+### Per-Project Git Repos
+
+Each project gets its own Git repository at `~/.forgeflow/projects/{id}/.git`. The `GitManager` service handles all operations using `simple-git`:
+
+- **Initialization** — `ensureInit()` creates the repo, writes `.gitignore` (references/, copilot-chats/, *.log, .DS_Store), and creates an initial commit
+- **Staging** — `stageAll()`, `stageFiles(paths)`, `unstageFiles(paths)`
+- **Commits** — `commit(message)` returns the commit hash
+- **History** — `log(limit)` returns commit objects, `diff(hash?)` returns per-file diffs
+- **Branches** — `branches()`, `createBranch(name)`, `switchBranch(name)`
+- **Remote** — `push()`, `pull()`, `setRemote(url)`, `getRemote()`
+- **Reset** — `resetToCommit(hash)` for hard reset
+
+**Concurrency:** Per-project mutex prevents `index.lock` conflicts from concurrent API calls. Stale lock files are auto-cleaned on startup.
+
+### Git Types
+
+```typescript
+interface GitStatusFile { path: string; status: 'M'|'A'|'D'|'?'|'R'|'MM'|'UU'; staged: boolean }
+interface GitStatus { initialized: boolean; branch: string; tracking: string|null; ahead: number; behind: number; files: GitStatusFile[]; hasRemote: boolean }
+interface GitCommit { hash: string; message: string; author: string; date: string; filesChanged: number }
+interface GitBranch { name: string; current: boolean; tracking?: string }
+interface GitDiffEntry { file: string; insertions: number; deletions: number; diff: string }
+```
+
+### GitPanel UI
+
+The `GitPanel` is a collapsible bottom panel in the workspace with 4 tabs:
+
+| Tab | Content |
+|-----|---------|
+| **Changes** | Staged/unstaged file list with individual stage/unstage toggles |
+| **Commit** | Commit message textarea with Cmd+Enter shortcut, last commit info |
+| **History** | Commit log with expandable diffs and "Reset to this commit" action |
+| **Branches** | Branch list with create/switch, current branch indicator |
+
+The panel shows a branch indicator with ahead/behind counts in the header. Push/pull buttons appear when a remote is configured. Status auto-refreshes every 5 seconds when the panel is visible.
+
+### GitHub Integration
+
+- **OAuth flow** — `GET /api/github/auth-url` returns the GitHub authorize URL (callback auto-detected from Referer header). `POST /api/github/callback` exchanges the code for an access token.
+- **Token persistence** — Stored at `~/.forgeflow/github-token.json`
+- **Repo operations** — List user repos, create new repos, link as remote (token injected into HTTPS URL for auth)
+- **UI** — `GitHubConnectDialog` triggers OAuth popup, shows repo list, enables linking. `GitHubCallbackPage` handles the OAuth redirect.
+
+### API Endpoints
+
+**Git** (`/api/projects/:id/git/`): status, init, stage, unstage, commit, log, diff, branches, create-branch, switch-branch, push, pull, reset, set-remote, get-remote
+
+**GitHub** (`/api/github/`): status, auth-url, callback, repos, create repo, link repo, disconnect
+
+---
+
+## .forge Bundle Format
+
+`.forge` is a portable project bundle format for sharing and archiving ForgeFlow projects.
+
+**Binary format:** 7-byte magic header (`FORGE\x01\x00`) + gzip-compressed minified JSON
+
+**Payload structure:**
+```typescript
+{
+  v: 1,                                          // Format version
+  flow: FlowDefinition,                          // The complete flow
+  skills: Record<string, Record<string, string | { $b64: string }>>,  // Skill files
+  references: Record<string, string | { $b64: string }>               // Reference files
+}
+```
+
+- Text files stored as strings
+- Binary files stored as `{ $b64: "base64..." }`
+- No redundant `project.json` — metadata derived from `flow` on import
+- ID collision handled by auto-suffixing (`_1`, `_2`, etc.)
+
+**API:** `GET /api/projects/:id/export` produces the bundle, `POST /api/projects/import` (multer) imports it.
+
+**UI:** Export button in workspace toolbar opens `ExportDialog` with filename input. Import button on the dashboard page.
+
+---
+
+## Forge AI Copilot
+
+Forge is the Claude-powered AI copilot that sits alongside the visual editor. Users can conversationally ask Forge to build, modify, validate, and debug workflows.
+
+### Architecture
+
+**Server:** `CopilotManager` service manages Agent SDK `query()` sessions per project. Each session has an in-process MCP server providing 13 tools:
+
+| Category | Tools |
+|----------|-------|
+| Read | `get_flow`, `get_project_info`, `get_skill`, `validate_flow`, `compile_preview` |
+| Write | `add_node`, `update_node`, `remove_node`, `add_edge`, `add_child`, `save_flow`, `create_skill`, `update_skill` |
+| User | `ask_user` (with optional multiple-choice options) |
+
+**No maxTurns limit** — set to 200 (effectively unlimited). The budget cap (`maxBudgetUsd: 1.0`) is the real safety net.
+
+**SSE streaming:** Token-level updates via SDK `stream_event` messages (`content_block_delta` / `text_delta`). Consolidated text is persisted for history replay.
+
+**Session persistence:** `copilot-events.ndjson` per project, auto-loaded on mount.
+
+### Mutating Tools
+
+When `save_flow`, `add_node`, `update_node`, `remove_node`, `add_edge`, `add_child`, `create_skill`, or `update_skill` succeed, a `copilot_flow_changed` event is emitted. The UI catches this and reloads the flow from the server to stay in sync.
+
+### UI Features
+
+- Chat interface with message history and streaming display
+- Interactive chips for interrupt types, skills, and artifacts
+- "Other" option on multi-choice `ask_user` responses
+- Fun starter prompts for new sessions
+- Multi-chat support: create, switch, archive, and delete conversations
+- Tool call indicators showing which MCP tool is executing
+
+---
+
+## Settings & Keyboard Shortcuts
+
+### Keyboard Shortcuts
+
+40+ shortcuts across 6 categories: General, Tabs, Toolbar, Layout, Nodes, Navigation. Platform-aware: Cmd on macOS, Ctrl on Windows/Linux.
+
+**Remapping:** Users can remap any shortcut via the Settings overlay. Remaps are persisted to localStorage (`forgeflow:shortcut-remaps`). Individual shortcuts or all shortcuts can be reset to defaults. Browser-reserved shortcuts are flagged with a warning (they work in the Electron desktop app).
+
+### Settings Overlay
+
+The `SettingsOverlay` component has two tabs:
+
+| Tab | Content |
+|-----|---------|
+| **Keyboard Shortcuts** | All shortcuts grouped by category, click-to-capture remap UI, reset buttons |
+| **Guide** | 7-section interactive reference: How It Works, Composable Nodes, Node Design, Docker Sandbox, Interrupts, Artifacts, References |
+
+The Guide tab has a left sidebar with section navigation and uses `IntersectionObserver` to track the active section as the user scrolls.
+
+---
+
+## Desktop App
+
+The `@forgeflow/desktop` package wraps the UI and server into an Electron 35 desktop application using `electron-vite`.
+
+- **Bundling** — UI dist is served as static files, server runs as an embedded process
+- **File association** — `.forge` files open ForgeFlow when double-clicked
+- **Platform targets** — macOS (dmg, zip), Windows (nsis, portable), Linux (AppImage, deb)
+- **Dev mode** — `pnpm dev:desktop` runs UI + Electron concurrently
+- **Distribution** — `pnpm dist:desktop` builds platform-specific installers
+
+---
+
 ## UI Architecture
 
 ### Tech Stack
@@ -552,11 +767,22 @@ The `InterruptWatcher` monitors `output/` via chokidar and handles:
 - **React 19** with TypeScript
 - **Vite 6** for bundling (ESM-only)
 - **Tailwind CSS 4** with custom design tokens
-- **React Router 7** — `/ ` (dashboard) and `/workspace/:id` (editor)
+- **React Router 7** — 5 routes
 - **dockview-react** — VS Code-like multi-panel tabbed editor
 - **@xyflow/react** (React Flow) — DAG visualization
 - **@dagrejs/dagre** — Graph auto-layout
 - **CodeMirror 6** — Code/markdown editing with custom extensions
+- **Electron 35** + electron-vite — Desktop app
+
+### Pages
+
+| Page | Route | Description |
+|------|-------|-------------|
+| `DashboardPage` | `/` | Project listing, create project, import `.forge` |
+| `WorkspacePage` | `/workspace/:id` | Full IDE with all panels |
+| `RunDashboardPage` | `/projects/:id/runs/:runId` | Live run observability |
+| `RunListPage` | `/projects/:id/runs` | Run history for a project |
+| `GitHubCallbackPage` | `/github/callback` | OAuth callback handler |
 
 ### Workspace Layout
 
@@ -575,15 +801,13 @@ The `InterruptWatcher` monitors `output/` via chokidar and handles:
 │            │  │ I/O │ Budget │ Skills │ ...   │    │          │
 │            │  └──────────────────────────────┘    │          │
 ├────────────┴──────────────────────────────────────┴──────────┤
+│  GitPanel (collapsible bottom, 4 tabs)                       │
+├──────────────────────────────────────────────────────────────┤
 │  WorkspaceToolbar                                            │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-All panels are resizable. Sidebar: 140-480px. DAG view: 64-400px, collapsible. AI panel: 280-600px, toggleable.
-
-### Dashboard (/)
-
-Project listing with grid cards showing name, description, node count, skill count, and checkpoints. "New Project" creates an empty flow and navigates to the workspace.
+All panels are resizable. Sidebar: 140-480px. DAG view: 64-400px, collapsible. AI panel: 280-600px, toggleable. Git panel: 100-400px, collapsible.
 
 ### AgentExplorer (Left Sidebar)
 
@@ -591,37 +815,28 @@ Tree-based navigator with three collapsible sections:
 
 **Agents** — All top-level nodes in topological order with recursive `AgentTreeItem` components. Type glyphs: "A" (agent), "C" (checkpoint). Inline rename (double-click or F2). Expandable sub-agents. Context menu: Open, Rename, New Sub-Agent, Duplicate, Delete.
 
-**Skills** — Available skills with sub-skill expansion. Circular reference protection. Context menu with Open action.
+**Skills** — Available skills with sub-skill expansion. Circular reference protection. Context menu: Open, Rename, Delete, New Skill.
 
-**References** — File tree with folder support and type icons (PDF, MD, JSON, TXT).
+**References** — File tree with folder support and type icons (PDF, MD, JSON, TXT). Upload, create folder, rename, delete via context menu.
 
 ### DagMiniView (Top Panel)
 
-Miniature DAG viewer using React Flow with custom node types (AgentNode, CheckpointNode, MergeNode) and custom FlowEdge:
+Miniature DAG viewer using React Flow with custom node types (AgentNode, CheckpointNode) and custom FlowEdge:
 - Single click: select node and open editor tab
 - Double click: drill into node's children
 - Breadcrumb navigation with "Root" and back button
 - Auto-fit viewport on resize
 - Dagre auto-layout for top-level nodes, parallel layout for children
-- Conversion utilities in `lib/flow-to-reactflow.ts`
 
 ### EditorLayout (Center — dockview-react)
 
-Multi-panel tabbed editor with three panel types:
+Multi-panel tabbed editor with panel types:
 
-**AgentEditor** — Node name input, type badge, `SlashCommandEditor` (CodeMirror 6) for instructions, and `ConfigBottomPanel` with tabs:
-- **I/O** — Input/output file tag lists
-- **Budget** — maxTurns, maxBudgetUsd controls
-- **Skills** — Skill assignment
-- **Interrupts** — Interrupt config (agent nodes only)
-- **Sub-Agents** — Child agent list
-- **Presentation** — Checkpoint presentation config
+**AgentEditor** — Node name input, type badge, `SlashCommandEditor` (CodeMirror 6) for instructions, and `ConfigBottomPanel` with tabs: I/O, Budget, Skills, Interrupts, Sub-Agents, Presentation.
 
-**SkillEditorPanel** — File tree navigation between SKILL.md and references. Three view modes: Edit (SkillSlashEditor with slash commands), Compiled (rendered markdown), Raw (plain CodeMirror). Import suggestions bar.
+**SkillEditorPanel** — File tree navigation between SKILL.md and references. Three view modes: Edit, Compiled (rendered markdown), Raw. Import suggestions bar.
 
-**ReferenceViewer** — Markdown, text, and JSON file viewer.
-
-Keyboard shortcuts: `Cmd+W` close panel, `Cmd+\` split right, `Cmd+Shift+\` split down, `Cmd+1-9` focus group.
+**Additional panels** — ValidationPanel, CompilePreviewPanel, OutputViewer, RunPanel, RunHistoryPanel, ReferenceViewer.
 
 ### Slash Command Editor
 
@@ -632,19 +847,20 @@ CodeMirror 6 editor with custom extensions for agent instructions and skill cont
 - `/guardrail` → Guardrail rules widget
 - `//skill:name` → Skill reference (renders as chip)
 - `@file` → File reference (renders as chip)
-- Chip backspace handler for deleting entire references
-- Block decorations for structured data tables
 
 ### State Management
 
-Five React context providers form the state architecture:
+Nine React context providers form the state architecture:
 
 | Context | Scope | Purpose |
 |---------|-------|---------|
-| `ProjectStore` | Global | CRUD for projects, flows, skills. Holds all project data. |
-| `FlowContext` | Per-workspace | `useReducer` with 10+ actions: SELECT_NODE, ADD_NODE, REMOVE_NODE, UPDATE_NODE, ADD_EDGE, REMOVE_EDGE, ADD_CHILD, CREATE_AGENT_BY_NAME, etc. |
+| `ProjectStore` | Global | CRUD for projects, flows, skills, references. API integration. |
+| `FlowContext` | Per-workspace | `useReducer` with 20+ actions: SELECT_NODE, ADD_NODE, REMOVE_NODE, UPDATE_NODE, ADD_EDGE, REMOVE_EDGE, ADD_CHILD, ADD_ARTIFACT, UPDATE_ARTIFACT, MARK_CLEAN, etc. |
 | `DagContext` | Per-workspace | DAG mini-view UI state: collapsed/expanded, breadcrumb stack for drill-down navigation. |
 | `LayoutContext` | Per-workspace | Dockview API wrapper. Tab open/close/focus, tracks active selection (agent/skill/reference). |
+| `RunContext` | Per-workspace | Active run state. SSE progress streaming, node/phase status, interrupt handling. |
+| `CopilotContext` | Per-workspace | Copilot chat state, SSE token streaming, session management, multi-chat. |
+| `GitContext` | Per-workspace | Git operations, status, commits, branches, GitHub connection. |
 | `SkillContext` | Per-skill-tab | File selection, content editing, dirty tracking, view mode (edit/compiled/raw). |
 
 Provider nesting:
@@ -653,7 +869,13 @@ Provider nesting:
   <FlowProvider>              (WorkspacePage — per-flow)
     <DagProvider>
       <LayoutProvider>
-        <WorkspaceContent />
+        <RunProvider>
+          <CopilotProvider>
+            <GitProvider>
+              <WorkspaceContent />
+            </GitProvider>
+          </CopilotProvider>
+        </RunProvider>
       </LayoutProvider>
     </DagProvider>
   </FlowProvider>
@@ -664,35 +886,6 @@ Provider nesting:
 
 ---
 
-## Forge AI Copilot
-
-### Vision
-
-Forge is the Claude-powered AI copilot that sits alongside the visual editor. Users can conversationally ask Forge to:
-- Add, modify, or remove nodes in a flow
-- Write or improve agent instructions
-- Explain what a node or skill does
-- Debug configuration issues (missing inputs, budget problems)
-- Suggest skills for a given task
-- Validate a flow and explain errors
-
-### Current State
-
-The UI shell is built (`AISidePanel` component):
-- Chat interface with message history
-- Welcome message explaining capabilities
-- Tool call indicators (name + status)
-- Streaming animation
-- Mock responses (will connect to real API)
-
-### Planned Architecture
-
-- Server-side: Express endpoint proxying to Claude API
-- Client-side: Streaming chat with tool call visualization
-- Tools available to Forge: `get_flow`, `update_node`, `add_node`, `remove_node`, `validate_flow`, `compile_prompt`, `list_skills`
-
----
-
 ## Package Dependency Graph
 
 ```
@@ -700,9 +893,9 @@ The UI shell is built (`AISidePanel` component):
   │
   ├── @forgeflow/parser (Zod schemas)
   │     │
-  │     └── @forgeflow/validator (semantic checks)
+  │     └── @forgeflow/validator (pluggable pipeline, FlowGraph)
   │           │
-  │           └── @forgeflow/compiler (prompt generation)
+  │           └── @forgeflow/compiler (staged IR pipeline)
   │
   ├── @forgeflow/skill-resolver (SKILL.md loading)
   │
@@ -710,15 +903,18 @@ The UI shell is built (`AISidePanel` component):
   │
   └── @forgeflow/engine (orchestrator, runners, watcher)
         │  (depends on parser, validator, compiler,
-        │   skill-resolver, state-store)
+        │   skill-resolver, state-store, chokidar, dockerode)
         │
         ├── @forgeflow/cli (forgeflow run/resume)
         │
-        └── @forgeflow/server (Express API)
+        └── @forgeflow/server (Express 5 API)
+              │  (+ copilot: @anthropic-ai/claude-agent-sdk)
+              │  (+ git: simple-git)
+              │  (+ github: @octokit/rest)
               │
               └── @forgeflow/desktop (Electron wrapper)
 
-@forgeflow/ui (React IDE — imports @forgeflow/types only)
+@forgeflow/ui (React IDE — imports @forgeflow/types only, API via fetch)
 ```
 
 ---
@@ -731,7 +927,7 @@ A 4-node contract review flow:
 1. User opens IDE, creates flow:
    Parse → Research (3 children) → ⛔ Checkpoint → Generate
 
-2. User saves → FLOW.json
+2. User saves → FLOW.json (auto-saved to server, git-tracked)
 
 3. User uploads contract.pdf → saved to state store as user input
 
@@ -781,22 +977,9 @@ A 4-node contract review flow:
    └───────────────────────────────────────────────────┘
 
 5. Run complete → all artifacts in state store
+   → viewable in Run Dashboard
+   → downloadable from output viewer
 ```
-
----
-
-## Local vs Cloud Architecture
-
-The engine uses the same interface everywhere. Only adapters change:
-
-| Concern | Local (MVP) | Cloud |
-|---------|-------------|-------|
-| Sandbox | Docker container per phase | Vercel Sandbox / Firecracker VM |
-| State store | `~/.forgeflow/runs/{id}/` on disk | Postgres + S3 |
-| Skill library | `~/.forgeflow/skills/` directory | Skill registry API |
-| Progress events | EventEmitter / WebSocket | WebSocket / SSE |
-| API key | User's `.env` file | Platform-managed per user |
-| Auth | None (single user) | User accounts + API keys |
 
 ---
 
@@ -807,17 +990,23 @@ The engine uses the same interface everywhere. Only adapters change:
 | Per-phase execution | Engine orchestrates, one agent per phase | Clean context, resource savings, natural serialization |
 | Sandbox per phase | New container for each phase | Isolation, security, clean filesystem |
 | Bidirectional sandbox channel | Filesystem watcher (chokidar) | Real-time interrupts, progressive output streaming, live monitoring |
+| Staged IR pipeline | resolve → generate | Separation of concerns, testable IR, enables live compile preview |
+| FlowGraph symbol table | Built once, consumed everywhere | Eliminates duplicated analysis, O(N+E) |
+| Pluggable validator | 11 rules with dependency ordering | Extensible, composable, skip-on-failure |
+| Wave-based children | Auto-computed from I/O declarations | No manual annotation, handles parallelism + ordering |
 | Flow validation before execution | Compiler-style type checking | Catch dependency errors, missing inputs, cycles at design time |
 | 5 interrupt types | approval, qa, selection, review, escalation | Covers all human-in-the-loop patterns across domains |
 | Inline + checkpoint modes | Auto-escalate via Promise.race | Quick questions stay fast, long pauses cost nothing |
-| Progressive output streaming | `file_written` events from InterruptWatcher | Real-time visibility, fault recovery |
 | Per-child prompt files | Prompts in `prompts/` directory, parent has ref table | O(n) tokens per level instead of O(n^depth) |
 | Resume after checkpoint | `orchestrator.resume()` reloads state, continues | Supports pauses of minutes or days with zero cost |
 | AgentRunner interface | Mock / Claude / Docker runners | Test without API, run locally, or sandbox |
-| Skills loaded per phase | Only declared skills copied to sandbox | Minimal context, faster startup |
+| Per-project Git repos | simple-git, per-project mutex | Version control without external dependencies |
+| GitHub integration | @octokit/rest, OAuth flow | First-class remote hosting |
+| .forge bundles | Magic header + gzip JSON | Portable, small, self-contained project sharing |
+| Keyboard shortcuts | Remappable, localStorage persistence | User customization without config files |
 | Editor framework | dockview-react | VS Code-like multi-panel tabs, split views, drag-and-drop |
 | DAG visualization | @xyflow/react + dagre | Mature, React-native, handles custom nodes well |
 | Instruction editor | CodeMirror 6 | Extensible, supports custom slash commands and decorations |
 | State management | React Context + useReducer | Clear action-based updates, no external library needed |
-| AI copilot | Side panel chat | Non-intrusive, always accessible, does not block editing |
+| AI copilot | Agent SDK + MCP tools, side panel | Full flow manipulation via conversation |
 | Styling | Tailwind CSS 4 | Utility-first with custom design tokens |

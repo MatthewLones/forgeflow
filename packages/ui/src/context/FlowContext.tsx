@@ -77,6 +77,7 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
     positions,
     selectedNodeId: null,
     dirty: false,
+    flowVersion: 0,
   });
 
   const selectedNode = state.selectedNodeId

@@ -8,14 +8,14 @@ import {
   type ReactNode,
 } from 'react';
 import type { DockviewApi } from 'dockview-react';
-import type { ValidationResult } from '@forgeflow/types';
+import type { ValidationResult, ReviewInterrupt } from '@forgeflow/types';
 import type { CompilePreviewResult } from '../lib/api-client';
 
 /* ── Tab types ────────────────────────────────────────────── */
 
 export interface EditorTab {
   id: string;
-  type: 'agent' | 'skill' | 'reference' | 'artifact' | 'validation' | 'compile' | 'run' | 'output' | 'run-history' | 'pre-run';
+  type: 'agent' | 'skill' | 'reference' | 'artifact' | 'validation' | 'compile' | 'run' | 'output' | 'run-history' | 'pre-run' | 'review';
   label: string;
   nodeId?: string;
   skillName?: string;
@@ -30,6 +30,8 @@ export interface EditorTab {
   requiredInputs?: Array<{ name: string; schema: { name: string; format: string; description: string; fields?: Array<{ key: string; type: string; description: string; required?: boolean }> } | null }>;
   /** Pre-run panel: still loading required inputs */
   fetchingInputs?: boolean;
+  /** Review panel: interrupt data */
+  interruptData?: { interrupt: ReviewInterrupt; runId: string };
 }
 
 /* ── Component map ────────────────────────────────────────── */
@@ -45,6 +47,7 @@ const COMPONENT_MAP: Record<EditorTab['type'], string> = {
   output: 'output-viewer',
   'run-history': 'run-history-panel',
   'pre-run': 'pre-run-panel',
+  review: 'review-panel',
 };
 
 export type WorkspaceSelection =

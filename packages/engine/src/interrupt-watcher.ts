@@ -60,8 +60,17 @@ export class InterruptWatcher {
       },
     });
 
-    this.watcher.on('add', (filePath: string) => {
+    const handleFile = (filePath: string, isChange = false) => {
       const fileName = basename(filePath);
+
+      // Subtask progress file — read on both add and change (not added to seen)
+      if (fileName === '__PROGRESS__.json') {
+        this.handleProgressFile(filePath);
+        return;
+      }
+
+      // For change events, only progress file is relevant
+      if (isChange) return;
 
       // Prevent duplicate processing
       if (this.seen.has(fileName)) return;
@@ -89,7 +98,10 @@ export class InterruptWatcher {
 
       // Regular output file → emit file_written event
       this.handleRegularFile(filePath, fileName);
-    });
+    };
+
+    this.watcher.on('add', (filePath: string) => handleFile(filePath));
+    this.watcher.on('change', (filePath: string) => handleFile(filePath, true));
 
     // Wait for watcher to be ready
     await new Promise<void>((resolve) => {
@@ -203,6 +215,25 @@ export class InterruptWatcher {
       } as ProgressEvent);
     } catch {
       // Malformed marker — ignore silently
+    }
+  }
+
+  /**
+   * Handle subtask progress file — emit subtask_update progress event.
+   */
+  private async handleProgressFile(filePath: string): Promise<void> {
+    try {
+      const content = await readFile(filePath, 'utf-8');
+      const data = JSON.parse(content);
+      if (Array.isArray(data.subtasks)) {
+        this.options?.onProgress?.({
+          type: 'subtask_update',
+          nodeId: this.options?.nodeId ?? 'unknown',
+          subtasks: data.subtasks,
+        });
+      }
+    } catch {
+      // Partial write or malformed — ignore
     }
   }
 

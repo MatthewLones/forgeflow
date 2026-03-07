@@ -1,8 +1,12 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   BackgroundVariant,
+  applyNodeChanges,
+  type Node,
+  type NodeChange,
   type NodeTypes,
   type EdgeTypes,
   type NodeMouseHandler,
@@ -34,14 +38,17 @@ export function DashboardDAG({
   nodeStatuses,
   selectedNodeId,
   onNodeClick,
+  onNodeDoubleClick,
 }: {
   nodes: FlowNode[];
   edges: FlowEdgeType[];
   nodeStatuses: Record<string, NodeRunStatus>;
   selectedNodeId: string | null;
   onNodeClick: (nodeId: string | null) => void;
+  onNodeDoubleClick?: (nodeId: string) => void;
 }) {
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [rfNodes, setRfNodes] = useState<Node[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,19 +58,25 @@ export function DashboardDAG({
     return () => { cancelled = true; };
   }, [nodes, edges]);
 
-  const rfNodes = useMemo(
-    () => {
-      const n = flowNodesToReactFlow(nodes, positions);
-      return n.map((node) => ({
-        ...node,
-        selected: node.id === selectedNodeId,
-        data: {
-          ...node.data,
-          runStatus: nodeStatuses[node.id] ?? 'idle',
-        },
-      }));
+  // Rebuild nodes when data changes (positions, statuses, selection)
+  useEffect(() => {
+    const n = flowNodesToReactFlow(nodes, positions);
+    setRfNodes(n.map((node) => ({
+      ...node,
+      selected: node.id === selectedNodeId,
+      data: {
+        ...node.data,
+        runStatus: nodeStatuses[node.id] ?? 'idle',
+      },
+    })));
+  }, [nodes, positions, nodeStatuses, selectedNodeId]);
+
+  // Apply node changes (drag, select) in real-time
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      setRfNodes((nds) => applyNodeChanges(changes, nds));
     },
-    [nodes, positions, nodeStatuses, selectedNodeId],
+    [],
   );
 
   const rfEdges = useMemo(
@@ -78,30 +91,39 @@ export function DashboardDAG({
     [onNodeClick, selectedNodeId],
   );
 
+  const handleNodeDblClick: NodeMouseHandler = useCallback(
+    (_e, node) => { onNodeDoubleClick?.(node.id); },
+    [onNodeDoubleClick],
+  );
+
   const handlePaneClick = useCallback(() => {
     onNodeClick(null);
   }, [onNodeClick]);
 
   return (
-    <ReactFlow
-      nodes={rfNodes}
-      edges={rfEdges}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
-      onNodeClick={handleNodeClick}
-      onPaneClick={handlePaneClick}
-      fitView
-      fitViewOptions={{ padding: 0.3 }}
-      nodesDraggable={false}
-      nodesConnectable={false}
-      elementsSelectable={true}
-      panOnDrag
-      zoomOnScroll
-      minZoom={0.3}
-      maxZoom={2}
-      proOptions={{ hideAttribution: true }}
-    >
-      <Background variant={BackgroundVariant.Dots} gap={16} size={0.5} />
-    </ReactFlow>
+    <ReactFlowProvider>
+      <ReactFlow
+        nodes={rfNodes}
+        edges={rfEdges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        onNodesChange={handleNodesChange}
+        onNodeClick={handleNodeClick}
+        onNodeDoubleClick={handleNodeDblClick}
+        onPaneClick={handlePaneClick}
+        fitView
+        fitViewOptions={{ padding: 0.3 }}
+        nodesDraggable
+        nodesConnectable={false}
+        elementsSelectable={true}
+        panOnDrag
+        zoomOnScroll
+        minZoom={0.3}
+        maxZoom={2}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background variant={BackgroundVariant.Dots} gap={16} size={0.5} />
+      </ReactFlow>
+    </ReactFlowProvider>
   );
 }

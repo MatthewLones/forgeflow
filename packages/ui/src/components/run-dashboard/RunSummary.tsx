@@ -15,7 +15,7 @@ interface Summary {
     toolCallCount: number;
     textBlockCount: number;
   }>;
-  artifacts: Array<{ name: string; size: number; producedBy: string }>;
+  artifacts: Array<{ name: string; size: number; format?: string; producedBy: string }>;
   errors: string[];
   interrupts: Array<{ id: string; type: string; nodeId: string; escalated: boolean }>;
 }
@@ -31,6 +31,17 @@ function formatDuration(start: string, end: string): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+}
+
+function formatIcon(format?: string): string {
+  switch (format) {
+    case 'json': return '{}';
+    case 'csv': return '\u2637';
+    case 'pdf': return '\u25A3';
+    case 'markdown': return '#';
+    case 'image': return '\u25A3';
+    default: return '\u25A1';
+  }
 }
 
 export function RunSummary({
@@ -126,7 +137,7 @@ export function RunSummary({
                 onClick={() => onArtifactClick(artifact.name)}
                 className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-blue-50 text-left group"
               >
-                <span className="text-[10px] text-[var(--color-text-muted)]">{'\u25A1'}</span>
+                <span className="text-[10px] text-[var(--color-text-muted)]">{formatIcon(artifact.format)}</span>
                 <span className="text-xs text-[var(--color-text-primary)] group-hover:text-blue-600 truncate flex-1">
                   {artifact.name}
                 </span>

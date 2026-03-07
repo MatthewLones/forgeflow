@@ -26,12 +26,15 @@ export interface StateStore {
   /** Save a checkpoint answer file */
   saveCheckpointAnswer(runId: string, fileName: string, content: Buffer): Promise<void>;
 
+  /** Save multiple checkpoint answer files at once */
+  saveCheckpointAnswers(runId: string, files: Array<{ fileName: string; content: Buffer }>): Promise<void>;
+
   /** Save user-uploaded input files */
   saveUserUploads(runId: string, files: StateFile[]): Promise<void>;
 
   /** List artifact files for a run */
-  listArtifacts(runId: string): Promise<Array<{ name: string; size: number }>>;
+  listArtifacts(runId: string): Promise<Array<{ name: string; size: number; format: string }>>;
 
-  /** Read a single artifact file */
-  readArtifact(runId: string, fileName: string): Promise<Buffer | null>;
+  /** Read a single artifact file (resolves extension fallback if exact match not found) */
+  readArtifact(runId: string, fileName: string): Promise<{ content: Buffer; resolvedName: string } | null>;
 }

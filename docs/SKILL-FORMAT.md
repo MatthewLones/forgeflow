@@ -286,7 +286,14 @@ This pattern — decision tree routing + focused reference files — scales to a
 
 ## Editing Skills in the UI
 
-The ForgeFlow IDE includes a visual skill editor accessible from the AgentExplorer sidebar (Skills section). Opening a skill launches a `SkillEditorPanel` in the dockview tab area.
+The ForgeFlow IDE includes a visual skill editor accessible from the AgentExplorer sidebar (Skills section). Skills are managed via the server API — all CRUD operations persist to `~/.forgeflow/projects/{id}/skills/`.
+
+### Skill Management
+
+- **Create** — Right-click "Skills" in AgentExplorer, or use the Forge copilot (`create_skill` MCP tool)
+- **Rename / Delete** — Context menu on any skill in the explorer tree
+- **Open** — Click a skill to open a `SkillEditorPanel` tab in the dockview editor area
+- **Reference files** — Upload, create folders, rename, and delete via the References section in AgentExplorer
 
 ### Editor Features
 
@@ -300,9 +307,20 @@ The ForgeFlow IDE includes a visual skill editor accessible from the AgentExplor
   - `/guardrail` — Insert guardrail rules
 - **View modes** — Toggle between Edit (slash editor with widgets), Compiled (rendered markdown preview), and Raw (plain CodeMirror)
 - **Import suggestions bar** — Detects referenced skills and files, suggests adding them as dependencies
+- **Auto-save** — Changes save to the server automatically after editing
+
+### Forge Copilot Integration
+
+The Forge AI copilot can create and modify skills conversationally via MCP tools:
+- `create_skill` — Creates a new skill directory with SKILL.md
+- `update_skill` — Modifies an existing skill's content
+
+When the copilot modifies a skill, the UI reloads automatically.
 
 ### Connecting Skills to Flows
 
 In the AgentEditor's ConfigBottomPanel (Skills tab), users assign skills to nodes. The skill names in `node.config.skills` must match skill directory names resolved by `@forgeflow/skill-resolver`. Global skills declared at the flow level are available to all nodes.
+
+Skills can reference artifacts by convention — document which artifacts the skill helps produce or consume to guide the compiler's prompt generation.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full UI architecture and state management details.

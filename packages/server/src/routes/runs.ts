@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { lookup } from 'mime-types';
 import type { StateFile } from '@forgeflow/types';
+import { validateFlow } from '@forgeflow/validator';
 import { runManager } from '../services/run-manager.js';
 import { ProjectStore } from '../services/project-store.js';
 import type { RunnerType } from '../services/run-manager.js';
@@ -41,6 +42,22 @@ router.post('/projects/:id/run', upload.array('files', 20), async (req, res) => 
       return;
     }
 
+    // Validate flow before running
+    const validation = validateFlow(flow);
+    const errors = validation.errors;
+    if (!validation.valid || errors.length > 0) {
+      console.error(`[runs] flow validation failed: ${errors.length} error(s)`);
+      res.status(400).json({
+        error: 'Flow has validation errors. Fix them before running.',
+        diagnostics: errors.map((d) => ({
+          rule: d.rule,
+          message: d.message,
+          nodeId: d.nodeId,
+        })),
+      });
+      return;
+    }
+
     // Convert multer files to StateFile[]
     const multerFiles = (req.files as Express.Multer.File[]) ?? [];
     const userUploads: StateFile[] = multerFiles.map((f) => ({
@@ -49,12 +66,14 @@ router.post('/projects/:id/run', upload.array('files', 20), async (req, res) => 
       producedByPhase: 'user_upload',
     }));
 
-    console.log(`[runs] starting run: ${multerFiles.length} uploads, flow has ${flow.nodes.length} nodes`);
+    const skillDir = store.skillsDir(projectId);
+    console.log(`[runs] starting run: ${multerFiles.length} uploads, flow has ${flow.nodes.length} nodes, skillDir=${skillDir}`);
 
     const runId = await runManager.startRun(projectId, flow, runner, {
       model,
       apiKey: resolvedApiKey,
       userUploads,
+      skillPaths: [store.skillsDir(projectId)],
     });
 
     console.log(`[runs] run started: ${runId}`);
@@ -131,17 +150,12 @@ router.post('/runs/:runId/interrupt-answer', (req, res) => {
   }
 });
 
-// POST /api/runs/:runId/resume — resume from checkpoint
-router.post('/runs/:runId/resume', async (req, res) => {
+// POST /api/runs/:runId/retry — retry a failed run from the failed phase
+router.post('/runs/:runId/retry', async (req, res) => {
   try {
-    const { projectId, fileName, content } = req.body as {
-      projectId: string;
-      fileName: string;
-      content: string; // base64 encoded
-    };
-
-    if (!projectId || !fileName || !content) {
-      res.status(400).json({ error: 'projectId, fileName, and content are required' });
+    const { projectId } = req.body as { projectId: string };
+    if (!projectId) {
+      res.status(400).json({ error: 'projectId is required' });
       return;
     }
 
@@ -153,19 +167,86 @@ router.post('/runs/:runId/resume', async (req, res) => {
 
     const runner = (req.body.runner ?? 'mock') as RunnerType;
     const resolvedKey = req.body.apiKey || process.env.ANTHROPIC_API_KEY;
-    const contentBuffer = Buffer.from(content, 'base64');
+
+    const runId = await runManager.retryRun(
+      req.params.runId,
+      flow,
+      runner,
+      { model: req.body.model, apiKey: resolvedKey, skillPaths: [store.skillsDir(projectId)] },
+    );
+
+    res.json({ runId });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to retry run';
+    res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/runs/:runId/resume — resume from checkpoint (multi-file or legacy single-file)
+router.post('/runs/:runId/resume', async (req, res) => {
+  try {
+    const { projectId } = req.body as { projectId: string };
+
+    if (!projectId) {
+      res.status(400).json({ error: 'projectId is required' });
+      return;
+    }
+
+    // Accept multi-file format { files: [...] } or legacy { fileName, content }
+    let checkpointFiles: Array<{ fileName: string; content: Buffer }>;
+    if (Array.isArray(req.body.files)) {
+      checkpointFiles = (req.body.files as Array<{ fileName: string; content: string }>).map((f) => ({
+        fileName: f.fileName,
+        content: Buffer.from(f.content, 'base64'),
+      }));
+    } else if (req.body.fileName && req.body.content) {
+      // Legacy single-file format
+      checkpointFiles = [{
+        fileName: req.body.fileName,
+        content: Buffer.from(req.body.content, 'base64'),
+      }];
+    } else {
+      res.status(400).json({ error: 'Either files array or fileName+content are required' });
+      return;
+    }
+
+    const flow = await store.getFlow(projectId);
+    if (!flow) {
+      res.status(404).json({ error: 'Flow not found for project' });
+      return;
+    }
+
+    const runner = (req.body.runner ?? 'mock') as RunnerType;
+    const resolvedKey = req.body.apiKey || process.env.ANTHROPIC_API_KEY;
 
     const runId = await runManager.resumeRun(
       req.params.runId,
       flow,
-      { fileName, content: contentBuffer },
+      checkpointFiles,
       runner,
-      { model: req.body.model, apiKey: resolvedKey },
+      { model: req.body.model, apiKey: resolvedKey, skillPaths: [store.skillsDir(projectId)] },
     );
 
     res.json({ runId });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to resume run';
+    res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/runs/:runId/checkpoint-validate — validate checkpoint content without resuming
+router.post('/runs/:runId/checkpoint-validate', async (req, res) => {
+  try {
+    const { fileName, content } = req.body as { fileName: string; content: string };
+    if (!fileName || !content) {
+      res.status(400).json({ error: 'fileName and content are required' });
+      return;
+    }
+
+    const result = await runManager.validateCheckpointFile(req.params.runId, fileName, Buffer.from(content, 'base64'));
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Validation failed';
     res.status(500).json({ error: message });
   }
 });
@@ -194,16 +275,17 @@ router.get('/runs/:runId/outputs', async (req, res) => {
 router.get('/runs/:runId/outputs/:fileName', async (req, res) => {
   try {
     const fileName = req.params.fileName;
-    const content = await runManager.readArtifact(req.params.runId, fileName);
-    if (!content) {
+    const result = await runManager.readArtifact(req.params.runId, fileName);
+    if (!result) {
       res.status(404).json({ error: 'Output file not found' });
       return;
     }
 
-    const mimeType = lookup(fileName) || 'application/octet-stream';
+    const mimeType = lookup(result.resolvedName) || 'application/octet-stream';
     res.setHeader('Content-Type', mimeType);
-    res.setHeader('Content-Length', content.length);
-    res.send(content);
+    res.setHeader('Content-Length', result.content.length);
+    res.setHeader('X-Resolved-Filename', result.resolvedName);
+    res.send(result.content);
   } catch (err) {
     res.status(500).json({ error: 'Failed to read output file' });
   }

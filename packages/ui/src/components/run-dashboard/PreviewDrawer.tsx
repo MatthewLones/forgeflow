@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { marked } from 'marked';
 import { api } from '../../lib/api-client';
+import { ArtifactViewer } from '../shared/ArtifactViewer';
 
 export interface PreviewTarget {
   type: 'workspace' | 'artifact';
@@ -9,6 +9,13 @@ export interface PreviewTarget {
   phaseId?: string;
   filePath: string;
   projectId?: string;
+}
+
+const BINARY_EXTENSIONS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico', 'zip', 'tar', 'gz']);
+
+function isBinaryFile(fileName: string): boolean {
+  const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
+  return BINARY_EXTENSIONS.has(ext);
 }
 
 export function PreviewDrawer({
@@ -23,9 +30,26 @@ export function PreviewDrawer({
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  const fileName = target ? (target.filePath.split('/').pop() ?? target.filePath) : '';
+  const binary = target ? isBinaryFile(target.filePath) : false;
+
+  // Build direct URL for binary files
+  const fileUrl = target
+    ? target.type === 'workspace' && target.phaseId
+      ? api.runs.getWorkspaceFileUrl(target.runId, target.phaseId, target.filePath)
+      : api.runs.getOutputFileUrl(target.runId, target.filePath)
+    : undefined;
+
   useEffect(() => {
     if (!target) {
       setContent(null);
+      return;
+    }
+
+    // Binary files use URL-based rendering, no text fetch needed
+    if (binary) {
+      setContent(null);
+      setLoading(false);
       return;
     }
 
@@ -48,22 +72,9 @@ export function PreviewDrawer({
       }
     };
     load();
-  }, [target]);
+  }, [target, binary]);
 
   if (!target) return null;
-
-  const fileName = target.filePath.split('/').pop() ?? target.filePath;
-  const isJson = fileName.endsWith('.json');
-  const isMd = fileName.endsWith('.md');
-
-  let displayContent = content;
-  if (isJson && content) {
-    try {
-      displayContent = JSON.stringify(JSON.parse(content), null, 2);
-    } catch {
-      // Not valid JSON, show raw
-    }
-  }
 
   return (
     <>
@@ -104,17 +115,12 @@ export function PreviewDrawer({
           {error && (
             <div className="text-xs text-red-500">{error}</div>
           )}
-          {displayContent !== null && !loading && (
-            isMd ? (
-              <div
-                className="prose-skill"
-                dangerouslySetInnerHTML={{ __html: marked.parse(displayContent, { async: false }) as string }}
-              />
-            ) : (
-              <pre className="text-xs whitespace-pre-wrap break-words font-mono text-[var(--color-text-primary)]">
-                {displayContent}
-              </pre>
-            )
+          {!loading && !error && (
+            <ArtifactViewer
+              content={binary ? undefined : (content ?? undefined)}
+              fileUrl={fileUrl}
+              fileName={target.filePath}
+            />
           )}
         </div>
       </div>

@@ -1,5 +1,5 @@
 import type {
-  FlowDefinition, ValidationResult,
+  FlowDefinition, ValidationResult, PhaseIR,
   GitStatus, GitCommit, GitBranch, GitDiffEntry,
   GitHubConnection, GitHubRepo,
 } from '@forgeflow/types';
@@ -63,14 +63,21 @@ export interface CompilePhase {
   nodeId: string;
   nodeName: string;
   nodeType: string;
-  ir?: unknown;
+  ir?: PhaseIR;
   prompt: string;
-  childPrompts: Record<string, { ir?: unknown; markdown: string }>;
+  childPrompts: Record<string, { ir?: PhaseIR; markdown: string }>;
+}
+
+export interface CompilePreviewSkill {
+  name: string;
+  files: Array<{ path: string; content: string }>;
 }
 
 export interface CompilePreviewResult {
   valid: boolean;
   errors?: Array<{ message: string }>;
+  systemPrompt?: string;
+  skills?: CompilePreviewSkill[];
   phases: CompilePhase[];
 }
 
@@ -277,8 +284,8 @@ export const api = {
     validate: (flow: FlowDefinition) =>
       post<ValidationResult>('/validate', flow),
 
-    compilePreview: (flow: FlowDefinition) =>
-      post<CompilePreviewResult>('/compile/preview', flow),
+    compilePreview: (flow: FlowDefinition, projectId?: string) =>
+      post<CompilePreviewResult>('/compile/preview', projectId ? { flow, projectId } : flow),
 
     requiredInputs: (projectId: string) =>
       get<{
@@ -324,15 +331,33 @@ export const api = {
     resume: (
       runId: string,
       projectId: string,
-      fileName: string,
-      content: string, // base64
+      files: Array<{ fileName: string; content: string }>, // content is base64
       runner: 'mock' | 'local' | 'docker' = 'mock',
     ) =>
       post<{ runId: string }>(`/runs/${runId}/resume`, {
         projectId,
+        files,
+        runner,
+      }),
+
+    retry: (
+      runId: string,
+      projectId: string,
+      runner: 'mock' | 'local' | 'docker' = 'mock',
+    ) =>
+      post<{ runId: string }>(`/runs/${runId}/retry`, {
+        projectId,
+        runner,
+      }),
+
+    validateCheckpointFile: (
+      runId: string,
+      fileName: string,
+      content: string, // base64
+    ) =>
+      post<{ valid: boolean; errors: string[] }>(`/runs/${runId}/checkpoint-validate`, {
         fileName,
         content,
-        runner,
       }),
 
     /** Connect to SSE progress stream. Returns EventSource. */
@@ -356,6 +381,15 @@ export const api = {
     getOutputText: async (runId: string, fileName: string): Promise<string> => {
       const res = await getRaw(`/runs/${runId}/outputs/${encodeURIComponent(fileName)}`);
       return res.text();
+    },
+
+    /** Fetch output file with resolved metadata (for checkpoint presented files) */
+    getOutputResponse: async (runId: string, fileName: string): Promise<{ text: string; resolvedName: string; contentType: string }> => {
+      const res = await getRaw(`/runs/${runId}/outputs/${encodeURIComponent(fileName)}`);
+      const resolvedName = res.headers.get('X-Resolved-Filename') ?? fileName;
+      const contentType = res.headers.get('Content-Type') ?? 'application/octet-stream';
+      const text = await res.text();
+      return { text, resolvedName, contentType };
     },
 
     /** Get computed post-run summary */

@@ -1,4 +1,4 @@
-import type { InterruptType, InterruptMode } from './node.js';
+import type { InterruptType, InterruptMode, ArtifactFormat } from './node.js';
 
 export interface InterruptSource {
   /** Path in the node tree, e.g., ["research", "law_agent"] */
@@ -19,6 +19,8 @@ export interface InterruptBase {
   title: string;
   /** Why this interrupt is happening */
   context: string;
+  /** Optional file attachments to present alongside the interrupt form */
+  attachments?: Array<{ fileName: string; label?: string; format?: ArtifactFormat }>;
 }
 
 // --- Approval ---

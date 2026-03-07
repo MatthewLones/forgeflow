@@ -40,6 +40,8 @@ export interface FlowState {
   positions: Record<string, { x: number; y: number }>;
   selectedNodeId: string | null;
   dirty: boolean;
+  /** Monotonic counter incremented on SET_FLOW — used as a React key to force panel remounts */
+  flowVersion: number;
 }
 
 /** Create a default new node of given type */
@@ -184,6 +186,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         flow: action.flow,
         positions: action.positions ?? state.positions,
         dirty: false,
+        flowVersion: (state.flowVersion ?? 0) + 1,
       };
 
     case 'SELECT_NODE':

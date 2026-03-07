@@ -51,6 +51,8 @@ interface ProjectStoreValue {
   refreshProjects: () => Promise<void>;
   /** Update the in-memory skill cache without a server round-trip */
   updateSkillCache: (skillName: string, files: Array<{ path: string; content: string }>) => void;
+  /** Clear cached skill file data — forces re-fetch on next access */
+  clearSkillDataCache: () => void;
 }
 
 const ProjectStoreContext = createContext<ProjectStoreValue | null>(null);
@@ -258,6 +260,10 @@ export function ProjectStoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const clearSkillDataCache = useCallback(() => {
+    setSkillData({});
+  }, []);
+
   const value = useMemo<ProjectStoreValue>(
     () => ({
       projects,
@@ -288,8 +294,9 @@ export function ProjectStoreProvider({ children }: { children: ReactNode }) {
       deleteSkill,
       refreshProjects,
       updateSkillCache,
+      clearSkillDataCache,
     }),
-    [projects, loading, error, skills, skillsLoading, skillData, references, referencesLoading, flows, loadReferences, uploadReferences, deleteReference, createReferenceFolder, renameReference, createProject, deleteProject, getFlowById, updateFlow, saveFlow, loadProject, loadSkills, loadSkill, saveSkill, createSkill, renameSkill, deleteSkill, refreshProjects, updateSkillCache],
+    [projects, loading, error, skills, skillsLoading, skillData, references, referencesLoading, flows, loadReferences, uploadReferences, deleteReference, createReferenceFolder, renameReference, createProject, deleteProject, getFlowById, updateFlow, saveFlow, loadProject, loadSkills, loadSkill, saveSkill, createSkill, renameSkill, deleteSkill, refreshProjects, updateSkillCache, clearSkillDataCache],
   );
 
   return (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FlowNode, NodeType, NodeConfig, ArtifactSchema } from '@forgeflow/types';
 import { useFlow } from '../../context/FlowContext';
 import { useProjectStore } from '../../context/ProjectStore';
@@ -9,6 +9,7 @@ import { artifactTooltip } from '../../lib/chip-styles';
 import { SlashCommandEditor } from './slash-commands/SlashCommandEditor';
 import type { ChipTooltipData } from './slash-commands/chip-decoration';
 import { ConfigBottomPanel } from './ConfigBottomPanel';
+import { CheckpointIOBar } from './CheckpointIOBar';
 
 interface AgentEditorProps {
   nodeId: string;
@@ -369,20 +370,25 @@ export function AgentEditor({ nodeId }: AgentEditorProps) {
         </button>
       </div>
 
+      {/* Checkpoint I/O bar (presents/expects) */}
+      {node.type === 'checkpoint' && (
+        <CheckpointIOBar nodeId={nodeId} node={node} />
+      )}
+
       {/* Instructions editor — fills all remaining space */}
       <div className="flex-1 overflow-hidden">
         <SlashCommandEditor
           key={nodeId}
           content={node.instructions}
           onChange={handleInstructionsChange}
-          skills={skillNames}
-          agents={agentNames}
+          skills={node.type === 'checkpoint' ? [] : skillNames}
+          agents={node.type === 'checkpoint' ? [] : agentNames}
           artifacts={artifactNames}
           artifactFolders={artifactFolders}
           tooltipData={tooltipData}
-          onCreateAgent={handleCreateAgent}
+          onCreateAgent={node.type === 'checkpoint' ? undefined : handleCreateAgent}
           onCreateArtifact={handleCreateArtifact}
-          onCreateSkill={handleCreateSkill}
+          onCreateSkill={node.type === 'checkpoint' ? undefined : handleCreateSkill}
           onClickSkill={handleClickSkill}
           onClickAgent={handleClickAgent}
           onClickArtifact={handleClickArtifact}
@@ -395,3 +401,4 @@ export function AgentEditor({ nodeId }: AgentEditorProps) {
     </div>
   );
 }
+

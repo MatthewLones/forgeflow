@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { ProjectStoreProvider } from './context/ProjectStore';
 import { DashboardPage } from './pages/DashboardPage';
+import { RunLayout } from './layouts/RunLayout';
 
 const WorkspacePage = lazy(() =>
   import('./pages/WorkspacePage').then((m) => ({ default: m.WorkspacePage })),
@@ -9,6 +10,14 @@ const WorkspacePage = lazy(() =>
 
 const RunDashboardPage = lazy(() =>
   import('./pages/RunDashboardPage').then((m) => ({ default: m.RunDashboardPage })),
+);
+
+const InterruptPage = lazy(() =>
+  import('./pages/InterruptPage').then((m) => ({ default: m.InterruptPage })),
+);
+
+const CheckpointPage = lazy(() =>
+  import('./pages/CheckpointPage').then((m) => ({ default: m.CheckpointPage })),
 );
 
 const RunListPage = lazy(() =>
@@ -60,14 +69,32 @@ export function App() {
             </Suspense>
           }
         />
-        <Route
-          path="/projects/:projectId/runs/:runId"
-          element={
-            <Suspense fallback={<Loading />}>
-              <RunDashboardPage />
-            </Suspense>
-          }
-        />
+        <Route path="/projects/:projectId/runs/:runId" element={<RunLayout />}>
+          <Route
+            index
+            element={
+              <Suspense fallback={<Loading />}>
+                <RunDashboardPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="interrupts"
+            element={
+              <Suspense fallback={<Loading />}>
+                <InterruptPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="checkpoint"
+            element={
+              <Suspense fallback={<Loading />}>
+                <CheckpointPage />
+              </Suspense>
+            }
+          />
+        </Route>
         <Route
           path="/github/callback"
           element={

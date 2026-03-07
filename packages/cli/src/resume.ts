@@ -10,7 +10,7 @@ import { createCliInterruptHandler } from './interrupt-handler.js';
 interface ResumeOptions {
   flowDir: string;
   runId: string;
-  inputFile: string;
+  inputFiles: string[];
   model?: string;
   runner: 'docker' | 'local' | 'mock';
   skillPaths: string[];
@@ -21,7 +21,7 @@ function parseResumeArgs(args: string[]): ResumeOptions {
   const options: ResumeOptions = {
     flowDir: '',
     runId: '',
-    inputFile: '',
+    inputFiles: [],
     runner: 'docker',
     skillPaths: [],
   };
@@ -32,7 +32,7 @@ function parseResumeArgs(args: string[]): ResumeOptions {
     const arg = args[i];
 
     if (arg === '--input' && args[i + 1]) {
-      options.inputFile = args[++i];
+      options.inputFiles.push(args[++i]);
     } else if (arg === '--model' && args[i + 1]) {
       options.model = args[++i];
     } else if (arg === '--docker') {
@@ -62,8 +62,8 @@ function parseResumeArgs(args: string[]): ResumeOptions {
   if (!options.runId) {
     throw new Error('Missing required argument: <run-id>');
   }
-  if (!options.inputFile) {
-    throw new Error('Missing required argument: --input <file>');
+  if (options.inputFiles.length === 0) {
+    throw new Error('Missing required argument: --input <file> (can be specified multiple times)');
   }
 
   return options;
@@ -94,10 +94,31 @@ export async function resume(args: string[]): Promise<void> {
   console.log(`Flow: ${flow.name} (${flow.id})`);
   console.log(`Resuming run: ${options.runId}`);
 
-  // Read checkpoint input file
-  const inputContent = await readFile(resolve(options.inputFile));
-  const inputFileName = basename(options.inputFile);
-  console.log(`  Checkpoint input: ${inputFileName}`);
+  // Read all checkpoint input files
+  const checkpointInputs: Array<{ fileName: string; content: Buffer }> = [];
+  for (const inputPath of options.inputFiles) {
+    const content = await readFile(resolve(inputPath));
+    const fileName = basename(inputPath);
+    checkpointInputs.push({ fileName, content });
+    console.log(`  Checkpoint input: ${fileName} (${content.length} bytes)`);
+  }
+
+  // Load checkpoint state and show what's expected
+  const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '/tmp';
+  const stateStore = new LocalStateStore(join(homeDir, '.forgeflow', 'runs'));
+
+  const checkpoint = await stateStore.loadCheckpoint(options.runId);
+  if (checkpoint?.expectedFiles?.length) {
+    const provided = new Set(checkpointInputs.map((f) => f.fileName));
+    const missing = checkpoint.expectedFiles.filter((ef) => !ef.provided && !provided.has(ef.fileName));
+    if (missing.length > 0) {
+      console.warn(`\n  Warning: checkpoint expects ${checkpoint.expectedFiles.length} file(s), but ${missing.length} not provided:`);
+      for (const ef of missing) {
+        const format = ef.schema?.format ?? 'any';
+        console.warn(`    - ${ef.fileName} (${format})`);
+      }
+    }
+  }
 
   // Build skill search paths
   const skillSearchPaths = [
@@ -115,8 +136,6 @@ export async function resume(args: string[]): Promise<void> {
     apiKey: options.apiKey,
   };
   const runner = createRunner(runnerOptions);
-  const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '/tmp';
-  const stateStore = new LocalStateStore(join(homeDir, '.forgeflow', 'runs'));
 
   const orchestrator = new FlowOrchestrator(runner, stateStore, {
     onProgress: (event) => {
@@ -127,12 +146,9 @@ export async function resume(args: string[]): Promise<void> {
     interruptHandler: createCliInterruptHandler(),
   });
 
-  // Resume
+  // Resume with all input files
   console.log('\nResuming execution...');
-  const result = await orchestrator.resume(flow, options.runId, {
-    fileName: inputFileName,
-    content: inputContent,
-  });
+  const result = await orchestrator.resume(flow, options.runId, checkpointInputs);
 
   // Print result
   console.log('\n=== Result ===');
@@ -147,6 +163,16 @@ export async function resume(args: string[]): Promise<void> {
 
   if (result.status === 'awaiting_input') {
     console.log(`\nRun paused at checkpoint. Run ID: ${result.runId}`);
+    // Show what the next checkpoint expects
+    const nextCheckpoint = await stateStore.loadCheckpoint(result.runId);
+    if (nextCheckpoint?.expectedFiles?.length) {
+      console.log('Expected files:');
+      for (const ef of nextCheckpoint.expectedFiles) {
+        const format = ef.schema?.format ?? 'any';
+        console.log(`  - ${ef.fileName} (${format})`);
+      }
+      console.log(`\nResume with: forgeflow resume ${options.flowDir} ${result.runId} ${nextCheckpoint.expectedFiles.map((ef) => `--input <${ef.fileName}>`).join(' ')}`);
+    }
   }
 
   process.exit(result.success ? 0 : 1);
