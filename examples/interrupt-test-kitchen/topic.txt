@@ -1,0 +1,13 @@
+Why Every Developer Should Learn to Write
+
+Write a blog post arguing that writing skills are the most underrated superpower for software engineers. Cover these angles:
+
+1. Code reviews are writing. Pull request descriptions, commit messages, and inline comments are all forms of technical writing that directly impact team velocity.
+
+2. Documentation is a product. Good docs reduce support burden, onboard new hires faster, and make open-source projects succeed or fail.
+
+3. Clear thinking requires clear writing. The act of writing forces you to organize your thoughts — if you can't explain a system in prose, you probably don't fully understand it.
+
+4. Career leverage. Engineers who can write well get promoted faster, land better roles, and build personal brands through blog posts and conference talks.
+
+Target audience: mid-career software engineers (3-7 years experience) who are technically strong but haven't invested in writing skills. Tone should be conversational and persuasive, not preachy.

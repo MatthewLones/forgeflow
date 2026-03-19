@@ -143,7 +143,7 @@ export function InterruptPage() {
               </h3>
               {[...answeredHistory].reverse().map((entry, i) => (
                 <div
-                  key={entry.interrupt.id}
+                  key={entry.interrupt.interrupt_id}
                   className="rounded-lg border border-[var(--color-border)] bg-white overflow-hidden"
                 >
                   <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 border-b border-[var(--color-border)]">

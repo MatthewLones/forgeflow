@@ -1199,5 +1199,304 @@ Describe this skill's purpose and how it should be used.
         ].join('\n'),
       },
     ]);
+
+    // --- Seed project 2: Interrupt Test Kitchen ---
+    await this.seedInterruptTestKitchen();
+  }
+
+  /**
+   * Simple 4-node linear flow that exercises all 5 interrupt types + 1 checkpoint.
+   * Designed for fast dev testing with MockRunner (minimal tokens).
+   */
+  private async seedInterruptTestKitchen(): Promise<void> {
+    const meta = await this.createProject(
+      'Interrupt Test Kitchen',
+      'Simple flow that exercises all 5 interrupt types, a checkpoint, and child agents — for dev testing',
+    );
+
+    const flow: FlowDefinition = {
+      id: meta.id,
+      name: 'Interrupt Test Kitchen',
+      version: '1.0',
+      description: 'Simple flow that exercises all 5 interrupt types, a checkpoint, and child agents — for dev testing',
+      skills: ['writing-guide'],
+      budget: { maxTurns: 100, maxBudgetUsd: 10.0, timeoutMs: 600000 },
+      nodes: [
+        {
+          id: 'draft_content',
+          type: 'agent',
+          name: 'Draft Content',
+          instructions: [
+            'Write a short blog post draft based on the provided topic.',
+            '',
+            'Read the @topic input and produce a 3-paragraph blog post draft.',
+            'Apply /skill:writing-guide for tone and structure.',
+            '',
+            'Use two subagents to help:',
+            '- //agent:research_facts — gather 3-5 supporting facts',
+            '- //agent:write_outline — create a structured outline',
+            '',
+            'Then assemble the final draft using their outputs.',
+            '',
+            'Before finalizing, trigger /interrupt:qa to ask the user:',
+            '- Preferred tone (formal, casual, technical)',
+            '- Target audience',
+            '- Any specific points to include',
+            '',
+            'Output: \\blog_draft',
+          ].join('\n'),
+          config: {
+            inputs: ['topic'],
+            outputs: ['blog_draft'],
+            skills: ['writing-guide'],
+            budget: { maxTurns: 30, maxBudgetUsd: 3.0 },
+            interrupts: [{ type: 'qa' as const }],
+          },
+          children: [
+            {
+              id: 'research_facts',
+              type: 'agent',
+              name: 'Fact Researcher',
+              instructions: [
+                'Research 3-5 supporting facts for the blog topic.',
+                '',
+                'Using @topic, find relevant statistics, quotes, or data points.',
+                'Output them as a structured list.',
+                '',
+                'Output: \\research_notes',
+              ].join('\n'),
+              config: {
+                inputs: ['topic'],
+                outputs: ['research_notes'],
+                skills: [],
+                budget: { maxTurns: 10, maxBudgetUsd: 1.0 },
+              },
+              children: [],
+            },
+            {
+              id: 'write_outline',
+              type: 'agent',
+              name: 'Outline Writer',
+              instructions: [
+                'Create a structured outline for the blog post.',
+                '',
+                'Using @topic, produce a 3-section outline with key points for each section.',
+                '',
+                'Output: \\outline',
+              ].join('\n'),
+              config: {
+                inputs: ['topic'],
+                outputs: ['outline'],
+                skills: [],
+                budget: { maxTurns: 10, maxBudgetUsd: 1.0 },
+              },
+              children: [],
+            },
+          ],
+        },
+        {
+          id: 'review_draft',
+          type: 'agent',
+          name: 'Review Draft',
+          instructions: [
+            'Review the blog draft for quality and accuracy.',
+            '',
+            'Read @blog_draft and evaluate:',
+            '- Grammar and clarity',
+            '- Factual accuracy',
+            '- Tone consistency',
+            '- Structure and flow',
+            '',
+            'First, trigger /interrupt:review so the user can read and edit the draft directly.',
+            '',
+            'Then trigger /interrupt:selection to let the user pick which sections need more work:',
+            '- Introduction',
+            '- Body paragraphs',
+            '- Conclusion',
+            '- Sources/citations',
+            '',
+            'Produce a review summary with recommendations.',
+            '',
+            'Output: \\review_notes',
+          ].join('\n'),
+          config: {
+            inputs: ['blog_draft'],
+            outputs: ['review_notes'],
+            skills: [],
+            budget: { maxTurns: 20, maxBudgetUsd: 2.0 },
+            interrupts: [
+              { type: 'review' as const },
+              { type: 'selection' as const },
+            ],
+          },
+          children: [],
+        },
+        {
+          id: 'editor_checkpoint',
+          type: 'checkpoint',
+          name: 'Editor Sign-off',
+          instructions: [
+            'The draft has been written and reviewed.',
+            '',
+            'Review the blog draft and the review notes below.',
+            'Provide your editorial decision as a JSON file with:',
+            '- **decision**: "publish", "revise", or "reject"',
+            '- **feedback**: your notes on what to change (if revise)',
+            '- **priority**: "low", "medium", or "high"',
+          ].join('\n'),
+          config: {
+            inputs: ['blog_draft', 'review_notes'],
+            outputs: ['editor_decision'],
+            skills: [],
+            presentation: {
+              title: 'Blog Post Review — Editor Sign-off Required',
+              sections: [],
+            },
+          },
+          children: [],
+        },
+        {
+          id: 'finalize',
+          type: 'agent',
+          name: 'Finalize & Publish',
+          instructions: [
+            'Finalize the blog post based on the editor decision.',
+            '',
+            'Using @blog_draft, @review_notes, and @editor_decision:',
+            '',
+            '- If decision is "publish", format the final version',
+            '- If decision is "revise", apply the feedback and rewrite',
+            '- If decision is "reject", produce a rejection summary',
+            '',
+            'Before publishing, trigger /interrupt:approval — the editor must approve the final version.',
+            '',
+            'If any critical issues are found during finalization, trigger /interrupt:escalation to flag them.',
+            '',
+            'Outputs: \\final_post \\publish_metadata',
+          ].join('\n'),
+          config: {
+            inputs: ['blog_draft', 'review_notes', 'editor_decision'],
+            outputs: ['final_post', 'publish_metadata'],
+            skills: ['writing-guide'],
+            budget: { maxTurns: 30, maxBudgetUsd: 3.0 },
+            interrupts: [
+              { type: 'approval' as const },
+              { type: 'escalation' as const },
+            ],
+          },
+          children: [],
+        },
+      ],
+      artifacts: {
+        topic: {
+          name: 'topic', format: 'text' as const,
+          description: 'Blog post topic or brief to write about',
+        },
+        blog_draft: {
+          name: 'blog_draft', format: 'markdown' as const,
+          description: 'The initial blog post draft',
+        },
+        research_notes: {
+          name: 'research_notes', format: 'json' as const,
+          description: 'Supporting facts and data points',
+          fields: [
+            { key: 'facts', type: 'array' as const, description: 'List of supporting facts' },
+            { key: 'sources', type: 'array' as const, description: 'Source URLs or references' },
+          ],
+        },
+        outline: {
+          name: 'outline', format: 'json' as const,
+          description: 'Blog post outline with sections and key points',
+          fields: [
+            { key: 'sections', type: 'array' as const, description: 'Outline sections' },
+          ],
+        },
+        review_notes: {
+          name: 'review_notes', format: 'json' as const,
+          description: 'Review findings and recommendations',
+          fields: [
+            { key: 'grammar_score', type: 'number' as const, description: 'Grammar quality (1-10)' },
+            { key: 'clarity_score', type: 'number' as const, description: 'Clarity score (1-10)' },
+            { key: 'issues', type: 'array' as const, description: 'List of issues found' },
+            { key: 'recommendations', type: 'array' as const, description: 'Improvement suggestions' },
+          ],
+        },
+        editor_decision: {
+          name: 'editor_decision', format: 'json' as const,
+          description: 'Editor sign-off decision',
+          fields: [
+            { key: 'decision', type: 'string' as const, description: 'publish, revise, or reject' },
+            { key: 'feedback', type: 'string' as const, description: 'Editor notes and feedback', required: false },
+            { key: 'priority', type: 'string' as const, description: 'low, medium, or high' },
+          ],
+        },
+        final_post: {
+          name: 'final_post', format: 'markdown' as const,
+          description: 'The finalized blog post ready for publishing',
+        },
+        publish_metadata: {
+          name: 'publish_metadata', format: 'json' as const,
+          description: 'Publishing metadata (title, tags, slug)',
+          fields: [
+            { key: 'title', type: 'string' as const, description: 'Post title' },
+            { key: 'slug', type: 'string' as const, description: 'URL slug' },
+            { key: 'tags', type: 'array' as const, description: 'Content tags' },
+            { key: 'published_at', type: 'string' as const, description: 'ISO timestamp' },
+          ],
+        },
+      },
+      edges: [
+        { from: 'draft_content', to: 'review_draft' },
+        { from: 'review_draft', to: 'editor_checkpoint' },
+        { from: 'editor_checkpoint', to: 'finalize' },
+      ],
+    };
+    await this.saveFlow(meta.id, flow);
+
+    // Create the writing-guide skill
+    await this.saveSkill(meta.id, 'writing-guide', [
+      {
+        path: 'SKILL.md',
+        content: [
+          '---',
+          'name: writing-guide',
+          'description: "Blog post writing style and structure guidelines"',
+          'version: "1.0.0"',
+          '---',
+          '',
+          '# Writing Guide',
+          '',
+          'Guidelines for producing high-quality blog content.',
+          '',
+          '## Structure',
+          '',
+          '- **Hook** — Open with a compelling question, stat, or anecdote',
+          '- **Body** — 2-3 paragraphs, each with a clear point and supporting evidence',
+          '- **Conclusion** — Summarize key takeaway and call to action',
+          '',
+          '## Tone',
+          '',
+          '- Conversational but authoritative',
+          '- Use active voice',
+          '- Keep sentences under 25 words',
+          '- One idea per paragraph',
+          '',
+          '## Formatting',
+          '',
+          '- Use H2 headers for main sections',
+          '- Bold key terms on first use',
+          '- Include bullet lists for 3+ related items',
+          '- Add a pull quote for emphasis',
+          '',
+          '> **DO** Write for a general audience first, add technical depth in later sections',
+          '>',
+          '> **DO** Include at least one data point or citation per section',
+          '>',
+          '> **DO NOT** Use jargon without defining it',
+          '>',
+          '> **DO NOT** Write paragraphs longer than 5 sentences',
+        ].join('\n'),
+      },
+    ]);
   }
 }

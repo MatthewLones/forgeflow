@@ -44,6 +44,8 @@ export function SchemaForm({ schema, values, onChange, disabled }: SchemaFormPro
 
 /* ── Per-field input ─── */
 
+const MULTILINE_KEYS = /^(feedback|notes|comments?|description|explanation|reason|details|summary|content|body|message)$/i;
+
 function FieldInput({
   field,
   value,
@@ -97,6 +99,15 @@ function FieldInput({
           disabled={disabled}
           placeholder={field.description || '0'}
           className="w-full text-[11px] px-2.5 py-1.5 border border-[var(--color-border)] rounded bg-white font-mono focus:border-blue-400 focus:ring-1 focus:ring-blue-400/20 focus:outline-none transition-colors disabled:opacity-50 disabled:bg-gray-50"
+        />
+      ) : MULTILINE_KEYS.test(field.key) ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          placeholder={field.description || field.key}
+          rows={3}
+          className="w-full text-[11px] px-2.5 py-1.5 border border-[var(--color-border)] rounded bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400/20 focus:outline-none transition-colors resize-y disabled:opacity-50 disabled:bg-gray-50"
         />
       ) : (
         <input

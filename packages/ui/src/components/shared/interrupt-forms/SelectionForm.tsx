@@ -37,7 +37,7 @@ export function SelectionForm({ interrupt, onSubmit, disabled }: {
       <div className="text-xs text-[var(--color-text-muted)]">
         Select {interrupt.minSelect ?? 0}–{maxLabel} items
       </div>
-      <div className="space-y-2 max-h-80 overflow-y-auto">
+      <div className="space-y-2 max-h-[60vh] overflow-y-auto">
         {interrupt.items.map((item) => (
           <label
             key={item.id}

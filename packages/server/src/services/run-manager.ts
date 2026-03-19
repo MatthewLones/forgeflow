@@ -694,6 +694,15 @@ export class RunManager {
     }
     if (state.error) errors.push(state.error);
 
+    // Workspace file inventory
+    let workspace: Array<{ phaseId: string; files: Array<{ path: string; size: number }> }> = [];
+    try {
+      const ws = await this.listWorkspaceFiles(runId);
+      workspace = ws.phases;
+    } catch {
+      // Workspace may not exist for mock runs
+    }
+
     return {
       runId,
       status: state.status,
@@ -719,6 +728,8 @@ export class RunManager {
       })),
       errors,
       interrupts,
+      events,
+      workspace,
     };
   }
 

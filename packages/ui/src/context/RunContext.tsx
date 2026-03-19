@@ -50,6 +50,7 @@ interface RunState {
 
 type RunAction =
   | { type: 'RUN_STARTED'; runId: string }
+  | { type: 'RESUME_STARTED'; runId: string }
   | { type: 'SSE_EVENT'; event: ProgressEvent }
   | { type: 'RUN_FINISHED'; status: 'completed' | 'failed' }
   | { type: 'INTERRUPT_ANSWERED'; interruptId: string; answer: InterruptAnswer }
@@ -82,6 +83,18 @@ function runReducer(state: RunState, action: RunAction): RunState {
   switch (action.type) {
     case 'RUN_STARTED':
       return { ...initialState, status: 'running', runId: action.runId, startedAt: Date.now() };
+
+    case 'RESUME_STARTED':
+      return {
+        ...initialState,
+        status: 'running',
+        runId: action.runId,
+        startedAt: Date.now(),
+        // Preserve history from previous run segment
+        checkpointAnswers: state.checkpointAnswers,
+        interruptAnswers: state.interruptAnswers,
+        events: state.events,
+      };
 
     case 'SSE_EVENT': {
       const event = action.event;
@@ -335,7 +348,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
 
   const answerInterrupt = useCallback(async (answer: InterruptAnswer) => {
     if (!state.runId || !state.pendingInterrupt) return;
-    const interruptId = state.pendingInterrupt.id;
+    const interruptId = state.pendingInterrupt.interrupt_id;
     await api.runs.answerInterrupt(state.runId, answer);
     dispatch({ type: 'INTERRUPT_ANSWERED', interruptId, answer });
   }, [state.runId, state.pendingInterrupt]);
@@ -363,10 +376,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
     doneReceivedRef.current = false;
     const { runId } = await api.runs.resume(state.runId, projectId, files, runner);
 
+    dispatch({ type: 'RESUME_STARTED', runId });
     if (checkpointNodeId) {
       dispatch({ type: 'CHECKPOINT_ANSWERED', checkpointNodeId, fileNames: files.map((f) => f.fileName) });
     }
-    dispatch({ type: 'RUN_STARTED', runId });
     subscribeSSE(runId);
   }, [state.runId, state.events, cleanupSSE, subscribeSSE]);
 
@@ -385,7 +398,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     for (const event of state.events) {
       if (event.type === 'interrupt') {
         const interrupt = event.interrupt;
-        const answer = state.interruptAnswers[interrupt.id];
+        const answer = state.interruptAnswers[interrupt.interrupt_id];
         if (!answer) continue; // Only include answered interrupts in history
         entries.push({
           interrupt,

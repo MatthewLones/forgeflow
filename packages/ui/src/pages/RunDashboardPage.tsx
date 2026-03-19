@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle, type PanelImperativeHandle } from 'react-resizable-panels';
 import { useRun } from '../context/RunContext';
 import { useProjectStore } from '../context/ProjectStore';
 import { DashboardToolbar } from '../components/run-dashboard/DashboardToolbar';
@@ -128,6 +128,14 @@ export function RunDashboardPage() {
 
   // Hooks must be called before any early returns
   const phaseTodos = useMemo(() => derivePhaseTodos(run.events), [run.events]);
+  const taskPanelRef = useRef<PanelImperativeHandle>(null);
+
+  // Expand the task panel when todos first arrive (panel starts collapsed at size 0)
+  useEffect(() => {
+    if (phaseTodos.length > 0 && taskPanelRef.current?.isCollapsed()) {
+      taskPanelRef.current.resize(20);
+    }
+  }, [phaseTodos.length]);
 
   // Debug logging
   console.log('[RunDashboard] render:', {
@@ -239,19 +247,17 @@ export function RunDashboardPage() {
       {/* Main content — resizable panels */}
       <div className="flex-1 overflow-hidden">
         <PanelGroup orientation="vertical">
-          {/* Phase progress todos — resizable panel */}
-          {phaseTodos.length > 0 && (
-            <>
-              <Panel defaultSize={20} minSize={3} maxSize={50}>
-                <div className="h-full px-4 py-2 bg-white">
-                  <TodoWidget todos={phaseTodos} isActive={run.status === 'running'} fillHeight />
-                </div>
-              </Panel>
-              <PanelResizeHandle className="h-1.5 bg-transparent hover:bg-blue-200/60 transition-colors cursor-row-resize flex items-center justify-center group border-y border-[var(--color-border)]">
-                <div className="w-8 h-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
-              </PanelResizeHandle>
-            </>
-          )}
+          {/* Phase progress todos — always mounted to avoid react-resizable-panels layout bugs on conditional mount */}
+          <Panel panelRef={taskPanelRef} defaultSize={phaseTodos.length > 0 ? 20 : 0} minSize={phaseTodos.length > 0 ? 3 : 0} maxSize={50} collapsible>
+            {phaseTodos.length > 0 && (
+              <div className="h-full px-4 py-2 bg-white">
+                <TodoWidget todos={phaseTodos} isActive={run.status === 'running'} fillHeight />
+              </div>
+            )}
+          </Panel>
+          <PanelResizeHandle disabled={phaseTodos.length === 0} className={`bg-transparent hover:bg-blue-200/60 transition-colors cursor-row-resize flex items-center justify-center group border-y border-[var(--color-border)] ${phaseTodos.length === 0 ? 'h-0 border-0 overflow-hidden' : 'h-1.5'}`}>
+            <div className="w-8 h-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+          </PanelResizeHandle>
 
           {/* DAG panel */}
           <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 30 : 40) : 0} minSize={flow ? 15 : 0}>
@@ -301,6 +307,7 @@ export function RunDashboardPage() {
                     onNodeClick={setSelectedNodeId}
                     onFileClick={handleEventFileClick}
                     onArtifactClick={handleArtifactClick}
+                    onWorkspaceFileClick={handleWorkspaceFileClick}
                   />
                 </Panel>
                 <PanelResizeHandle className="w-1.5 bg-transparent hover:bg-blue-200/60 transition-colors cursor-col-resize flex items-center justify-center group border-x border-[var(--color-border)]">
@@ -325,6 +332,7 @@ export function RunDashboardPage() {
                 onNodeClick={setSelectedNodeId}
                 onFileClick={handleEventFileClick}
                 onArtifactClick={handleArtifactClick}
+                onWorkspaceFileClick={handleWorkspaceFileClick}
               />
             )}
           </Panel>
@@ -360,6 +368,7 @@ function EventStreamPanel({
   onNodeClick,
   onFileClick,
   onArtifactClick,
+  onWorkspaceFileClick,
 }: {
   showSummary: boolean;
   isDone: boolean;
@@ -370,7 +379,17 @@ function EventStreamPanel({
   onNodeClick: (nodeId: string | null) => void;
   onFileClick: (fileName: string, nodeId?: string) => void;
   onArtifactClick: (fileName: string) => void;
+  onWorkspaceFileClick: (phaseId: string, filePath: string) => void;
 }) {
+  // Unified handler for RunSummary: routes workspace clicks vs artifact clicks
+  const handleSummaryFileClick = useCallback((fileName: string, phaseId?: string) => {
+    if (phaseId) {
+      onWorkspaceFileClick(phaseId, fileName);
+    } else {
+      onFileClick(fileName);
+    }
+  }, [onWorkspaceFileClick, onFileClick]);
+
   if (showSummary && isDone && run.runId) {
     return (
       <div className="h-full flex flex-col">
@@ -384,8 +403,8 @@ function EventStreamPanel({
             Show Events
           </button>
         </div>
-        <div className="flex-1 overflow-hidden">
-          <RunSummary runId={run.runId} onArtifactClick={onArtifactClick} />
+        <div className="flex-1 min-h-0">
+          <RunSummary runId={run.runId} onArtifactClick={onArtifactClick} onFileClick={handleSummaryFileClick} />
         </div>
       </div>
     );
