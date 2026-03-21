@@ -43,3 +43,4 @@
 - GitManager auto-initializes repos with a `.gitignore` (ignores `references/`, `copilot-chats/`) and an initial commit
 - ProjectStore `isPathSafe()` guards all reference file operations against directory traversal
 - RunManager `readWorkspaceFile()` independently guards against directory traversal via `path.resolve()` comparison
+- ProjectStore `getProjectSkillsSummaries()` extracts sub-skill references from SKILL.md via `/skill:NAME` pattern (single slash, matching the UI chip syntax). Returns `subSkills: string[]` in each `SkillSummary`.
