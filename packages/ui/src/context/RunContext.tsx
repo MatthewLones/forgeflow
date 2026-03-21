@@ -135,8 +135,17 @@ function runReducer(state: RunState, action: RunAction): RunState {
             nodeStatuses: { ...state.nodeStatuses, [event.checkpoint.checkpointNodeId]: 'waiting' },
           };
 
-        case 'interrupt':
-          return { ...state, events, pendingInterrupt: event.interrupt };
+        case 'interrupt': {
+          // Deduplicate: if this interrupt_id is already in events, skip appending
+          const isDuplicate = state.events.some(
+            (e) => e.type === 'interrupt' && e.interrupt.interrupt_id === event.interrupt.interrupt_id,
+          );
+          return {
+            ...state,
+            events: isDuplicate ? state.events : events,
+            pendingInterrupt: event.interrupt,
+          };
+        }
 
         case 'cost_update':
           return { ...state, events, totalCost: { turns: event.turns, usd: event.usd } };
@@ -395,11 +404,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
 
   const interruptHistory = useMemo<InterruptHistoryEntry[]>(() => {
     const entries: InterruptHistoryEntry[] = [];
+    const seen = new Set<string>();
+    const pendingId = state.pendingInterrupt?.interrupt_id;
     for (const event of state.events) {
       if (event.type === 'interrupt') {
         const interrupt = event.interrupt;
+        // Exclude the currently-pending interrupt, unanswered ones, and duplicates
+        if (interrupt.interrupt_id === pendingId) continue;
+        if (seen.has(interrupt.interrupt_id)) continue;
         const answer = state.interruptAnswers[interrupt.interrupt_id];
-        if (!answer) continue; // Only include answered interrupts in history
+        if (!answer) continue;
+        seen.add(interrupt.interrupt_id);
         entries.push({
           interrupt,
           answer,
@@ -408,7 +423,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       }
     }
     return entries;
-  }, [state.events, state.interruptAnswers]);
+  }, [state.events, state.interruptAnswers, state.pendingInterrupt]);
 
   const checkpointHistory = useMemo<CheckpointHistoryEntry[]>(() => {
     const entries: CheckpointHistoryEntry[] = [];

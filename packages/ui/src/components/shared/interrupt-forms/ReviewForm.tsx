@@ -15,28 +15,39 @@ export function ReviewForm({ interrupt, onSubmit, disabled, runId }: {
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [editedContent, setEditedContent] = useState('');
   const [draftContent, setDraftContent] = useState<string | null>(null);
+  const [resolvedFileName, setResolvedFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Fetch draft file content if runId is provided
   useEffect(() => {
     if (!runId || !interrupt.draftFile) return;
     let cancelled = false;
     setLoading(true);
-    api.runs.getOutputText(runId, interrupt.draftFile)
-      .then((text) => {
+    setLoadError(null);
+    api.runs.getOutputResponse(runId, interrupt.draftFile)
+      .then(({ text, resolvedName }) => {
         if (!cancelled) {
           setDraftContent(text);
           setEditedContent(text);
+          setResolvedFileName(resolvedName);
         }
       })
-      .catch(() => {
-        if (!cancelled) setDraftContent(null);
+      .catch((err) => {
+        if (!cancelled) {
+          setDraftContent(null);
+          setLoadError(err instanceof Error ? err.message : 'Failed to load draft file');
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [runId, interrupt.draftFile]);
+  }, [runId, interrupt.draftFile, retryCount]);
+
+  const effectiveFileName = resolvedFileName ?? interrupt.draftFile;
+  const fileUrl = runId ? api.runs.getOutputFileUrl(runId, effectiveFileName) : undefined;
 
   return (
     <div className="space-y-4">
@@ -88,12 +99,29 @@ export function ReviewForm({ interrupt, onSubmit, disabled, runId }: {
             Loading draft...
           </div>
         ) : mode === 'view' ? (
-          <div className="max-h-[50vh] overflow-y-auto">
-            {draftContent != null ? (
-              <ArtifactViewer content={draftContent} fileName={interrupt.draftFile} schema={{ format: interrupt.format } as ArtifactSchema} />
+          <div className="max-h-[70vh] overflow-y-auto">
+            {(draftContent != null || fileUrl) ? (
+              <ArtifactViewer
+                content={draftContent ?? undefined}
+                fileUrl={fileUrl}
+                fileName={effectiveFileName}
+                schema={{ format: interrupt.format } as ArtifactSchema}
+              />
             ) : (
               <div className="p-4 text-sm text-[var(--color-text-muted)]">
                 Draft file not available for preview
+              </div>
+            )}
+            {loadError && (
+              <div className="px-4 py-2 text-[11px] text-amber-700 bg-amber-50 border-t border-amber-200 flex items-center gap-2">
+                <span>Failed to load content: {loadError}</span>
+                <button
+                  type="button"
+                  onClick={() => setRetryCount((c) => c + 1)}
+                  className="underline hover:text-amber-900"
+                >
+                  Retry
+                </button>
               </div>
             )}
           </div>

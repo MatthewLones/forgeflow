@@ -41,9 +41,9 @@ function base64Encode(text: string): string {
   return btoa(unescape(encodeURIComponent(text)));
 }
 
-async function fetchPresentedFile(runId: string, fileName: string): Promise<{ text: string; resolvedName: string }> {
+async function fetchPresentedFile(runId: string, fileName: string): Promise<{ text: string; resolvedName: string; contentType: string }> {
   const result = await api.runs.getOutputResponse(runId, fileName);
-  return { text: result.text, resolvedName: result.resolvedName };
+  return { text: result.text, resolvedName: result.resolvedName, contentType: result.contentType };
 }
 
 /* ── Presented file state ─── */
@@ -113,10 +113,12 @@ export function CheckpointPanel({ projectId, checkpoint, runId, className, hideH
       if (isBinaryFormat(schema)) continue; // binary files use URL, skip text fetch
 
       fetchPresentedFile(runId, fileName)
-        .then(({ text, resolvedName }) => {
+        .then(({ text, resolvedName, contentType }) => {
           if (cancelled) return;
           // Check if resolved file is actually binary (e.g., extensionless name resolved to .pdf)
-          const resolvedBinary = isBinaryExtension(resolvedName);
+          const resolvedBinary = isBinaryExtension(resolvedName)
+            || contentType.startsWith('image/')
+            || contentType === 'application/pdf';
           setPresentedFiles((prev) =>
             prev.map((f) => f.fileName === fileName
               ? { ...f, content: resolvedBinary ? null : text, resolvedName, binary: resolvedBinary, loading: false }
@@ -226,7 +228,7 @@ export function CheckpointPanel({ projectId, checkpoint, runId, className, hideH
   const headerText = isEscalated ? 'text-red-800' : 'text-amber-800';
 
   return (
-    <div className={className ?? `shrink-0 border-b ${isEscalated ? 'border-red-300' : 'border-amber-300'} max-h-[70vh] overflow-y-auto`}>
+    <div className={className ?? `shrink-0 border-b ${isEscalated ? 'border-red-300' : 'border-amber-300'} max-h-[85vh] overflow-y-auto`}>
       {/* Escalation warning */}
       {isEscalated && !hideHeader && (
         <div className="flex items-center gap-2 px-4 py-2 bg-red-100 border-b border-red-200">
@@ -253,11 +255,6 @@ export function CheckpointPanel({ projectId, checkpoint, runId, className, hideH
       )}
 
       <div className="bg-white">
-        {/* ── Instructions text ── */}
-        {checkpoint.instructions && (
-          <InstructionsBlock text={checkpoint.instructions} />
-        )}
-
         {/* ── PRESENTS section ── */}
         {presentedFiles.length > 0 && (
           <div className="border-b border-[var(--color-border)]">
@@ -281,16 +278,6 @@ export function CheckpointPanel({ projectId, checkpoint, runId, className, hideH
                     <span className="text-[11px] font-mono font-medium text-[var(--color-text-primary)] flex-1 text-left truncate">
                       {pf.fileName}
                     </span>
-                    {pf.schema?.format && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-canvas-bg)] text-[var(--color-text-muted)] border border-[var(--color-border)] shrink-0">
-                        {pf.schema.format}
-                      </span>
-                    )}
-                    {pf.schema?.fields?.length ? (
-                      <span className="text-[9px] text-[var(--color-text-muted)] shrink-0">
-                        {pf.schema.fields.length} fields
-                      </span>
-                    ) : null}
                     {pf.loading && (
                       <span className="text-[10px] text-[var(--color-text-muted)] italic shrink-0">loading...</span>
                     )}
@@ -311,7 +298,7 @@ export function CheckpointPanel({ projectId, checkpoint, runId, className, hideH
                       {!pf.loading && !pf.error && (pf.content !== null || pf.binary) && (
                         <ArtifactViewer
                           content={pf.binary ? undefined : (pf.content ?? undefined)}
-                          fileUrl={pf.binary ? api.runs.getOutputFileUrl(runId, pf.fileName) : undefined}
+                          fileUrl={api.runs.getOutputFileUrl(runId, pf.resolvedName ?? pf.fileName)}
                           fileName={pf.resolvedName ?? pf.fileName}
                           schema={pf.schema}
                         />
@@ -411,23 +398,6 @@ function ExpectedFileInput({ entry, onUpdate, onFileUpload, onValidate, fileInpu
         <span className="text-[11px] font-mono font-medium text-[var(--color-text-primary)] flex-1 truncate">
           {entry.fileName}
         </span>
-        {schema?.description && (
-          <span className="text-[10px] text-[var(--color-text-muted)] truncate max-w-[200px]" title={schema.description}>
-            {schema.description}
-          </span>
-        )}
-        <span className="text-[9px] px-1.5 py-0.5 rounded bg-white text-[var(--color-text-muted)] border border-[var(--color-border)] shrink-0">
-          {formatLabel}
-        </span>
-        {hasFields && (
-          <span className="text-[9px] text-[var(--color-text-muted)] shrink-0">
-            {schema!.fields!.length} fields
-          </span>
-        )}
-        {/* Validation status */}
-        {entry.validating && <span className="text-[10px] text-amber-600 shrink-0">validating...</span>}
-        {entry.valid === true && <span className="text-[10px] text-green-600 shrink-0">{'\u2713'} Valid</span>}
-        {entry.valid === false && <span className="text-[10px] text-red-600 shrink-0">{'\u2717'} Invalid</span>}
       </div>
 
       {/* Input area */}
@@ -440,26 +410,6 @@ function ExpectedFileInput({ entry, onUpdate, onFileUpload, onValidate, fileInpu
               values={entry.formValues}
               onChange={(formValues) => onUpdate({ formValues, valid: null, errors: [] })}
             />
-            <div className="flex items-center gap-2 pt-1 border-t border-[var(--color-border)]/30">
-              <button
-                type="button"
-                onClick={() => {
-                  const content = formValuesToJson(schema!.fields!, entry.formValues);
-                  onUpdate({ mode: 'textarea', rawContent: content });
-                }}
-                className="text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline"
-              >
-                Switch to raw JSON
-              </button>
-              <button
-                type="button"
-                onClick={onValidate}
-                disabled={!isFormComplete(schema!.fields!, entry.formValues)}
-                className="text-[10px] font-medium px-2 py-0.5 rounded border border-[var(--color-border)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] disabled:opacity-40"
-              >
-                Validate
-              </button>
-            </div>
           </div>
         )}
 
@@ -473,44 +423,6 @@ function ExpectedFileInput({ entry, onUpdate, onFileUpload, onValidate, fileInpu
               rows={formatLabel === 'json' ? 6 : 4}
               className="w-full text-[11px] px-2.5 py-1.5 border border-[var(--color-border)] rounded bg-white font-mono focus:border-blue-400 focus:ring-1 focus:ring-blue-400/20 focus:outline-none transition-colors resize-none"
             />
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={triggerFileDialog}
-                className="text-[10px] font-medium px-2 py-0.5 rounded border border-[var(--color-border)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)]"
-              >
-                Upload file
-              </button>
-              <button
-                type="button"
-                onClick={onValidate}
-                disabled={!entry.rawContent.trim()}
-                className="text-[10px] font-medium px-2 py-0.5 rounded border border-[var(--color-border)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-canvas-bg)] disabled:opacity-40"
-              >
-                Validate
-              </button>
-              {hasFields && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    let parsed: Record<string, string> = {};
-                    try {
-                      const obj = JSON.parse(entry.rawContent);
-                      for (const field of schema!.fields!) {
-                        if (obj[field.key] !== undefined) {
-                          const val = obj[field.key];
-                          parsed[field.key] = typeof val === 'object' ? JSON.stringify(val) : String(val);
-                        }
-                      }
-                    } catch { /* ignore */ }
-                    onUpdate({ mode: 'form', formValues: parsed });
-                  }}
-                  className="text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline"
-                >
-                  Switch to form
-                </button>
-              )}
-            </div>
           </div>
         )}
 

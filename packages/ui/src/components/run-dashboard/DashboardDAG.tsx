@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -49,11 +49,17 @@ export function DashboardDAG({
 }) {
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [rfNodes, setRfNodes] = useState<Node[]>([]);
+  // Track user-dragged positions so they survive re-renders from selection/status changes
+  const dragPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
 
   useEffect(() => {
     let cancelled = false;
     autoLayout(nodes, edges).then((pos) => {
-      if (!cancelled) setPositions(pos);
+      if (!cancelled) {
+        setPositions(pos);
+        // Reset drag overrides when layout is recomputed
+        dragPositionsRef.current = {};
+      }
     });
     return () => { cancelled = true; };
   }, [nodes, edges]);
@@ -61,8 +67,11 @@ export function DashboardDAG({
   // Rebuild nodes when data changes (positions, statuses, selection)
   useEffect(() => {
     const n = flowNodesToReactFlow(nodes, positions);
+    const dragged = dragPositionsRef.current;
     setRfNodes(n.map((node) => ({
       ...node,
+      // Preserve drag positions if the user moved the node
+      position: dragged[node.id] ?? node.position,
       selected: node.id === selectedNodeId,
       data: {
         ...node.data,
@@ -74,6 +83,12 @@ export function DashboardDAG({
   // Apply node changes (drag, select) in real-time
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
+      // Persist drag positions so they survive useEffect rebuilds
+      for (const change of changes) {
+        if (change.type === 'position' && change.position && change.id) {
+          dragPositionsRef.current[change.id] = change.position;
+        }
+      }
       setRfNodes((nds) => applyNodeChanges(changes, nds));
     },
     [],

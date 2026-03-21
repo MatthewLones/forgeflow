@@ -512,7 +512,71 @@ export class RunManager {
   }
 
   async readArtifact(runId: string, fileName: string): Promise<{ content: Buffer; resolvedName: string } | null> {
-    return this.stateStore.readArtifact(runId, fileName);
+    // Normalize: agents reference files as "output/name" (relative to workspace root)
+    // but storage and workspace search use just "name" (relative to the output/ dir)
+    const normalized = fileName.replace(/^output\//, '');
+
+    // Try state store first (artifacts + uploads)
+    const result = await this.stateStore.readArtifact(runId, normalized);
+    if (result) return result;
+
+    // Fallback: search workspace output directories (for mid-phase files like review drafts)
+    const wsResult = await this.readFromWorkspace(runId, normalized);
+    if (wsResult) return wsResult;
+
+    // Retry once for active runs — file may still be stabilizing
+    // (chokidar awaitWriteFinish has a 200ms threshold; the UI fetch can arrive before it settles)
+    const activeRun = this.runs.get(runId);
+    if (activeRun && !activeRun.result) {
+      await new Promise((r) => setTimeout(r, 500));
+      return this.readFromWorkspace(runId, normalized);
+    }
+
+    return null;
+  }
+
+  /**
+   * Search workspace output directories for a file by name.
+   * Handles extension fallback (e.g., "draft_blog" matches "draft_blog.md").
+   */
+  private async readFromWorkspace(runId: string, fileName: string): Promise<{ content: Buffer; resolvedName: string } | null> {
+    try {
+      const { readdir, readFile } = await import('node:fs/promises');
+      const { resolve } = await import('node:path');
+      const runWorkspace = join(this.workspaceBasePath, runId);
+      let phaseDirs: string[];
+      try {
+        phaseDirs = await readdir(runWorkspace);
+      } catch {
+        return null;
+      }
+      for (const phaseId of phaseDirs) {
+        const outputDir = join(runWorkspace, phaseId, 'output');
+        // Try exact match
+        const exactPath = join(outputDir, fileName);
+        const resolvedExact = resolve(exactPath);
+        const base = resolve(outputDir);
+        if (resolvedExact.startsWith(base)) {
+          try {
+            const content = await readFile(exactPath);
+            return { content, resolvedName: fileName };
+          } catch { /* not in this phase */ }
+        }
+        // Try extension fallback (e.g., "draft_blog" -> "draft_blog.md")
+        try {
+          const files = await readdir(outputDir);
+          const baseName = fileName.replace(/\.[^.]+$/, '');
+          const match = files.find((f) => f === fileName || f.replace(/\.[^.]+$/, '') === baseName || f.replace(/\.[^.]+$/, '') === fileName);
+          if (match) {
+            const matchPath = join(outputDir, match);
+            const content = await readFile(matchPath);
+            return { content, resolvedName: match };
+          }
+        } catch { /* no output dir for this phase */ }
+      }
+    } catch { /* fallback failed */ }
+
+    return null;
   }
 
   /**

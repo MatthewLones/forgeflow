@@ -199,7 +199,7 @@ export function RunDashboardPage() {
         reconnecting={run.reconnecting}
         onStop={stopRun}
         onRerun={handleRerun}
-        interruptCount={interruptHistory.length}
+        interruptCount={interruptHistory.length + (run.pendingInterrupt ? 1 : 0)}
         onInterrupts={() => navigate('interrupts')}
         checkpointCount={checkpointTotal}
         onCheckpoints={() => navigate('checkpoint')}
@@ -248,19 +248,19 @@ export function RunDashboardPage() {
       <div className="flex-1 overflow-hidden">
         <PanelGroup orientation="vertical">
           {/* Phase progress todos — always mounted to avoid react-resizable-panels layout bugs on conditional mount */}
-          <Panel panelRef={taskPanelRef} defaultSize={phaseTodos.length > 0 ? 20 : 0} minSize={phaseTodos.length > 0 ? 3 : 0} maxSize={50} collapsible>
+          <Panel panelRef={taskPanelRef} defaultSize={phaseTodos.length > 0 ? 30 : 0} minSize={phaseTodos.length > 0 ? 3 : 0} maxSize={70} collapsible>
             {phaseTodos.length > 0 && (
               <div className="h-full px-4 py-2 bg-white">
                 <TodoWidget todos={phaseTodos} isActive={run.status === 'running'} fillHeight />
               </div>
             )}
           </Panel>
-          <PanelResizeHandle disabled={phaseTodos.length === 0} className={`bg-transparent hover:bg-blue-200/60 transition-colors cursor-row-resize flex items-center justify-center group border-y border-[var(--color-border)] ${phaseTodos.length === 0 ? 'h-0 border-0 overflow-hidden' : 'h-1.5'}`}>
+          <PanelResizeHandle disabled={phaseTodos.length === 0} className={`bg-transparent hover:bg-blue-200/60 transition-colors cursor-row-resize flex items-center justify-center group border-y border-[var(--color-border)] relative z-10 ${phaseTodos.length === 0 ? 'h-0 border-0 overflow-hidden' : 'h-2 py-1'}`}>
             <div className="w-8 h-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
           </PanelResizeHandle>
 
           {/* DAG panel */}
-          <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 30 : 40) : 0} minSize={flow ? 15 : 0}>
+          <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 30 : 40) : 0} minSize={flow ? 5 : 0} collapsible>
             {flow ? (
               <div className="h-full">
                 <DashboardDAG
@@ -287,7 +287,7 @@ export function RunDashboardPage() {
           </Panel>
 
           {flow && (
-            <PanelResizeHandle className="h-1.5 bg-transparent hover:bg-blue-200/60 transition-colors cursor-row-resize flex items-center justify-center group border-y border-[var(--color-border)]">
+            <PanelResizeHandle className="h-2 py-1 bg-transparent hover:bg-blue-200/60 transition-colors cursor-row-resize flex items-center justify-center group border-y border-[var(--color-border)] relative z-10">
               <div className="w-8 h-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
             </PanelResizeHandle>
           )}

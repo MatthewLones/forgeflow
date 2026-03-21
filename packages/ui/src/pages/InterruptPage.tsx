@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { marked } from 'marked';
 import { useRun, type InterruptHistoryEntry } from '../context/RunContext';
@@ -60,6 +61,17 @@ export function InterruptPage() {
   const navigate = useNavigate();
   const { run, interruptHistory, answerInterrupt } = useRun();
 
+  // Escape key navigates back to run dashboard
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        navigate(`/projects/${projectId}/runs/${runId}`);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [navigate, projectId, runId]);
+
   const isLive = run.status === 'running' || run.status === 'starting' || run.status === 'awaiting_input';
   const pending = run.pendingInterrupt;
   const answeredHistory = interruptHistory;
@@ -94,7 +106,7 @@ export function InterruptPage() {
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto py-6 px-4 space-y-6">
+        <div className="max-w-6xl mx-auto py-6 px-4 space-y-6">
           {/* Current pending interrupt */}
           {pending ? (
             <div className="rounded-lg border-2 border-amber-300 bg-white shadow-sm overflow-hidden">

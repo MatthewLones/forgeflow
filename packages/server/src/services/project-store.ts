@@ -1498,5 +1498,170 @@ Describe this skill's purpose and how it should be used.
         ].join('\n'),
       },
     ]);
+
+    // --- Seed project 3: Interrupt Smoke Test ---
+    await this.seedInterruptSmokeTest();
+  }
+
+  /**
+   * Ultra-minimal flow for testing interrupt/checkpoint UI plumbing.
+   * Each node does the absolute minimum work and immediately triggers its interrupt.
+   * Designed to be run with the local runner at minimal token cost.
+   */
+  private async seedInterruptSmokeTest(): Promise<void> {
+    const meta = await this.createProject(
+      'Interrupt Smoke Test',
+      'Minimal flow: 3 interrupts (review, qa, selection) + 1 checkpoint. Each node does almost no thinking — just triggers the interrupt immediately.',
+    );
+
+    const flow: FlowDefinition = {
+      id: meta.id,
+      name: 'Interrupt Smoke Test',
+      version: '1.0',
+      description: 'Minimal flow: 3 interrupts + 1 checkpoint for UI smoke testing',
+      skills: [],
+      budget: { maxTurns: 50, maxBudgetUsd: 5.0, timeoutMs: 300000 },
+      nodes: [
+        {
+          id: 'write_draft',
+          type: 'agent',
+          name: 'Write Draft',
+          instructions: [
+            'IMPORTANT: Do NOT research or analyze. Keep this minimal.',
+            '',
+            'Write exactly ONE short paragraph (3-4 sentences) about the @topic. Do not elaborate.',
+            '',
+            'Save it as output/draft then IMMEDIATELY trigger /interrupt:review so the user can read it.',
+            '',
+            'After the user responds, save the final version.',
+            '',
+            'Output: \\draft',
+          ].join('\n'),
+          config: {
+            inputs: ['topic'],
+            outputs: [{ name: 'draft', format: 'markdown' as const, description: 'A short paragraph draft' }],
+            skills: [],
+            budget: { maxTurns: 10, maxBudgetUsd: 1.0 },
+            interrupts: [{ type: 'review' as const }],
+          },
+          children: [],
+        },
+        {
+          id: 'ask_preferences',
+          type: 'agent',
+          name: 'Ask Preferences',
+          instructions: [
+            'IMPORTANT: Do NOT analyze the draft. Just ask questions immediately.',
+            '',
+            'Trigger /interrupt:qa with exactly these 2 questions:',
+            '1. "What tone do you prefer?" (choice: casual, formal, technical)',
+            '2. "Any topics to avoid?" (free text)',
+            '',
+            'After receiving answers, write a simple JSON summary of the preferences.',
+            '',
+            'Output: \\preferences',
+          ].join('\n'),
+          config: {
+            inputs: ['draft'],
+            outputs: [{
+              name: 'preferences', format: 'json' as const, description: 'User preferences',
+              fields: [
+                { key: 'tone', type: 'string' as const, description: 'Preferred tone' },
+                { key: 'avoid', type: 'string' as const, description: 'Topics to avoid' },
+              ],
+            }],
+            skills: [],
+            budget: { maxTurns: 10, maxBudgetUsd: 1.0 },
+            interrupts: [{ type: 'qa' as const }],
+          },
+          children: [],
+        },
+        {
+          id: 'pick_sections',
+          type: 'agent',
+          name: 'Pick Sections',
+          instructions: [
+            'IMPORTANT: Do NOT rewrite anything. Just present choices immediately.',
+            '',
+            'Trigger /interrupt:selection with these 4 items for the user to choose which sections to keep:',
+            '- "introduction" — Opening hook',
+            '- "body" — Main argument',
+            '- "conclusion" — Closing summary',
+            '- "citations" — Sources and references',
+            '',
+            'After the user selects, write a JSON file listing which sections were kept.',
+            '',
+            'Output: \\selected_sections',
+          ].join('\n'),
+          config: {
+            inputs: ['draft', 'preferences'],
+            outputs: [{
+              name: 'selected_sections', format: 'json' as const, description: 'Which sections to keep',
+              fields: [
+                { key: 'kept', type: 'array' as const, description: 'Section IDs the user kept' },
+              ],
+            }],
+            skills: [],
+            budget: { maxTurns: 10, maxBudgetUsd: 1.0 },
+            interrupts: [{ type: 'selection' as const }],
+          },
+          children: [],
+        },
+        {
+          id: 'final_review',
+          type: 'checkpoint',
+          name: 'Final Review',
+          instructions: [
+            'Review all artifacts and approve or reject.',
+          ].join('\n'),
+          config: {
+            inputs: ['draft', 'preferences', 'selected_sections'],
+            outputs: [{
+              name: 'approval', format: 'json' as const, description: 'Final approval decision',
+              fields: [
+                { key: 'approved', type: 'boolean' as const, description: 'Whether to approve' },
+                { key: 'notes', type: 'string' as const, description: 'Final comments', required: false },
+              ],
+            }],
+            skills: [],
+            presentation: {
+              title: 'Final Review — Approve or Reject',
+              sections: [],
+            },
+          },
+          children: [],
+        },
+      ],
+      artifacts: {
+        topic: { name: 'topic', format: 'text' as const, description: 'A one-line topic to write about' },
+        draft: { name: 'draft', format: 'markdown' as const, description: 'Short paragraph draft' },
+        preferences: {
+          name: 'preferences', format: 'json' as const, description: 'User preferences from QA',
+          fields: [
+            { key: 'tone', type: 'string' as const, description: 'Preferred tone' },
+            { key: 'avoid', type: 'string' as const, description: 'Topics to avoid' },
+          ],
+        },
+        selected_sections: {
+          name: 'selected_sections', format: 'json' as const, description: 'Sections the user chose to keep',
+          fields: [
+            { key: 'kept', type: 'array' as const, description: 'Section IDs kept' },
+          ],
+        },
+        approval: {
+          name: 'approval', format: 'json' as const, description: 'Final approval',
+          fields: [
+            { key: 'approved', type: 'boolean' as const, description: 'Approved or not' },
+            { key: 'notes', type: 'string' as const, description: 'Comments', required: false },
+          ],
+        },
+      },
+      edges: [
+        { from: 'write_draft', to: 'ask_preferences' },
+        { from: 'ask_preferences', to: 'pick_sections' },
+        { from: 'pick_sections', to: 'final_review' },
+      ],
+    };
+    await this.saveFlow(meta.id, flow);
   }
 }

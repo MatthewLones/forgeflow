@@ -14,6 +14,7 @@ const STANDARD_TYPES = new Set([
   ...COMPACT_TYPES,
   'file_written', 'child_started', 'child_completed',
   'message', 'cost_update', 'escalation_timeout', 'interrupt_answered',
+  'subtask_update',
 ]);
 
 // Verbose = all events
@@ -75,6 +76,12 @@ function getEventDisplay(event: ProgressEvent): EventDisplay {
       return { icon: '\u23F1', color: 'text-amber-500', message: `Escalation timeout on ${event.nodeId}`, detail: `Timeout: ${event.timeoutMs}ms` };
     case 'interrupt_answered':
       return { icon: '\u2713', color: 'text-emerald-500', message: `Interrupt answered: ${event.interruptId}`, detail: event.escalated ? 'Escalated' : undefined };
+    case 'subtask_update': {
+      const done = event.subtasks.filter((s: { status: string }) => s.status === 'completed').length;
+      const total = event.subtasks.length;
+      const active = event.subtasks.find((s: { status: string }) => s.status === 'in_progress') as { label: string } | undefined;
+      return { icon: '\u2611', color: 'text-blue-400', message: active ? active.label : `Subtasks ${done}/${total}`, detail: `${done}/${total} complete`, indent: true, chipNode: event.nodeId };
+    }
     // Verbose events
     case 'tool_call':
       return { icon: '\u2692', color: 'text-indigo-500', message: `Tool call: ${event.toolName}`, detail: event.inputSummary.length > 100 ? event.inputSummary.slice(0, 100) + '...' : event.inputSummary, indent: true, chipTool: event.toolName, expandable: event.inputSummary };

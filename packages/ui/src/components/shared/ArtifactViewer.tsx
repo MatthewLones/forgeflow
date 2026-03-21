@@ -35,8 +35,11 @@ export function ArtifactViewer({ content, fileUrl, fileName, schema, format: for
     return <BinaryDownload fileUrl={fileUrl} fileName={fileName} />;
   }
 
-  // Text-based formats require content
+  // Text-based formats require content — fall back to download link if fileUrl available
   if (content == null) {
+    if (fileUrl) {
+      return <BinaryDownload fileUrl={fileUrl} fileName={fileName} />;
+    }
     return (
       <div className="text-[11px] text-[var(--color-text-muted)] italic">No content available</div>
     );

@@ -24,11 +24,6 @@ export function SchemaForm({ schema, values, onChange, disabled }: SchemaFormPro
 
   return (
     <div className="space-y-3">
-      {schema.description && (
-        <div className="text-[11px] text-[var(--color-text-secondary)] italic">
-          {schema.description}
-        </div>
-      )}
       {fields.map((field) => (
         <FieldInput
           key={field.key}
@@ -61,23 +56,13 @@ function FieldInput({
 
   return (
     <div className="space-y-1">
-      {/* Label row */}
+      {/* Label */}
       <div className="flex items-center gap-1.5">
         <label className="text-[11px] font-semibold text-[var(--color-text-primary)]">
           {field.key}
         </label>
         {isRequired && <span className="text-red-400 text-[10px]">*</span>}
-        <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--color-canvas-bg)] text-[var(--color-text-muted)] font-mono">
-          {field.type}
-        </span>
       </div>
-
-      {/* Description */}
-      {field.description && (
-        <div className="text-[10px] text-[var(--color-text-muted)] leading-tight">
-          {field.description}
-        </div>
-      )}
 
       {/* Input widget */}
       {field.type === 'boolean' ? (

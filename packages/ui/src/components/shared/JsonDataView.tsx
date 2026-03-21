@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ArtifactSchema } from '@forgeflow/types';
 
 interface JsonDataViewProps {
@@ -6,39 +7,37 @@ interface JsonDataViewProps {
 }
 
 /**
- * Renders parsed JSON as human-readable tables/cards. Never shows raw JSON.
+ * Renders parsed JSON as human-readable tables/cards with a raw JSON toggle.
  *
- * - Object with schema fields → labeled key-value card
+ * - Object with schema fields → clean key-value card (no type badges or descriptions)
  * - Array of objects → HTML table
  * - Flat object → two-column key-value table
  * - Primitives → inline formatted value
  */
 export function JsonDataView({ data, schema }: JsonDataViewProps) {
-  // Schema with fields → labeled key-value card
+  return <FormattedView data={data} schema={schema} />;
+}
+
+/* ── Formatted view ─── */
+
+function FormattedView({ data, schema }: JsonDataViewProps) {
+  // Schema with fields → clean key-value card
   if (schema?.fields?.length && data && typeof data === 'object' && !Array.isArray(data)) {
     const obj = data as Record<string, unknown>;
     return (
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         {schema.fields.map((field) => {
           const value = obj[field.key];
           return (
-            <div key={field.key} className="flex items-start gap-2 py-1 border-b border-[var(--color-border)]/30 last:border-0">
-              <div className="w-[140px] shrink-0">
-                <div className="text-[11px] font-medium text-[var(--color-text-primary)]">
+            <div key={field.key} className="flex items-start gap-2 py-1.5 border-b border-[var(--color-border)]/30 last:border-0">
+              <div className="min-w-[100px] max-w-[220px] w-auto shrink-0" title={field.key}>
+                <div className="text-[11px] font-medium text-[var(--color-text-primary)] truncate">
                   {field.key}
                 </div>
-                {field.description && (
-                  <div className="text-[9px] text-[var(--color-text-muted)] leading-tight">
-                    {field.description}
-                  </div>
-                )}
               </div>
               <div className="flex-1 min-w-0">
                 <ValueDisplay value={value} />
               </div>
-              <span className="text-[9px] text-[var(--color-text-muted)] shrink-0 px-1 py-0.5 rounded bg-[var(--color-canvas-bg)]">
-                {field.type}
-              </span>
             </div>
           );
         })}
@@ -46,8 +45,8 @@ export function JsonDataView({ data, schema }: JsonDataViewProps) {
         {Object.keys(obj)
           .filter((k) => !schema.fields!.some((f) => f.key === k))
           .map((key) => (
-            <div key={key} className="flex items-start gap-2 py-1 border-b border-[var(--color-border)]/30 last:border-0">
-              <div className="w-[140px] shrink-0 text-[11px] text-[var(--color-text-muted)]">
+            <div key={key} className="flex items-start gap-2 py-1.5 border-b border-[var(--color-border)]/30 last:border-0">
+              <div className="min-w-[100px] max-w-[220px] w-auto shrink-0 text-[11px] text-[var(--color-text-muted)] truncate" title={key}>
                 {key}
               </div>
               <div className="flex-1 min-w-0">
@@ -69,7 +68,7 @@ export function JsonDataView({ data, schema }: JsonDataViewProps) {
           <thead>
             <tr className="bg-[var(--color-canvas-bg)]">
               {columns.map((col) => (
-                <th key={col} className="text-left px-2 py-1 font-medium text-[var(--color-text-secondary)] border-b border-[var(--color-border)]">
+                <th key={col} className="text-left px-2 py-1.5 font-medium text-[var(--color-text-secondary)] border-b border-[var(--color-border)]">
                   {col}
                 </th>
               ))}
@@ -79,7 +78,7 @@ export function JsonDataView({ data, schema }: JsonDataViewProps) {
             {rows.slice(0, 100).map((row, i) => (
               <tr key={i} className="hover:bg-[var(--color-canvas-bg)]/50">
                 {columns.map((col) => (
-                  <td key={col} className="px-2 py-1 border-b border-[var(--color-border)]/30">
+                  <td key={col} className="px-2 py-1.5 border-b border-[var(--color-border)]/30">
                     <ValueDisplay value={row[col]} />
                   </td>
                 ))}
@@ -121,8 +120,8 @@ export function JsonDataView({ data, schema }: JsonDataViewProps) {
     return (
       <div className="space-y-0.5">
         {entries.map(([key, value]) => (
-          <div key={key} className="flex items-start gap-2 py-0.5 border-b border-[var(--color-border)]/30 last:border-0">
-            <span className="text-[11px] font-medium text-[var(--color-text-secondary)] w-[140px] shrink-0 truncate">
+          <div key={key} className="flex items-start gap-2 py-1.5 border-b border-[var(--color-border)]/30 last:border-0">
+            <span className="text-[11px] font-medium text-[var(--color-text-secondary)] min-w-[100px] max-w-[220px] w-auto shrink-0 truncate" title={key}>
               {key}
             </span>
             <div className="flex-1 min-w-0">
@@ -136,6 +135,53 @@ export function JsonDataView({ data, schema }: JsonDataViewProps) {
 
   // Primitive fallback
   return <ValueDisplay value={data} />;
+}
+
+/* ── Expandable string ─── */
+
+function ExpandableString({ value, threshold = 500 }: { value: string; threshold?: number }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (value.length <= threshold) {
+    return <span className="text-[11px] text-[var(--color-text-primary)] break-words">{value}</span>;
+  }
+
+  return (
+    <span className="text-[11px] text-[var(--color-text-primary)] break-words">
+      {expanded ? value : value.slice(0, threshold)}
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="text-blue-500 hover:underline ml-1 text-[10px]"
+      >
+        {expanded ? 'Show less' : `... (${value.length} chars)`}
+      </button>
+    </span>
+  );
+}
+
+/* ── Collapsible nested ─── */
+
+function CollapsibleNested({ data, label }: { data: unknown; label: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="text-[10px] text-blue-500 hover:underline flex items-center gap-1"
+      >
+        <span>{open ? '\u25BC' : '\u25B6'}</span>
+        {label}
+      </button>
+      {open && (
+        <div className="pl-2 border-l-2 border-[var(--color-border)]/40 ml-1 mt-1">
+          <FormattedView data={data} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ── Value renderer ─── */
@@ -158,55 +204,40 @@ function ValueDisplay({ value }: { value: unknown }) {
   }
 
   if (typeof value === 'string') {
-    // Truncate long strings
-    if (value.length > 200) {
-      return (
-        <span className="text-[11px] text-[var(--color-text-primary)] break-words">
-          {value.slice(0, 200)}<span className="text-[var(--color-text-muted)]">... ({value.length} chars)</span>
-        </span>
-      );
-    }
-    return <span className="text-[11px] text-[var(--color-text-primary)] break-words">{value}</span>;
+    return <ExpandableString value={value} />;
   }
 
-  // Nested object/array → recurse
+  // Nested array → collapsible
   if (Array.isArray(value)) {
     if (value.length === 0) {
       return <span className="text-[11px] text-[var(--color-text-muted)] italic">empty array</span>;
     }
-    // Simple arrays (strings/numbers) inline
-    if (value.every((v) => typeof v === 'string' || typeof v === 'number')) {
+    // Simple small arrays (strings/numbers) inline
+    if (value.length <= 5 && value.every((v) => typeof v === 'string' || typeof v === 'number')) {
       return (
         <span className="text-[11px] text-[var(--color-text-primary)]">
           {value.join(', ')}
         </span>
       );
     }
-    return (
-      <div className="pl-2 border-l-2 border-[var(--color-border)]/40 ml-1">
-        <JsonDataView data={value} />
-      </div>
-    );
+    return <CollapsibleNested data={value} label={`[${value.length} items]`} />;
   }
 
+  // Nested object → collapsible
   if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>);
     if (entries.length === 0) {
       return <span className="text-[11px] text-[var(--color-text-muted)] italic">empty object</span>;
     }
-    // Small objects inline
-    if (entries.length <= 3 && entries.every(([, v]) => typeof v !== 'object')) {
+    // Small flat objects inline
+    if (entries.length <= 3 && entries.every(([, v]) => typeof v !== 'object' || v === null)) {
       return (
         <span className="text-[11px] text-[var(--color-text-primary)]">
           {entries.map(([k, v]) => `${k}: ${String(v)}`).join(', ')}
         </span>
       );
     }
-    return (
-      <div className="pl-2 border-l-2 border-[var(--color-border)]/40 ml-1">
-        <JsonDataView data={value} />
-      </div>
-    );
+    return <CollapsibleNested data={value} label={`{${entries.length} fields}`} />;
   }
 
   return <span className="text-[11px] text-[var(--color-text-primary)]">{String(value)}</span>;

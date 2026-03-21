@@ -37,7 +37,7 @@ export function CheckpointPage() {
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto py-6 px-4 space-y-6">
+        <div className="max-w-6xl mx-auto py-6 px-4 space-y-6">
           {/* Current pending checkpoint */}
           {pendingCheckpoint && projectId && run.runId ? (
             <div className="rounded-lg border-2 border-amber-300 bg-white shadow-sm overflow-hidden">
