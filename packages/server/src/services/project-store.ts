@@ -369,9 +369,9 @@ export class ProjectStore {
         // No references dir
       }
 
-      // Find sub-skill references (//skill:NAME patterns)
+      // Find sub-skill references (/skill:NAME patterns)
       const subSkills: string[] = [];
-      const skillRefs = skillMd.matchAll(/\/\/skill:([a-z][a-z0-9_-]*)/g);
+      const skillRefs = skillMd.matchAll(/\/skill:([a-z][a-z0-9_-]*)/g);
       for (const match of skillRefs) {
         if (!subSkills.includes(match[1])) subSkills.push(match[1]);
       }

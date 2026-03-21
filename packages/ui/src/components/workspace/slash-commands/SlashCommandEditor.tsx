@@ -255,6 +255,15 @@ export function SlashCommandEditor({
         // Tab to accept completion at highest priority
         Prec.highest(keymap.of([
           { key: 'Tab', run: acceptCompletion },
+          { key: ' ', run: (view) => {
+            if (acceptCompletion(view)) {
+              view.dispatch({
+                changes: { from: view.state.selection.main.head, insert: ' ' },
+              });
+              return true;
+            }
+            return false;
+          }},
         ])),
         keymap.of([
           { key: 'Backspace', run: chipBackspace },
@@ -310,17 +319,6 @@ export function SlashCommandEditor({
             localChangeRef.current = true;
             const doc = update.state.doc.toString();
             onChangeRef.current(doc);
-
-            // Check if a new //agent: was just created via autocomplete
-            // by looking for //agent:name patterns where name is new
-            const agentPattern = /\/\/agent:([\w-]+)/g;
-            let match: RegExpExecArray | null;
-            while ((match = agentPattern.exec(doc)) !== null) {
-              const name = match[1];
-              if (!agents.includes(name)) {
-                onCreateAgentRef.current?.(name);
-              }
-            }
           }
         }),
         EditorView.lineWrapping,

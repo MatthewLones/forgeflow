@@ -297,6 +297,20 @@ export function AgentEditor({ nodeId }: AgentEditorProps) {
       syncTimerRef.current = setTimeout(() => {
         const configUpdate = extractConfigFromInstructions(text, state.flow.artifacts);
         if (configUpdate) {
+          // Auto-register any artifact names not yet in the flow registry
+          for (const ref of configUpdate.outputs ?? []) {
+            const n = typeof ref === 'string' ? ref : (ref as ArtifactSchema).name;
+            if (!state.flow.artifacts?.[n]) {
+              addArtifact({ name: n, format: 'json', description: '' });
+            }
+          }
+          for (const ref of configUpdate.inputs ?? []) {
+            const n = typeof ref === 'string' ? ref : (ref as ArtifactSchema).name;
+            if (!state.flow.artifacts?.[n]) {
+              addArtifact({ name: n, format: 'json', description: '' });
+            }
+          }
+
           // Merge skill-inherited outputs into the extracted config
           const extractedNames = new Set(
             ((configUpdate.outputs ?? []) as Array<string | ArtifactSchema>).map(

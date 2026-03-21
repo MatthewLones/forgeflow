@@ -144,8 +144,14 @@ export function createSlashAutocomplete({ skills, agents, artifacts, artifactFol
         options.push({
           label: `Create "${query}"`,
           type: 'variable',
-          apply: `//agent:${query}`,
           detail: 'new agent',
+          apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+            view.dispatch({
+              changes: { from, to, insert: `//agent:${query}` },
+              selection: { anchor: from + query.length + 8 },
+            });
+            onCreateAgent?.(query);
+          },
         });
       }
 
