@@ -224,6 +224,26 @@ Before declaring this phase complete, verify ALL of the following:
 - Use plain text with clear structure (blank lines between sections)
 - Encode any special characters properly
 
+## CSV Artifacts
+- Write valid CSV with a header row as the first line
+- Use commas as delimiters, quote fields that contain commas or newlines
+- Verify with: \`python3 -c "import csv; list(csv.reader(open('output/name')))"\`
+
+## PDF Artifacts
+- You MUST generate a real PDF file, not plain text with a .pdf extension
+- Recommended approach: write content as markdown first, then convert:
+  \`pandoc output/draft.md -o output/report.pdf\`
+- Alternative: use Python reportlab: \`pip install reportlab\` then generate programmatically
+- If pandoc is not available, install it: \`apt-get install -y pandoc\` or \`pip install pypandoc\`
+- Verify the output is valid PDF: \`head -c 4 output/name | grep -q '%PDF'\`
+
+## Image Artifacts
+- You MUST generate a real image file (PNG, JPG, SVG, etc.), not text with an image extension
+- For charts and graphs: use matplotlib (\`pip install matplotlib\`)
+- For diagrams: write SVG directly as XML text (no library needed)
+- For other images: use Pillow (\`pip install pillow\`)
+- Verify with: \`file output/name\` should show the correct image type
+
 ## Directory-Based Artifacts
 - Create the output directory: output/{artifact_name}/
 - Place related files inside with descriptive names

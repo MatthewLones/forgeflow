@@ -110,6 +110,14 @@ function appendSchemaDetail(sections: string[], schema: ArtifactSchema): void {
   if (parts.length > 0) {
     sections.push(`  ${parts.join(' — ')}`);
   }
+  // Format-specific generation hint for non-text formats
+  if (schema.format === 'pdf') {
+    sections.push('  \u26A0 Generate a real PDF (e.g., write markdown then `pandoc input.md -o output/name.pdf`)');
+  } else if (schema.format === 'image') {
+    sections.push('  \u26A0 Generate a real image file (e.g., matplotlib, PIL, or write SVG)');
+  } else if (schema.format === 'csv') {
+    sections.push('  \u26A0 Write valid CSV with a header row');
+  }
   if (schema.fields && schema.fields.length > 0) {
     const fieldDescriptions = schema.fields.map((f) => {
       const opt = f.required === false ? '?' : '';

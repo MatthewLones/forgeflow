@@ -1581,7 +1581,7 @@ Describe this skill's purpose and how it should be used.
           type: 'agent',
           name: 'Pick Sections',
           instructions: [
-            'IMPORTANT: Do NOT rewrite anything. Just present choices immediately.',
+            'IMPORTANT: Do NOT rewrite anything. Just present choices and produce outputs.',
             '',
             'Trigger /interrupt:selection with these 4 items for the user to choose which sections to keep:',
             '- "introduction" — Opening hook',
@@ -1589,20 +1589,18 @@ Describe this skill's purpose and how it should be used.
             '- "conclusion" — Closing summary',
             '- "citations" — Sources and references',
             '',
-            'After the user selects, write a JSON file listing which sections were kept.',
-            '',
-            'Output: \\selected_sections',
+            'After the user selects, produce TWO outputs:',
+            '1. \\selected_sections — a CSV listing the kept sections',
+            '2. \\summary_report — a one-page PDF summarizing the draft and selections',
           ].join('\n'),
           config: {
             inputs: ['draft', 'preferences'],
-            outputs: [{
-              name: 'selected_sections', format: 'json' as const, description: 'Which sections to keep',
-              fields: [
-                { key: 'kept', type: 'array' as const, description: 'Section IDs the user kept' },
-              ],
-            }],
+            outputs: [
+              { name: 'selected_sections', format: 'csv' as const, description: 'CSV of section IDs the user chose to keep' },
+              { name: 'summary_report', format: 'pdf' as const, description: 'One-page PDF summary of the draft and selected sections' },
+            ],
             skills: [],
-            budget: { maxTurns: 10, maxBudgetUsd: 1.0 },
+            budget: { maxTurns: 15, maxBudgetUsd: 2.0 },
             interrupts: [{ type: 'selection' as const }],
           },
           children: [],
@@ -1615,7 +1613,7 @@ Describe this skill's purpose and how it should be used.
             'Review all artifacts and approve or reject.',
           ].join('\n'),
           config: {
-            inputs: ['draft', 'preferences', 'selected_sections'],
+            inputs: ['draft', 'preferences', 'selected_sections', 'summary_report'],
             outputs: [{
               name: 'approval', format: 'json' as const, description: 'Final approval decision',
               fields: [
@@ -1642,12 +1640,8 @@ Describe this skill's purpose and how it should be used.
             { key: 'avoid', type: 'string' as const, description: 'Topics to avoid' },
           ],
         },
-        selected_sections: {
-          name: 'selected_sections', format: 'json' as const, description: 'Sections the user chose to keep',
-          fields: [
-            { key: 'kept', type: 'array' as const, description: 'Section IDs kept' },
-          ],
-        },
+        selected_sections: { name: 'selected_sections', format: 'csv' as const, description: 'CSV of section IDs the user chose to keep' },
+        summary_report: { name: 'summary_report', format: 'pdf' as const, description: 'One-page PDF summary of the draft and selections' },
         approval: {
           name: 'approval', format: 'json' as const, description: 'Final approval',
           fields: [
