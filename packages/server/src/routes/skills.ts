@@ -85,6 +85,25 @@ router.patch('/projects/:id/skills/:name', async (req, res) => {
   }
 });
 
+// POST /api/projects/:id/skills/:name/duplicate — duplicate a skill
+router.post('/projects/:id/skills/:name/duplicate', async (req, res) => {
+  try {
+    const { newName } = req.body;
+    if (!newName || typeof newName !== 'string') {
+      res.status(400).json({ error: 'newName is required' });
+      return;
+    }
+    const duplicated = await store.duplicateSkill(req.params.id, req.params.name, newName);
+    if (!duplicated) {
+      res.status(404).json({ error: 'Skill not found or duplicate failed' });
+      return;
+    }
+    res.status(201).json({ ok: true, name: newName });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to duplicate skill' });
+  }
+});
+
 // DELETE /api/projects/:id/skills/:name — delete a skill
 router.delete('/projects/:id/skills/:name', async (req, res) => {
   try {

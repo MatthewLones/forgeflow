@@ -147,6 +147,16 @@ function runReducer(state: RunState, action: RunAction): RunState {
           };
         }
 
+        case 'interrupt_answered':
+          return {
+            ...state,
+            events,
+            interruptAnswers: {
+              ...state.interruptAnswers,
+              [event.interruptId]: event.answer,
+            },
+          };
+
         case 'cost_update':
           return { ...state, events, totalCost: { turns: event.turns, usd: event.usd } };
 

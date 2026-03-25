@@ -182,6 +182,7 @@ export class InterruptWatcher {
           interruptId: interrupt.interrupt_id,
           nodeId: this.options?.nodeId ?? 'unknown',
           escalated: this.escalated,
+          answer,
         });
       } catch (error) {
         // Log but don't crash — the agent will timeout and handle gracefully

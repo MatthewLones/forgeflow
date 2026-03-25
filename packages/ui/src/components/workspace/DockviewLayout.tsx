@@ -100,7 +100,7 @@ function SkillEditorContent({ skillName, projectId }: { skillName: string; proje
   const { state, selectedFile, selectFile, updateFile } = useSkill();
   const { skills, createSkill, renameSkill, deleteSkill } = useProjectStore();
   const { selectSkill, selectArtifact, updateTabLabel } = useLayout();
-  const { state: flowState } = useFlow();
+  const { state: flowState, addArtifact } = useFlow();
 
   // Local state for editable skill name
   const [editName, setEditName] = useState(skillName);
@@ -169,6 +169,20 @@ function SkillEditorContent({ skillName, projectId }: { skillName: string; proje
   }, [artifactNames, flowState.flow.artifactFolders]);
 
   const handleClickArtifact = useCallback(
+    (name: string) => selectArtifact(name),
+    [selectArtifact],
+  );
+
+  const handleCreateArtifact = useCallback(
+    (name: string) => {
+      if (!flowState.flow.artifacts?.[name]) {
+        addArtifact({ name, format: 'json', description: '' });
+      }
+    },
+    [flowState.flow.artifacts, addArtifact],
+  );
+
+  const handleClickArtifactOutput = useCallback(
     (name: string) => selectArtifact(name),
     [selectArtifact],
   );
@@ -314,9 +328,11 @@ function SkillEditorContent({ skillName, projectId }: { skillName: string; proje
             artifactFolders={artifactFolders}
             currentSkill={skillName}
             onCreateSkill={handleCreateSkill}
+            onCreateArtifact={handleCreateArtifact}
             onClickSkill={handleClickSkill}
             onClickFile={handleClickFile}
             onClickArtifact={handleClickArtifact}
+            onClickArtifactOutput={handleClickArtifactOutput}
           />
         ) : (
           <div className="h-full flex items-center justify-center text-sm text-[var(--color-text-muted)]">

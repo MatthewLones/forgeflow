@@ -5,7 +5,7 @@
   "description": "Reads a document and produces a structured summary — the simplest possible ForgeFlow flow",
   "skills": [],
   "budget": {
-    "maxTurns": 60,
+    "maxTurns": 120,
     "maxBudgetUsd": 8.00,
     "timeoutMs": 300000
   },
@@ -19,7 +19,7 @@
         "inputs": ["document.pdf"],
         "outputs": ["content_extracted.json"],
         "skills": [],
-        "budget": { "maxTurns": 25, "maxBudgetUsd": 3.00 },
+        "budget": { "maxTurns": 50, "maxBudgetUsd": 3.00 },
         "estimatedDuration": "30s"
       },
       "children": []
@@ -33,7 +33,7 @@
         "inputs": ["content_extracted.json"],
         "outputs": ["summary.md"],
         "skills": [],
-        "budget": { "maxTurns": 20, "maxBudgetUsd": 2.00 },
+        "budget": { "maxTurns": 40, "maxBudgetUsd": 2.00 },
         "estimatedDuration": "20s"
       },
       "children": []

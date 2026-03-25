@@ -241,6 +241,9 @@ export const api = {
 
     rename: (projectId: string, oldName: string, newName: string) =>
       patch<{ ok: boolean; name: string }>(`/projects/${projectId}/skills/${oldName}`, { newName }),
+
+    duplicate: (projectId: string, skillName: string, newName: string) =>
+      post<{ ok: boolean; name: string }>(`/projects/${projectId}/skills/${skillName}/duplicate`, { newName }),
   },
 
   references: {

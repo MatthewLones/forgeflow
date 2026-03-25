@@ -5,7 +5,7 @@
   "description": "Reviews a contract, flags risks, and generates a redlined version with negotiation memo",
   "skills": ["contract-law-basics"],
   "budget": {
-    "maxTurns": 400,
+    "maxTurns": 800,
     "maxBudgetUsd": 40.00,
     "timeoutMs": 1200000
   },
@@ -19,7 +19,7 @@
         "inputs": ["contract.pdf"],
         "outputs": ["clauses_parsed.json"],
         "skills": [],
-        "budget": { "maxTurns": 25, "maxBudgetUsd": 3.00 },
+        "budget": { "maxTurns": 50, "maxBudgetUsd": 3.00 },
         "estimatedDuration": "45s"
       },
       "children": []
@@ -33,7 +33,7 @@
         "inputs": ["clauses_parsed.json"],
         "outputs": ["liability_findings.json", "ip_findings.json", "termination_findings.json"],
         "skills": ["contract-law-basics"],
-        "budget": { "maxTurns": 120, "maxBudgetUsd": 15.00 },
+        "budget": { "maxTurns": 240, "maxBudgetUsd": 15.00 },
         "estimatedDuration": "2min"
       },
       "children": [
@@ -46,7 +46,7 @@
             "inputs": ["clauses_parsed.json"],
             "outputs": ["liability_findings.json"],
             "skills": ["contract-law-basics"],
-            "budget": { "maxTurns": 35, "maxBudgetUsd": 4.00 }
+            "budget": { "maxTurns": 70, "maxBudgetUsd": 4.00 }
           },
           "children": []
         },
@@ -59,7 +59,7 @@
             "inputs": ["clauses_parsed.json"],
             "outputs": ["ip_findings.json"],
             "skills": ["contract-law-basics"],
-            "budget": { "maxTurns": 35, "maxBudgetUsd": 4.00 }
+            "budget": { "maxTurns": 70, "maxBudgetUsd": 4.00 }
           },
           "children": []
         },
@@ -72,7 +72,7 @@
             "inputs": ["clauses_parsed.json"],
             "outputs": ["termination_findings.json"],
             "skills": ["contract-law-basics"],
-            "budget": { "maxTurns": 35, "maxBudgetUsd": 4.00 }
+            "budget": { "maxTurns": 70, "maxBudgetUsd": 4.00 }
           },
           "children": []
         }
@@ -103,7 +103,7 @@
         "inputs": ["clauses_parsed.json", "risk_matrix.json", "attorney_decisions.json"],
         "outputs": ["redline_changes.md", "negotiation_memo.md", "risk_summary.json"],
         "skills": ["contract-law-basics"],
-        "budget": { "maxTurns": 100, "maxBudgetUsd": 12.00 },
+        "budget": { "maxTurns": 200, "maxBudgetUsd": 12.00 },
         "estimatedDuration": "2min"
       },
       "children": []

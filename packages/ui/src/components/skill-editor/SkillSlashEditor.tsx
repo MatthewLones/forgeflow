@@ -21,9 +21,11 @@ interface SkillSlashEditorProps {
   artifactFolders?: string[];
   currentSkill?: string;
   onCreateSkill?: (name: string) => void;
+  onCreateArtifact?: (name: string) => void;
   onClickSkill?: (name: string) => void;
   onClickFile?: (path: string) => void;
   onClickArtifact?: (name: string) => void;
+  onClickArtifactOutput?: (name: string) => void;
 }
 
 /**
@@ -91,11 +93,11 @@ function splitFrontmatter(content: string): {
  * Use `key={filePath}` to remount when switching files.
  */
 /** Chip click patterns for the skill editor */
-const SKILL_CHIP_CLICK_MAP: { className: string; regex: RegExp; type: 'skill' | 'file' | 'artifact' }[] = [
+const SKILL_CHIP_CLICK_MAP: { className: string; regex: RegExp; type: 'skill' | 'file' | 'artifact' | 'artifact-output' }[] = [
   { className: 'cm-chip-subskill', regex: /\/\/?skill:([\w-]+)/g, type: 'skill' },
   { className: 'cm-chip-fileref', regex: /@([\w./-]+\.\w+)/g, type: 'file' },
   { className: 'cm-chip-artifact', regex: /@([\w._/-]+)/g, type: 'artifact' },
-  { className: 'cm-chip-artifact-output', regex: /\\([\w._/-]+)/g, type: 'artifact' },
+  { className: 'cm-chip-artifact-output', regex: /\\([\w._/-]+)/g, type: 'artifact-output' },
 ];
 
 export function SkillSlashEditor({
@@ -107,25 +109,31 @@ export function SkillSlashEditor({
   artifactFolders = [],
   currentSkill = '',
   onCreateSkill,
+  onCreateArtifact,
   onClickSkill,
   onClickFile,
   onClickArtifact,
+  onClickArtifactOutput,
 }: SkillSlashEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const onCreateSkillRef = useRef(onCreateSkill);
+  const onCreateArtifactRef = useRef(onCreateArtifact);
   const onClickSkillRef = useRef(onClickSkill);
   const onClickFileRef = useRef(onClickFile);
   const onClickArtifactRef = useRef(onClickArtifact);
+  const onClickArtifactOutputRef = useRef(onClickArtifactOutput);
   // Capture the frontmatter at mount time so we can reconstruct on changes
   const frontmatterRef = useRef('');
 
   onChangeRef.current = onChange;
   onCreateSkillRef.current = onCreateSkill;
+  onCreateArtifactRef.current = onCreateArtifact;
   onClickSkillRef.current = onClickSkill;
   onClickFileRef.current = onClickFile;
   onClickArtifactRef.current = onClickArtifact;
+  onClickArtifactOutputRef.current = onClickArtifactOutput;
 
   const { frontmatter, body } = useMemo(() => splitFrontmatter(content), [content]);
   frontmatterRef.current = frontmatter;
@@ -231,6 +239,7 @@ export function SkillSlashEditor({
       artifactFolders,
       currentSkill,
       onCreateSkill: (name: string) => onCreateSkillRef.current?.(name),
+      onCreateArtifact: (name: string) => onCreateArtifactRef.current?.(name),
     };
     const slashComplete = createSkillSlashAutocomplete(slashOpts);
 
@@ -241,6 +250,15 @@ export function SkillSlashEditor({
         // Tab to accept completion at highest priority so markdown() can't intercept
         Prec.highest(keymap.of([
           { key: 'Tab', run: acceptCompletion },
+          { key: ' ', run: (view) => {
+            if (acceptCompletion(view)) {
+              view.dispatch({
+                changes: { from: view.state.selection.main.head, insert: ' ' },
+              });
+              return true;
+            }
+            return false;
+          }},
         ])),
         keymap.of([
           { key: 'Backspace', run: chipBackspace },
@@ -281,6 +299,7 @@ export function SkillSlashEditor({
                   if (type === 'skill') onClickSkillRef.current?.(name);
                   else if (type === 'file') onClickFileRef.current?.(name);
                   else if (type === 'artifact') onClickArtifactRef.current?.(name);
+                  else if (type === 'artifact-output') onClickArtifactOutputRef.current?.(name);
                   return true;
                 }
               }

@@ -5,7 +5,7 @@
   "description": "Analyzes an insurance claim against policy terms and generates a coverage recommendation",
   "skills": ["property-insurance-basics", "claims-precedents"],
   "budget": {
-    "maxTurns": 350,
+    "maxTurns": 700,
     "maxBudgetUsd": 35.00,
     "timeoutMs": 900000
   },
@@ -19,7 +19,7 @@
         "inputs": ["incident_report.pdf", "photos.zip", "policy.pdf"],
         "outputs": ["claim_parsed.json", "damage_assessment.json"],
         "skills": [],
-        "budget": { "maxTurns": 30, "maxBudgetUsd": 4.00 },
+        "budget": { "maxTurns": 60, "maxBudgetUsd": 4.00 },
         "estimatedDuration": "1min"
       },
       "children": []
@@ -33,7 +33,7 @@
         "inputs": ["claim_parsed.json", "damage_assessment.json", "policy.pdf"],
         "outputs": ["coverage_analysis.json", "comparable_claims.json"],
         "skills": ["property-insurance-basics", "claims-precedents"],
-        "budget": { "maxTurns": 80, "maxBudgetUsd": 10.00 },
+        "budget": { "maxTurns": 160, "maxBudgetUsd": 10.00 },
         "estimatedDuration": "90s"
       },
       "children": [
@@ -46,7 +46,7 @@
             "inputs": ["claim_parsed.json", "policy.pdf"],
             "outputs": ["coverage_analysis.json"],
             "skills": ["property-insurance-basics"],
-            "budget": { "maxTurns": 35, "maxBudgetUsd": 4.00 }
+            "budget": { "maxTurns": 70, "maxBudgetUsd": 4.00 }
           },
           "children": []
         },
@@ -59,7 +59,7 @@
             "inputs": ["claim_parsed.json"],
             "outputs": ["comparable_claims.json"],
             "skills": ["claims-precedents"],
-            "budget": { "maxTurns": 30, "maxBudgetUsd": 3.00 }
+            "budget": { "maxTurns": 60, "maxBudgetUsd": 3.00 }
           },
           "children": []
         }
@@ -90,7 +90,7 @@
         "inputs": ["claim_parsed.json", "coverage_analysis.json", "comparable_claims.json", "adjuster_input.json"],
         "outputs": ["determination_letter.md", "reserve_recommendation.json", "decision_rationale.md"],
         "skills": ["property-insurance-basics"],
-        "budget": { "maxTurns": 80, "maxBudgetUsd": 10.00 },
+        "budget": { "maxTurns": 160, "maxBudgetUsd": 10.00 },
         "estimatedDuration": "2min"
       },
       "children": []

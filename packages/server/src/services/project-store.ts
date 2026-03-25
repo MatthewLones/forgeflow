@@ -475,6 +475,25 @@ Describe this skill's purpose and how it should be used.
     }
   }
 
+  async duplicateSkill(projectId: string, skillName: string, newName: string): Promise<boolean> {
+    const existing = await this.getSkill(projectId, skillName);
+    if (!existing) return false;
+
+    // Update the name in SKILL.md frontmatter
+    const files = existing.files.map((f) => {
+      if (f.path === 'SKILL.md') {
+        const content = f.content.replace(
+          /^(---\n[\s\S]*?name:\s*)"?[^"\n]+"?/m,
+          `$1"${newName}"`,
+        );
+        return { ...f, content };
+      }
+      return f;
+    });
+
+    return this.saveSkill(projectId, newName, files);
+  }
+
   // --- References ---
 
   private getFileType(filename: string): ReferenceFileType {
@@ -807,7 +826,7 @@ Describe this skill's purpose and how it should be used.
       version: '1.0',
       description: 'VC analyst workflow: research a startup, assess risks across financial/legal/team dimensions, and produce an investment memo',
       skills: ['venture-analysis', 'startup-legal'],
-      budget: { maxTurns: 400, maxBudgetUsd: 50.0, timeoutMs: 1200000 },
+      budget: { maxTurns: 800, maxBudgetUsd: 50.0, timeoutMs: 1200000 },
       nodes: [
         {
           id: 'ingest_materials',
@@ -829,7 +848,7 @@ Describe this skill's purpose and how it should be used.
             inputs: ['startup_materials'],
             outputs: ['company_profile'],
             skills: [],
-            budget: { maxTurns: 30, maxBudgetUsd: 3.0 },
+            budget: { maxTurns: 60, maxBudgetUsd: 3.0 },
           },
           children: [],
         },
@@ -857,7 +876,7 @@ Describe this skill's purpose and how it should be used.
             inputs: ['company_profile'],
             outputs: ['market_analysis'],
             skills: ['venture-analysis'],
-            budget: { maxTurns: 40, maxBudgetUsd: 5.0 },
+            budget: { maxTurns: 80, maxBudgetUsd: 5.0 },
             interrupts: [{ type: 'review' as const }],
           },
           children: [],
@@ -887,7 +906,7 @@ Describe this skill's purpose and how it should be used.
             inputs: ['company_profile', 'market_analysis', 'financial_findings', 'legal_findings', 'team_assessment'],
             outputs: ['risk_matrix'],
             skills: [],
-            budget: { maxTurns: 120, maxBudgetUsd: 15.0 },
+            budget: { maxTurns: 240, maxBudgetUsd: 15.0 },
             interrupts: [{ type: 'qa' as const }],
           },
           children: [
@@ -913,7 +932,7 @@ Describe this skill's purpose and how it should be used.
                 inputs: ['company_profile', 'market_analysis'],
                 outputs: ['financial_findings'],
                 skills: ['venture-analysis'],
-                budget: { maxTurns: 35, maxBudgetUsd: 4.0 },
+                budget: { maxTurns: 70, maxBudgetUsd: 4.0 },
               },
               children: [],
             },
@@ -939,7 +958,7 @@ Describe this skill's purpose and how it should be used.
                 inputs: ['company_profile'],
                 outputs: ['legal_findings'],
                 skills: ['startup-legal'],
-                budget: { maxTurns: 35, maxBudgetUsd: 4.0 },
+                budget: { maxTurns: 70, maxBudgetUsd: 4.0 },
               },
               children: [],
             },
@@ -964,7 +983,7 @@ Describe this skill's purpose and how it should be used.
                 inputs: ['company_profile'],
                 outputs: ['team_assessment'],
                 skills: [],
-                budget: { maxTurns: 35, maxBudgetUsd: 4.0 },
+                budget: { maxTurns: 70, maxBudgetUsd: 4.0 },
               },
               children: [],
             },
@@ -1018,7 +1037,7 @@ Describe this skill's purpose and how it should be used.
             inputs: ['market_analysis', 'risk_matrix', 'partner_decisions'],
             outputs: ['investment_memo', 'term_sheet_draft'],
             skills: ['venture-analysis'],
-            budget: { maxTurns: 60, maxBudgetUsd: 8.0 },
+            budget: { maxTurns: 120, maxBudgetUsd: 8.0 },
             interrupts: [{ type: 'approval' as const }],
           },
           children: [],
@@ -1220,7 +1239,7 @@ Describe this skill's purpose and how it should be used.
       version: '1.0',
       description: 'Simple flow that exercises all 5 interrupt types, a checkpoint, and child agents — for dev testing',
       skills: ['writing-guide'],
-      budget: { maxTurns: 100, maxBudgetUsd: 10.0, timeoutMs: 600000 },
+      budget: { maxTurns: 200, maxBudgetUsd: 10.0, timeoutMs: 600000 },
       nodes: [
         {
           id: 'draft_content',
@@ -1249,7 +1268,7 @@ Describe this skill's purpose and how it should be used.
             inputs: ['topic'],
             outputs: ['blog_draft'],
             skills: ['writing-guide'],
-            budget: { maxTurns: 30, maxBudgetUsd: 3.0 },
+            budget: { maxTurns: 60, maxBudgetUsd: 3.0 },
             interrupts: [{ type: 'qa' as const }],
           },
           children: [
@@ -1269,7 +1288,7 @@ Describe this skill's purpose and how it should be used.
                 inputs: ['topic'],
                 outputs: ['research_notes'],
                 skills: [],
-                budget: { maxTurns: 10, maxBudgetUsd: 1.0 },
+                budget: { maxTurns: 20, maxBudgetUsd: 1.0 },
               },
               children: [],
             },
@@ -1288,7 +1307,7 @@ Describe this skill's purpose and how it should be used.
                 inputs: ['topic'],
                 outputs: ['outline'],
                 skills: [],
-                budget: { maxTurns: 10, maxBudgetUsd: 1.0 },
+                budget: { maxTurns: 20, maxBudgetUsd: 1.0 },
               },
               children: [],
             },
@@ -1323,7 +1342,7 @@ Describe this skill's purpose and how it should be used.
             inputs: ['blog_draft'],
             outputs: ['review_notes'],
             skills: [],
-            budget: { maxTurns: 20, maxBudgetUsd: 2.0 },
+            budget: { maxTurns: 40, maxBudgetUsd: 2.0 },
             interrupts: [
               { type: 'review' as const },
               { type: 'selection' as const },
@@ -1378,7 +1397,7 @@ Describe this skill's purpose and how it should be used.
             inputs: ['blog_draft', 'review_notes', 'editor_decision'],
             outputs: ['final_post', 'publish_metadata'],
             skills: ['writing-guide'],
-            budget: { maxTurns: 30, maxBudgetUsd: 3.0 },
+            budget: { maxTurns: 60, maxBudgetUsd: 3.0 },
             interrupts: [
               { type: 'approval' as const },
               { type: 'escalation' as const },
@@ -1520,7 +1539,7 @@ Describe this skill's purpose and how it should be used.
       version: '1.0',
       description: 'Minimal flow: 3 interrupts + 1 checkpoint for UI smoke testing',
       skills: [],
-      budget: { maxTurns: 50, maxBudgetUsd: 5.0, timeoutMs: 300000 },
+      budget: { maxTurns: 100, maxBudgetUsd: 5.0, timeoutMs: 300000 },
       nodes: [
         {
           id: 'write_draft',
@@ -1541,7 +1560,7 @@ Describe this skill's purpose and how it should be used.
             inputs: ['topic'],
             outputs: [{ name: 'draft', format: 'markdown' as const, description: 'A short paragraph draft' }],
             skills: [],
-            budget: { maxTurns: 10, maxBudgetUsd: 1.0 },
+            budget: { maxTurns: 20, maxBudgetUsd: 1.0 },
             interrupts: [{ type: 'review' as const }],
           },
           children: [],
@@ -1571,7 +1590,7 @@ Describe this skill's purpose and how it should be used.
               ],
             }],
             skills: [],
-            budget: { maxTurns: 10, maxBudgetUsd: 1.0 },
+            budget: { maxTurns: 20, maxBudgetUsd: 1.0 },
             interrupts: [{ type: 'qa' as const }],
           },
           children: [],
@@ -1600,7 +1619,7 @@ Describe this skill's purpose and how it should be used.
               { name: 'summary_report', format: 'pdf' as const, description: 'One-page PDF summary of the draft and selected sections' },
             ],
             skills: [],
-            budget: { maxTurns: 15, maxBudgetUsd: 2.0 },
+            budget: { maxTurns: 30, maxBudgetUsd: 2.0 },
             interrupts: [{ type: 'selection' as const }],
           },
           children: [],

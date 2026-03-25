@@ -1,5 +1,5 @@
 import type { ArtifactSchema, CheckpointPresentation } from './node.js';
-import type { Interrupt } from './interrupt.js';
+import type { Interrupt, InterruptAnswer } from './interrupt.js';
 
 // --- State Store ---
 
@@ -79,7 +79,7 @@ export type ProgressEvent =
   // Checkpoints & interrupts
   | { type: 'checkpoint'; checkpoint: CheckpointState }
   | { type: 'interrupt'; interrupt: Interrupt }
-  | { type: 'interrupt_answered'; interruptId: string; nodeId: string; escalated: boolean }
+  | { type: 'interrupt_answered'; interruptId: string; nodeId: string; escalated: boolean; answer: InterruptAnswer }
   | { type: 'escalation_timeout'; interruptId: string; nodeId: string; timeoutMs: number }
   // Artifacts & children
   | { type: 'message'; content: string }

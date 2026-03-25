@@ -27,6 +27,7 @@ export interface SkillSlashOptions {
   artifactFolders?: string[];
   currentSkill: string;
   onCreateSkill?: (name: string) => void;
+  onCreateArtifact?: (name: string) => void;
 }
 
 /**
@@ -38,7 +39,7 @@ export interface SkillSlashOptions {
  * - `/`  → block commands (inserts fenced code block template)
  */
 export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills: [], files: [], artifacts: [], artifactFolders: [], currentSkill: '' }) {
-  const { onCreateSkill } = opts;
+  const { onCreateSkill, onCreateArtifact } = opts;
   const artifactFolders = opts.artifactFolders ?? [];
 
   return function skillSlashAutocomplete(context: CompletionContext): CompletionResult | null {
@@ -52,7 +53,7 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
         // Not after whitespace — skip
       } else {
         const query = backslash.text.slice(1).toLowerCase();
-        const options: Array<{ label: string; type: string; detail: string; apply: string }> = opts.artifacts
+        const options: Array<{ label: string; type: string; detail: string; apply: string | ((view: EditorView, _completion: Completion, from: number, to: number) => void) }> = opts.artifacts
           .filter((a) => a.toLowerCase().includes(query))
           .map((a) => ({
             label: a,
@@ -72,6 +73,22 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
               detail: `folder (${count} artifact${count !== 1 ? 's' : ''})`,
             });
           }
+        }
+
+        // Offer "Create" if query doesn't match an existing artifact or folder
+        if (query && !opts.artifacts.some((a) => a.toLowerCase() === query) && !artifactFolders.some((f) => f.toLowerCase() === query)) {
+          options.push({
+            label: `Create "${query}"`,
+            type: 'property',
+            detail: 'new artifact',
+            apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+              view.dispatch({
+                changes: { from, to, insert: `\\${query}` },
+                selection: { anchor: from + query.length + 1 },
+              });
+              onCreateArtifact?.(query);
+            },
+          });
         }
 
         if (options.length > 0) {
@@ -112,7 +129,7 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
       if (charBefore && !/[\s\n]/.test(charBefore)) return null;
 
       const query = atSign.text.slice(1).toLowerCase();
-      const options: Array<{ label: string; type: string; detail: string; apply: string }> = [];
+      const options: Array<{ label: string; type: string; detail: string; apply: string | ((view: EditorView, _completion: Completion, from: number, to: number) => void) }> = [];
 
       // File references (@path/to/file.md)
       for (const f of opts.files) {
@@ -150,6 +167,22 @@ export function createSkillSlashAutocomplete(opts: SkillSlashOptions = { skills:
             detail: `folder (${count} artifact${count !== 1 ? 's' : ''})`,
           });
         }
+      }
+
+      // Offer "Create" if query doesn't match an existing artifact, folder, or file
+      if (query && !opts.artifacts.some((a) => a.toLowerCase() === query) && !artifactFolders.some((f) => f.toLowerCase() === query) && !opts.files.some((f) => f.toLowerCase() === query)) {
+        options.push({
+          label: `Create "${query}"`,
+          type: 'variable',
+          detail: 'new artifact',
+          apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+            view.dispatch({
+              changes: { from, to, insert: `@${query}` },
+              selection: { anchor: from + query.length + 1 },
+            });
+            onCreateArtifact?.(query);
+          },
+        });
       }
 
       if (options.length === 0) return null;

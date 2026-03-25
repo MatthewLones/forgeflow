@@ -132,8 +132,17 @@ export function RunDashboardPage() {
 
   // Expand the task panel when todos first arrive (panel starts collapsed at size 0)
   useEffect(() => {
-    if (phaseTodos.length > 0 && taskPanelRef.current?.isCollapsed()) {
-      taskPanelRef.current.resize(20);
+    if (phaseTodos.length > 0) {
+      const panel = taskPanelRef.current;
+      console.log('[RunDashboard] task panel state:', {
+        isCollapsed: panel?.isCollapsed(),
+        size: panel?.getSize(),
+        todoCount: phaseTodos.length,
+      });
+      if (panel && panel.getSize() < 30) {
+        panel.resize(35);
+        console.log('[RunDashboard] resized task panel to 35, new size:', panel.getSize());
+      }
     }
   }, [phaseTodos.length]);
 
@@ -248,7 +257,7 @@ export function RunDashboardPage() {
       <div className="flex-1 overflow-hidden">
         <PanelGroup orientation="vertical">
           {/* Phase progress todos — always mounted to avoid react-resizable-panels layout bugs on conditional mount */}
-          <Panel panelRef={taskPanelRef} defaultSize={phaseTodos.length > 0 ? 30 : 0} minSize={phaseTodos.length > 0 ? 3 : 0} maxSize={70} collapsible>
+          <Panel panelRef={taskPanelRef} defaultSize={phaseTodos.length > 0 ? 35 : 0} minSize={phaseTodos.length > 0 ? 3 : 0} maxSize={80} collapsible>
             {phaseTodos.length > 0 && (
               <div className="h-full px-4 py-2 bg-white">
                 <TodoWidget todos={phaseTodos} isActive={run.status === 'running'} fillHeight />
@@ -260,7 +269,7 @@ export function RunDashboardPage() {
           </PanelResizeHandle>
 
           {/* DAG panel */}
-          <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 30 : 40) : 0} minSize={flow ? 5 : 0} collapsible>
+          <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 25 : 40) : 0} minSize={0} collapsible>
             {flow ? (
               <div className="h-full">
                 <DashboardDAG
@@ -293,7 +302,7 @@ export function RunDashboardPage() {
           )}
 
           {/* Bottom panel: EventStream + WorkspaceExplorer */}
-          <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 50 : 60) : (phaseTodos.length > 0 ? 80 : 100)} minSize={20}>
+          <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 40 : 60) : (phaseTodos.length > 0 ? 65 : 100)} minSize={20}>
             {run.runId ? (
               <PanelGroup orientation="horizontal">
                 <Panel defaultSize={70} minSize={30}>

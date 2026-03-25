@@ -877,9 +877,9 @@ function ArtifactTreeItem({
 /* ── Main Explorer ───────────────────────────────────────── */
 
 export function AgentExplorer() {
-  const { state, addNode, addChild, removeNode, updateNode, selectNode, addArtifact, removeArtifact, renameArtifact, addArtifactFolder, renameArtifactFolder, removeArtifactFolder } = useFlow();
+  const { state, addNode, duplicateNode, addChild, removeNode, updateNode, selectNode, addArtifact, removeArtifact, renameArtifact, addArtifactFolder, renameArtifactFolder, removeArtifactFolder } = useFlow();
   const { activeTabId, selectAgent, selectSkill, selectReference, selectArtifact } = useLayout();
-  const { skills, references, uploadReferences, deleteReference, createReferenceFolder, renameReference, createSkill, renameSkill, deleteSkill } = useProjectStore();
+  const { skills, references, uploadReferences, deleteReference, createReferenceFolder, renameReference, createSkill, duplicateSkill, renameSkill, deleteSkill } = useProjectStore();
 
   const [agentsExpanded, setAgentsExpanded] = useState(true);
   const [checkpointsExpanded, setCheckpointsExpanded] = useState(true);
@@ -939,9 +939,9 @@ export function AgentExplorer() {
 
   const handleDuplicateAgent = useCallback(
     (node: FlowNode) => {
-      addNode(node.type, { x: 0, y: 0 });
+      duplicateNode(node);
     },
-    [addNode],
+    [duplicateNode],
   );
 
   const handleAgentContextMenu = useCallback(
@@ -986,12 +986,13 @@ export function AgentExplorer() {
         }},
         { separator: true },
         { label: 'New Skill', onClick: () => handleAddSkill() },
+        { label: 'Duplicate', onClick: () => duplicateSkill(state.flow.id, skillName) },
         { separator: true },
         { label: 'Delete', onClick: () => handleDeleteSkill(skillName), danger: true },
       ];
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [selectSkill, handleAddSkill, handleDeleteSkill, renameSkill, state.flow.id],
+    [selectSkill, handleAddSkill, handleDeleteSkill, duplicateSkill, renameSkill, state.flow.id],
   );
 
   const handleOpenReference = useCallback(

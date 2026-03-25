@@ -46,6 +46,7 @@ interface ProjectStoreValue {
   loadSkill: (projectId: string, skillName: string) => Promise<SkillState | null>;
   saveSkill: (projectId: string, skillName: string, files: Array<{ path: string; content: string }>) => Promise<void>;
   createSkill: (projectId: string, name: string) => Promise<void>;
+  duplicateSkill: (projectId: string, skillName: string) => Promise<void>;
   renameSkill: (projectId: string, oldName: string, newName: string) => Promise<void>;
   deleteSkill: (projectId: string, name: string) => Promise<void>;
   refreshProjects: () => Promise<void>;
@@ -227,6 +228,14 @@ export function ProjectStoreProvider({ children }: { children: ReactNode }) {
     await loadSkills(projectId);
   }, [loadSkills]);
 
+  // Duplicate a skill
+  const duplicateSkill = useCallback(async (projectId: string, skillName: string) => {
+    const newName = window.prompt('New skill name:', `${skillName}_copy`);
+    if (!newName?.trim()) return;
+    await api.skills.duplicate(projectId, skillName, newName.trim());
+    await loadSkills(projectId);
+  }, [loadSkills]);
+
   // Update in-memory skill cache (for live edits without server round-trip)
   const updateSkillCache = useCallback((skillName: string, files: Array<{ path: string; content: string }>) => {
     setSkillData((prev) => ({
@@ -290,13 +299,14 @@ export function ProjectStoreProvider({ children }: { children: ReactNode }) {
       loadSkill,
       saveSkill,
       createSkill,
+      duplicateSkill,
       renameSkill,
       deleteSkill,
       refreshProjects,
       updateSkillCache,
       clearSkillDataCache,
     }),
-    [projects, loading, error, skills, skillsLoading, skillData, references, referencesLoading, flows, loadReferences, uploadReferences, deleteReference, createReferenceFolder, renameReference, createProject, deleteProject, getFlowById, updateFlow, saveFlow, loadProject, loadSkills, loadSkill, saveSkill, createSkill, renameSkill, deleteSkill, refreshProjects, updateSkillCache, clearSkillDataCache],
+    [projects, loading, error, skills, skillsLoading, skillData, references, referencesLoading, flows, loadReferences, uploadReferences, deleteReference, createReferenceFolder, renameReference, createProject, deleteProject, getFlowById, updateFlow, saveFlow, loadProject, loadSkills, loadSkill, saveSkill, createSkill, duplicateSkill, renameSkill, deleteSkill, refreshProjects, updateSkillCache, clearSkillDataCache],
   );
 
   return (

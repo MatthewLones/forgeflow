@@ -5,7 +5,7 @@
   "description": "Reads a research paper and generates a structured summary with methodology critique",
   "skills": ["research-methodology"],
   "budget": {
-    "maxTurns": 100,
+    "maxTurns": 200,
     "maxBudgetUsd": 10.00,
     "timeoutMs": 300000
   },
@@ -19,7 +19,7 @@
         "inputs": ["paper.pdf"],
         "outputs": ["paper_structure.json"],
         "skills": [],
-        "budget": { "maxTurns": 25, "maxBudgetUsd": 3.00 },
+        "budget": { "maxTurns": 50, "maxBudgetUsd": 3.00 },
         "estimatedDuration": "30s"
       },
       "children": []
@@ -33,7 +33,7 @@
         "inputs": ["paper_structure.json"],
         "outputs": ["methodology_critique.json"],
         "skills": ["research-methodology"],
-        "budget": { "maxTurns": 30, "maxBudgetUsd": 3.00 },
+        "budget": { "maxTurns": 60, "maxBudgetUsd": 3.00 },
         "estimatedDuration": "45s"
       },
       "children": []
@@ -47,7 +47,7 @@
         "inputs": ["paper_structure.json", "methodology_critique.json"],
         "outputs": ["paper_summary.md"],
         "skills": [],
-        "budget": { "maxTurns": 20, "maxBudgetUsd": 2.00 },
+        "budget": { "maxTurns": 40, "maxBudgetUsd": 2.00 },
         "estimatedDuration": "30s"
       },
       "children": []

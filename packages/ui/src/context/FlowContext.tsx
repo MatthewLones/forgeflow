@@ -22,6 +22,7 @@ interface FlowContextValue {
   selectedNode: FlowNode | null;
   selectNode: (nodeId: string | null) => void;
   addNode: (type: NodeType, position: { x: number; y: number }) => void;
+  duplicateNode: (node: FlowNode) => void;
   removeNode: (nodeId: string) => void;
   updateNode: (nodeId: string, updates: Partial<Pick<FlowNode, 'name' | 'description' | 'instructions' | 'type'>>) => void;
   updateNodeConfig: (nodeId: string, config: Partial<NodeConfig>) => void;
@@ -100,6 +101,28 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
       dispatch({ type: 'ADD_NODE', node, position });
     },
     [state.flow.nodes],
+  );
+
+  const duplicateNode = useCallback(
+    (node: FlowNode) => {
+      const existingIds = collectAllIds(state.flow.nodes);
+      const clone = JSON.parse(JSON.stringify(node)) as FlowNode;
+      clone.id = generateNodeId(node.id, existingIds);
+      existingIds.add(clone.id);
+      clone.name = `${node.name} (copy)`;
+      // Recursively assign fresh IDs to children
+      function reIdChildren(children: FlowNode[]) {
+        for (const child of children) {
+          child.id = generateNodeId(child.id, existingIds);
+          existingIds.add(child.id);
+          if (child.children?.length) reIdChildren(child.children);
+        }
+      }
+      if (clone.children?.length) reIdChildren(clone.children);
+      const pos = state.positions[node.id] ?? { x: 0, y: 0 };
+      dispatch({ type: 'ADD_NODE', node: clone, position: { x: pos.x + 40, y: pos.y + 40 } });
+    },
+    [state.flow.nodes, state.positions],
   );
 
   const removeNode = useCallback(
@@ -201,6 +224,7 @@ export function FlowProvider({ flow, positions, children }: FlowProviderProps) {
         selectedNode,
         selectNode,
         addNode,
+        duplicateNode,
         removeNode,
         updateNode,
         updateNodeConfig,

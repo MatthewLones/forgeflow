@@ -63,7 +63,7 @@ describe('validateFlow integration', () => {
     ]);
 
     // Total estimated cost
-    expect(plan.totalEstimatedCost.turns).toBe(45); // 25 + 20
+    expect(plan.totalEstimatedCost.turns).toBe(90); // 50 + 40
     expect(plan.totalEstimatedCost.usd).toBe(5); // 3 + 2
 
     // Critical path is the full chain
