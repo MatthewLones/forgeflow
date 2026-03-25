@@ -4,13 +4,20 @@ A programming language and IDE for building AI agents. Crystallize any repeatabl
 
 ## Why ForgeFlow?
 
-You're a lawyer who reviews 50 contracts a month. You're a contractor who processes permit applications. You're an analyst who writes the same research report every quarter. You know exactly how the work should be done — the steps, the decision points, the places where judgment matters.
+Many professional workflows — contract review, insurance claims, due diligence, permit analysis — follow a repeatable structure: defined steps, known decision points, clear judgment calls. ForgeFlow lets domain experts encode that structure as a program. Not in Python, but in a declarative format backed by a full toolchain: type system, validator, compiler, sandboxed runtime, and a visual IDE.
 
-ForgeFlow lets you turn that expertise into a program. Not by writing Python, but by describing your process in plain language, packaging your domain knowledge into reusable **skills**, and letting a compiler, validator, and runtime handle the rest. The agent follows your structure. When it needs your judgment, it asks — then picks up where it left off.
+**A full language toolchain.** ForgeFlow has a type system (artifact schemas with 7 formats and typed fields), an 11-rule validator with dependency resolution across 4 categories, a staged compiler (flow graph → phase IR → executable prompts), and a per-phase sandboxed runtime. Authoring happens in the IDE with slash commands that render as color-coded chips:
 
-**Structure without rigidity.** ForgeFlow is a full language: it has a type system for file schemas, a validator that catches dependency errors at design time, a compiler that produces per-phase prompts, and a sandboxed runtime. But authoring a workflow feels like writing a document. Slash commands (`/output`, `/decision`, `/guardrail`, `//skill:`) render as interactive chips in the editor — you describe what each step does, declare what goes in and out, and the toolchain enforces correctness.
+- `/skill:name` (green) — attach a skill to a node
+- `//agent:name` (blue) — reference a child sub-agent
+- `@artifact` (purple) — declare an input artifact
+- `\artifact` (purple) — declare an output artifact
+- `/interrupt:type` (red) — declare an interrupt point (approval, Q&A, selection, review, escalation)
+- `/merge` (amber) — merge marker for parallel branches
 
-**Human-in-the-loop by design.** Five interrupt types let the agent ask for approval, ask questions, present selections, request edits, or escalate findings — from any depth in the workflow, in real-time. The agent pauses, you respond, it continues. If you step away, it auto-saves and waits at zero cost. Resume minutes or days later.
+Declare what each step reads, what it produces, and the toolchain infers edges, validates data flow, and compiles per-phase prompts.
+
+**Human-in-the-loop by design.** Five interrupt types with three modes — inline (agent pauses, sandbox stays alive), checkpoint (state serialized, sandbox torn down, zero cost), and auto-escalate (inline with configurable timeout that promotes to checkpoint). Interrupts fire from any depth in the node tree in real-time. The agent pauses, the human responds, the agent continues. Step away for days — resume where it left off.
 
 ## How It Works
 
@@ -18,7 +25,7 @@ You build workflows from three primitives:
 
 **Skills** are packages of domain knowledge — a `SKILL.md` with routing logic, reference files with the actual expertise, and optional scripts. A "California ADU Code" skill, a "Contract Law Basics" skill, a "Tax Prep Checklist" skill. Skills are standalone and composable: any workflow can reference any skill.
 
-**Nodes** are units of work. An **agent node** runs Claude with your instructions and loaded skills. A **checkpoint node** pauses the workflow, shows data to the human, and waits for input. Nodes can contain sub-agents that run in parallel.
+**Nodes** are units of work. An **agent node** runs Claude with your instructions and loaded skills. A **checkpoint node** pauses the workflow, shows data to the human, and waits for input. Nodes have budget constraints (`maxTurns`, `maxBudgetUsd`) and can contain sub-agents that auto-sort into concurrent waves based on sibling I/O dependencies.
 
 **Flows** connect nodes into a multi-phase pipeline defined in `FLOW.json`:
 
@@ -28,9 +35,11 @@ You build workflows from three primitives:
 
 Each node declares its inputs, outputs, skills, and budget. The engine validates dependencies, compiles per-phase prompts, and executes each phase in its own sandbox — clean context, fault isolation, and automatic state serialization between every step.
 
+**Artifacts** are the typed files that flow between nodes. Each artifact has a schema: a name, one of 7 formats (`json`, `markdown`, `text`, `csv`, `pdf`, `image`, `binary`), a description, and optional typed fields for JSON artifacts. A flow-level artifact registry defines shared schemas. The validator traces every node input back to a user upload or a prior node's output. Edges between nodes are auto-inferred from `@input` and `\output` declarations — declare the data flow, and the dependency graph builds itself.
+
 ## The IDE
 
-ForgeFlow ships as a full workspace: a visual dependency graph, tabbed editors with slash-command chips, a skill authoring system, a run dashboard with live progress, and **Forge** — a built-in AI copilot that helps you build workflows conversationally.
+ForgeFlow ships as a full workspace: a visual dependency graph, tabbed editors with slash-command chips, a skill authoring system, a run dashboard with live progress, and **Forge** — a built-in AI copilot with 14 MCP tools for reading, writing, validating, and compiling flows conversationally.
 
 ```
 ┌────────────┬──────────────────────────────────────┬──────────┐
@@ -46,10 +55,11 @@ ForgeFlow ships as a full workspace: a visual dependency graph, tabbed editors w
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- 40+ keyboard shortcuts (remappable)
-- Git version control and GitHub integration per project
-- `.forge` export/import for sharing portable project bundles
-- Desktop app (Electron) and CLI for headless execution
+- **Run dashboard** — live SSE streaming, per-phase progress, artifact output preview, interactive interrupt forms
+- **40+ keyboard shortcuts** (remappable), interactive guide overlay
+- **Git version control** and GitHub integration per project
+- **`.forge` export/import** for sharing portable project bundles
+- **Desktop app** (Electron) and **CLI** (`forgeflow run` / `forgeflow resume`) for headless execution
 
 ## Under the Hood
 
@@ -58,8 +68,8 @@ ForgeFlow works like a compiled language:
 | Language Concept | ForgeFlow Equivalent |
 |-----------------|---------------------|
 | Source code | `FLOW.json` |
-| Type system | Artifact schemas on inputs/outputs |
-| Linter / type checker | 11-rule validator with dependency resolution |
+| Type system | ArtifactSchema (7 formats, typed fields, flow-level registry) |
+| Linter / type checker | 11 rules across 4 categories (structural, type-system, dataflow, resource) |
 | Compiler | Staged IR pipeline (flow graph → phase IR → executable prompt) |
 | Linker | Skill resolver (loads and composes skill trees) |
 | Runtime | Per-phase orchestrator with sandboxed execution |
@@ -69,7 +79,19 @@ ForgeFlow works like a compiled language:
 | Debugger | Run dashboard with live SSE streaming |
 | Package format | `.forge` bundles |
 
-Each phase runs in a fresh sandbox with only its declared inputs and skills. The engine orchestrates **between** phases; Claude orchestrates **within** a phase (spawning sub-agents, firing interrupts). State serializes to disk between every step — if phase 2 fails, phase 1's outputs are safe.
+Each phase runs in a fresh sandbox with only its declared inputs and skills. The engine orchestrates **between** phases; Claude orchestrates **within** a phase (spawning sub-agents, firing interrupts). State serializes to disk between every step — if phase 2 fails, phase 1's outputs are safe. Output files stream to the state store as the agent writes them (not at phase end), so the run dashboard shows artifacts appearing in real-time.
+
+### Key Design Decisions
+
+**Budget system.** Flows have a global budget (`maxTurns`, `maxBudgetUsd`, `timeoutMs`). Nodes have per-node budgets. The validator warns if budgets are missing or inconsistent. Agent SDK enforces limits at runtime.
+
+**Wave-based child ordering.** Children within a parent node are auto-grouped into concurrent waves by topologically sorting sibling I/O dependencies. Wave 0 children have no sibling deps and run concurrently; wave 1 depends on wave 0 outputs. No manual ordering annotations needed.
+
+**Progressive output streaming.** The `InterruptWatcher` monitors the agent's output directory via filesystem events. Files emit `file_written` progress events as they're created, streaming to the run dashboard in real-time rather than batching at phase end.
+
+**Artifact auto-edges.** When a node's `@input` matches another node's `\output`, the validator auto-creates a dependency edge. Remove the reference, the edge disappears. Manual edges are also supported.
+
+**Per-child prompt files.** Each child sub-agent gets its own compiled prompt file in `workspace/prompts/`. The parent prompt has a reference table. This keeps token usage O(n) per nesting level instead of O(n^depth).
 
 ## Quick Start
 
@@ -147,7 +169,7 @@ Phase 3: Generate Deliverables
   → Uses attorney's decisions + all prior findings
 ```
 
-The attorney defines this once. Every future contract runs through the same process — with the agent asking for judgment at the right moments.
+Each phase runs in its own container. State serializes between phases. The checkpoint has zero runtime cost — no sandbox running while waiting for the human.
 
 ## Packages
 
@@ -172,6 +194,7 @@ The attorney defines this once. Every future contract runs through the same proc
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Full system design: runtime, server, UI, interrupts, git, copilot |
 | [FLOW-FORMAT.md](docs/FLOW-FORMAT.md) | FLOW.json specification and compilation pipeline |
 | [SKILL-FORMAT.md](docs/SKILL-FORMAT.md) | Skill directory structure and conventions |
+| [PIPELINE.md](docs/PIPELINE.md) | Compiler IR pipeline: resolve stage, generate stage, wave ordering, child prompts |
 
 ## Roadmap
 
@@ -179,7 +202,7 @@ The attorney defines this once. Every future contract runs through the same proc
 - [x] 5 interrupt types with inline, checkpoint, and auto-escalate modes
 - [x] CLI with mock, local, and Docker runners
 - [x] Visual IDE with dependency graph, agent editor, skill editor
-- [x] Forge AI copilot (conversational flow building with 13 MCP tools)
+- [x] Forge AI copilot (conversational flow building with 14 MCP tools)
 - [x] Run dashboard with real-time progress and interrupt UI
 - [x] Git version control and GitHub integration
 - [x] Desktop app and .forge export/import
