@@ -129,34 +129,41 @@ export function RunDashboardPage() {
   // Hooks must be called before any early returns
   const phaseTodos = useMemo(() => derivePhaseTodos(run.events), [run.events]);
   const taskPanelRef = useRef<PanelImperativeHandle>(null);
+  const needsInitialResize = useRef(true);
 
-  // Expand the task panel when todos first arrive (panel starts collapsed at size 0)
-  useEffect(() => {
-    if (phaseTodos.length > 0) {
-      const panel = taskPanelRef.current;
-      console.log('[RunDashboard] task panel state:', {
-        isCollapsed: panel?.isCollapsed(),
-        size: panel?.getSize(),
-        todoCount: phaseTodos.length,
-      });
-      if (panel && panel.getSize() < 30) {
-        panel.resize(35);
-        console.log('[RunDashboard] resized task panel to 35, new size:', panel.getSize());
+  // Count total visible rows (phases + expanded subtasks).
+  const visibleRowCount = useMemo(() => {
+    let rows = 0;
+    for (const todo of phaseTodos) {
+      rows += 1;
+      if (todo.subtasks && (todo.status === 'in_progress' || todo.status === 'completed')) {
+        rows += todo.subtasks.length;
       }
     }
-  }, [phaseTodos.length]);
+    return rows;
+  }, [phaseTodos]);
 
-  // Debug logging
-  console.log('[RunDashboard] render:', {
-    projectId,
-    runId,
-    isWizard,
-    'run.status': run.status,
-    'run.runId': run.runId,
-    'run.events.length': run.events.length,
-    loadingFlow,
-    hasFlow: !!flow,
-  });
+  // Called by react-resizable-panels once the panel is ready and on every resize.
+  // We use the first call to set the correct initial size (panel ref is guaranteed valid).
+  const handleTaskPanelResize = useCallback(() => {
+    if (!needsInitialResize.current) return;
+    if (visibleRowCount === 0) return;
+    const panel = taskPanelRef.current;
+    if (!panel) return;
+    needsInitialResize.current = false;
+    const idealPx = 72 + visibleRowCount * 24;
+    // Defer to next microtask to avoid resizing during a resize callback
+    Promise.resolve().then(() => panel.resize(idealPx));
+  }, [visibleRowCount]);
+
+  // Resize the task panel whenever the row count changes during the run.
+  useEffect(() => {
+    if (visibleRowCount === 0) return;
+    const panel = taskPanelRef.current;
+    if (!panel) return;
+    const idealPx = 72 + visibleRowCount * 24;
+    panel.resize(idealPx);
+  }, [visibleRowCount]);
 
   if (!projectId) return null;
 
@@ -257,7 +264,7 @@ export function RunDashboardPage() {
       <div className="flex-1 overflow-hidden">
         <PanelGroup orientation="vertical">
           {/* Phase progress todos — always mounted to avoid react-resizable-panels layout bugs on conditional mount */}
-          <Panel panelRef={taskPanelRef} defaultSize={phaseTodos.length > 0 ? 35 : 0} minSize={phaseTodos.length > 0 ? 3 : 0} maxSize={80} collapsible>
+          <Panel panelRef={taskPanelRef} defaultSize={phaseTodos.length > 0 ? "35%" : "0%"} minSize={phaseTodos.length > 0 ? "3%" : "0%"} collapsible onResize={handleTaskPanelResize}>
             {phaseTodos.length > 0 && (
               <div className="h-full px-4 py-2 bg-white">
                 <TodoWidget todos={phaseTodos} isActive={run.status === 'running'} fillHeight />
@@ -268,44 +275,72 @@ export function RunDashboardPage() {
             <div className="w-8 h-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
           </PanelResizeHandle>
 
-          {/* DAG panel */}
-          <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 25 : 40) : 0} minSize={0} collapsible>
-            {flow ? (
-              <div className="h-full">
-                <DashboardDAG
-                  nodes={flow.nodes}
-                  edges={flow.edges}
-                  nodeStatuses={run.nodeStatuses}
-                  selectedNodeId={selectedNodeId}
-                  onNodeClick={setSelectedNodeId}
-                  onNodeDoubleClick={setPromptNodeId}
-                />
-              </div>
-            ) : !loadingFlow && flowError ? (
-              <div className="flex items-center gap-2 px-4 py-3 bg-amber-50">
-                <span className="text-xs text-amber-600">Could not load flow graph: {flowError}</span>
-                <button
-                  type="button"
-                  onClick={loadFlow}
-                  className="text-[10px] px-2 py-0.5 rounded border border-amber-300 text-amber-700 hover:bg-amber-100"
-                >
-                  Retry
-                </button>
-              </div>
-            ) : null}
-          </Panel>
+          {/* DAG + bottom content nested so the task handle can take space from both */}
+          <Panel defaultSize={phaseTodos.length > 0 ? "65%" : "100%"} minSize="10%">
+            <PanelGroup orientation="vertical">
+              {/* DAG panel */}
+              <Panel defaultSize={flow ? (phaseTodos.length > 0 ? "38%" : "40%") : "0%"} minSize="0%" collapsible>
+                {flow ? (
+                  <div className="h-full">
+                    <DashboardDAG
+                      nodes={flow.nodes}
+                      edges={flow.edges}
+                      nodeStatuses={run.nodeStatuses}
+                      selectedNodeId={selectedNodeId}
+                      onNodeClick={setSelectedNodeId}
+                      onNodeDoubleClick={setPromptNodeId}
+                    />
+                  </div>
+                ) : !loadingFlow && flowError ? (
+                  <div className="flex items-center gap-2 px-4 py-3 bg-amber-50">
+                    <span className="text-xs text-amber-600">Could not load flow graph: {flowError}</span>
+                    <button
+                      type="button"
+                      onClick={loadFlow}
+                      className="text-[10px] px-2 py-0.5 rounded border border-amber-300 text-amber-700 hover:bg-amber-100"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : null}
+              </Panel>
 
-          {flow && (
-            <PanelResizeHandle className="h-2 py-1 bg-transparent hover:bg-blue-200/60 transition-colors cursor-row-resize flex items-center justify-center group border-y border-[var(--color-border)] relative z-10">
-              <div className="w-8 h-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
-            </PanelResizeHandle>
-          )}
+              {flow && (
+                <PanelResizeHandle className="h-2 py-1 bg-transparent hover:bg-blue-200/60 transition-colors cursor-row-resize flex items-center justify-center group border-y border-[var(--color-border)] relative z-10">
+                  <div className="w-8 h-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+                </PanelResizeHandle>
+              )}
 
-          {/* Bottom panel: EventStream + WorkspaceExplorer */}
-          <Panel defaultSize={flow ? (phaseTodos.length > 0 ? 40 : 60) : (phaseTodos.length > 0 ? 65 : 100)} minSize={20}>
-            {run.runId ? (
-              <PanelGroup orientation="horizontal">
-                <Panel defaultSize={70} minSize={30}>
+              {/* Bottom panel: EventStream + WorkspaceExplorer */}
+              <Panel defaultSize={flow ? (phaseTodos.length > 0 ? "62%" : "60%") : "100%"} minSize="20%">
+                {run.runId ? (
+                  <PanelGroup orientation="horizontal">
+                    <Panel defaultSize="70%" minSize="30%">
+                      <EventStreamPanel
+                        showSummary={showSummary}
+                        isDone={isDone}
+                        isRunning={isRunning}
+                        run={run}
+                        selectedNodeId={selectedNodeId}
+                        onSetShowSummary={setShowSummary}
+                        onNodeClick={setSelectedNodeId}
+                        onFileClick={handleEventFileClick}
+                        onArtifactClick={handleArtifactClick}
+                        onWorkspaceFileClick={handleWorkspaceFileClick}
+                      />
+                    </Panel>
+                    <PanelResizeHandle className="w-1.5 bg-transparent hover:bg-blue-200/60 transition-colors cursor-col-resize flex items-center justify-center group border-x border-[var(--color-border)]">
+                      <div className="h-8 w-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+                    </PanelResizeHandle>
+                    <Panel defaultSize="30%" minSize="15%">
+                      <WorkspaceExplorer
+                        runId={run.runId}
+                        isRunning={isRunning}
+                        onFileClick={handleWorkspaceFileClick}
+                      />
+                    </Panel>
+                  </PanelGroup>
+                ) : (
                   <EventStreamPanel
                     showSummary={showSummary}
                     isDone={isDone}
@@ -318,32 +353,9 @@ export function RunDashboardPage() {
                     onArtifactClick={handleArtifactClick}
                     onWorkspaceFileClick={handleWorkspaceFileClick}
                   />
-                </Panel>
-                <PanelResizeHandle className="w-1.5 bg-transparent hover:bg-blue-200/60 transition-colors cursor-col-resize flex items-center justify-center group border-x border-[var(--color-border)]">
-                  <div className="h-8 w-0.5 rounded bg-gray-300 group-hover:bg-blue-400 transition-colors" />
-                </PanelResizeHandle>
-                <Panel defaultSize={30} minSize={15}>
-                  <WorkspaceExplorer
-                    runId={run.runId}
-                    isRunning={isRunning}
-                    onFileClick={handleWorkspaceFileClick}
-                  />
-                </Panel>
-              </PanelGroup>
-            ) : (
-              <EventStreamPanel
-                showSummary={showSummary}
-                isDone={isDone}
-                isRunning={isRunning}
-                run={run}
-                selectedNodeId={selectedNodeId}
-                onSetShowSummary={setShowSummary}
-                onNodeClick={setSelectedNodeId}
-                onFileClick={handleEventFileClick}
-                onArtifactClick={handleArtifactClick}
-                onWorkspaceFileClick={handleWorkspaceFileClick}
-              />
-            )}
+                )}
+              </Panel>
+            </PanelGroup>
           </Panel>
         </PanelGroup>
       </div>

@@ -238,8 +238,16 @@ function WorkspaceContent({ projectId }: { projectId: string }) {
       id: 'escape', label: 'Dismiss', category: 'general',
       key: 'Escape', global: true,
       handler: () => {
-        if (settingsOpenRef.current) setSettingsOpen(false);
-        // Other Escape handlers (DAG fullscreen, rename cancel) are component-local
+        if (settingsOpenRef.current) { setSettingsOpen(false); return; }
+        // Close dismissible dockview panels (pre-run, run-history)
+        const api = layoutRef.current.api;
+        if (api) {
+          const active = api.activePanel;
+          const panelId = active?.id;
+          if (panelId === 'pre-run' || panelId === 'run-history') {
+            api.removePanel(active);
+          }
+        }
       },
     },
 

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRun, type CheckpointHistoryEntry } from '../context/RunContext';
 import { CheckpointPanel } from '../components/shared/CheckpointPanel';
@@ -10,6 +11,15 @@ export function CheckpointPage() {
   const { run, pendingCheckpoint, checkpointHistory } = useRun();
 
   const isLive = run.status === 'running' || run.status === 'starting' || run.status === 'awaiting_input';
+
+  // Dismiss on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') navigate(`/projects/${projectId}/runs/${runId}`);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [navigate, projectId, runId]);
 
   return (
     <div className="h-screen flex flex-col bg-[var(--color-canvas-bg)]">

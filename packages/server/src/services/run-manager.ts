@@ -683,10 +683,18 @@ export class RunManager {
       textBlockCount: number;
     }>();
 
+    // Track the latest active (unfinished) phase per nodeId for lookups
+    const activePhaseKey = new Map<string, string>();
+
     for (let i = 0; i < events.length; i++) {
       const e = events[i];
       if (e.type === 'phase_started') {
-        phaseMap.set(e.nodeId, {
+        // Use a unique key to avoid overwriting on retry
+        let key = e.nodeId;
+        if (phaseMap.has(key)) {
+          key = `${e.nodeId}__retry_${i}`;
+        }
+        phaseMap.set(key, {
           nodeId: e.nodeId,
           nodeName: e.nodeName,
           startIndex: i,
@@ -697,8 +705,10 @@ export class RunManager {
           toolCallCount: 0,
           textBlockCount: 0,
         });
+        activePhaseKey.set(e.nodeId, key);
       } else if (e.type === 'phase_completed') {
-        const phase = phaseMap.get(e.nodeId);
+        const key = activePhaseKey.get(e.nodeId);
+        const phase = key ? phaseMap.get(key) : undefined;
         if (phase) {
           phase.endIndex = i;
           phase.cost = e.cost;
@@ -706,13 +716,16 @@ export class RunManager {
           phase.missingOutputs = e.missingOutputs ?? [];
         }
       } else if (e.type === 'phase_failed') {
-        const phase = phaseMap.get(e.nodeId);
+        const key = activePhaseKey.get(e.nodeId);
+        const phase = key ? phaseMap.get(key) : undefined;
         if (phase) phase.endIndex = i;
       } else if (e.type === 'tool_call') {
-        const phase = phaseMap.get(e.nodeId);
+        const key = activePhaseKey.get(e.nodeId);
+        const phase = key ? phaseMap.get(key) : undefined;
         if (phase) phase.toolCallCount++;
       } else if (e.type === 'text_block') {
-        const phase = phaseMap.get(e.nodeId);
+        const key = activePhaseKey.get(e.nodeId);
+        const phase = key ? phaseMap.get(key) : undefined;
         if (phase) phase.textBlockCount++;
       }
     }

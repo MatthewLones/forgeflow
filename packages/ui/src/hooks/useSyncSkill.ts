@@ -15,7 +15,7 @@ export function useSyncSkill(
   skillName: string,
   state: SkillState,
 ) {
-  const { updateSkillCache, saveSkill } = useProjectStore();
+  const { updateSkillCache, saveSkill, loadSkills } = useProjectStore();
   const cacheTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -33,6 +33,7 @@ export function useSyncSkill(
     saveTimerRef.current = setTimeout(async () => {
       try {
         await saveSkill(projectId, skillName, state.files);
+        await loadSkills(projectId);
       } catch (err) {
         console.error('Failed to auto-save skill:', err);
       }
@@ -42,7 +43,7 @@ export function useSyncSkill(
       if (cacheTimerRef.current) clearTimeout(cacheTimerRef.current);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [state.dirty, state.files, skillName, projectId, updateSkillCache, saveSkill]);
+  }, [state.dirty, state.files, skillName, projectId, updateSkillCache, saveSkill, loadSkills]);
 
   // Cleanup on unmount
   useEffect(() => {
