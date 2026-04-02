@@ -107,7 +107,7 @@ export class RunManager {
     options?: { model?: string; apiKey?: string; skillPaths?: string[]; userUploads?: StateFile[] },
   ): Promise<string> {
     log(`startRun: project=${projectId} runner=${runnerType} uploads=${options?.userUploads?.length ?? 0}`);
-    const runner = await this.createRunner(runnerType, options);
+    const runner = await this.createRunner(runnerType, options, flow);
 
     // Generate runId up front so we can register the ActiveRun before execution starts.
     // This avoids a race where fast runs (mock) complete before the map entry exists.
@@ -200,7 +200,7 @@ export class RunManager {
     options?: { model?: string; apiKey?: string; skillPaths?: string[] },
   ): Promise<string> {
     log(`resumeRun: runId=${runId} runner=${runnerType} files=${checkpointInputs.length}`);
-    const runner = await this.createRunner(runnerType, options);
+    const runner = await this.createRunner(runnerType, options, flow);
     const events: ProgressEvent[] = [];
     const sseClients = new Set<Response>();
 
@@ -286,7 +286,7 @@ export class RunManager {
     options?: { model?: string; apiKey?: string; skillPaths?: string[] },
   ): Promise<string> {
     log(`retryRun: runId=${runId} runner=${runnerType}`);
-    const runner = await this.createRunner(runnerType, options);
+    const runner = await this.createRunner(runnerType, options, flow);
     const events: ProgressEvent[] = [];
     const sseClients = new Set<Response>();
 
@@ -867,10 +867,11 @@ export class RunManager {
   private async createRunner(
     type: RunnerType,
     options?: { model?: string; apiKey?: string },
+    flow?: FlowDefinition,
   ): Promise<AgentRunner> {
     switch (type) {
       case 'mock':
-        return new MockRunner(new Map<string, MockBehavior>());
+        return new MockRunner(this.buildMockBehaviors(flow));
       case 'local':
         return new ClaudeAgentRunner({
           model: options?.model,
@@ -886,6 +887,487 @@ export class RunManager {
         });
       }
     }
+  }
+
+  /**
+   * Build mock behaviors that produce realistic sample output for known seed projects.
+   * Falls back to empty map (default succeed-with-no-output) for unknown projects.
+   */
+  private buildMockBehaviors(flow?: FlowDefinition): Map<string, MockBehavior> {
+    if (!flow) return new Map();
+
+    // Detect the startup due diligence project by checking for signature nodes
+    const nodeIds = new Set(flow.nodes.map(n => n.id));
+    if (nodeIds.has('ingest_materials') && nodeIds.has('risk_assessment') && nodeIds.has('partner_review')) {
+      return this.buildStartupDueDiligenceMocks();
+    }
+
+    // Detect the interrupt test kitchen by signature nodes
+    if (nodeIds.has('draft_content') && nodeIds.has('edit_pass') && nodeIds.has('final_review')) {
+      return this.buildInterruptTestKitchenMocks();
+    }
+
+    return new Map();
+  }
+
+  private buildStartupDueDiligenceMocks(): Map<string, MockBehavior> {
+    return new Map<string, MockBehavior>([
+      ['ingest_materials', {
+        outputFiles: {
+          'company_profile.json': JSON.stringify({
+            company_name: 'NovaBridge AI',
+            sector: 'Enterprise AI / Developer Tools',
+            stage: 'series-a',
+            founded_year: 2024,
+            team: [
+              { name: 'Sarah Chen', role: 'CEO', background: 'Ex-Stripe engineering lead, Stanford CS, 8 years in developer tools' },
+              { name: 'Marcus Rivera', role: 'CTO', background: 'Ex-Google Brain researcher, PhD MIT, led COBOL modernization at IBM' },
+              { name: 'Dr. Aisha Patel', role: 'Chief Scientist', background: 'Former DeepMind, published 12 papers on code generation, Oxford PhD' },
+            ],
+            traction: {
+              arr: 2400000,
+              mrr: 200000,
+              customers: 14,
+              avg_contract_value: 170000,
+              logo_retention: 1.0,
+              nrr: 1.45,
+              yoy_growth: 6.0,
+            },
+            funding_history: [
+              { round: 'Pre-seed', date: '2024-01', amount: 500000, investors: ['Y Combinator'] },
+              { round: 'Seed', date: '2024-06', amount: 4200000, investors: ['Sequoia Capital', 'Angel syndicate'] },
+            ],
+            cap_table: {
+              founders: { total: 0.62, breakdown: { sarah_chen: 0.30, marcus_rivera: 0.22, aisha_patel: 0.10 } },
+              employee_pool: { total: 0.15, allocated: 0.08, unallocated: 0.07 },
+              seed_investors: { total: 0.18, sequoia: 0.10, angels: 0.08 },
+              yc: 0.05,
+            },
+          }, null, 2),
+        },
+        cost: { turns: 12, usd: 0.85 },
+        verbose: {
+          textBlocks: [
+            'Reading startup materials and extracting structured company data...',
+            'Parsing financial metrics, team bios, and cap table from the pitch deck...',
+            'Company profile assembled — NovaBridge AI, Series A stage, $2.4M ARR with 6x YoY growth.',
+          ],
+          delayMs: 30,
+        },
+      }],
+      ['market_research', {
+        outputFiles: {
+          'market_analysis.json': JSON.stringify({
+            tam: { value_usd: 87000000000, methodology: 'Global IT modernization spend (Gartner 2025)', sources: ['Gartner IT Spending Forecast Q1 2025', 'IDC Worldwide Digital Transformation Spending Guide'] },
+            sam: { value_usd: 12000000000, methodology: 'Automated code migration tools segment, filtered by enterprise AI adoption rate', sources: ['Markets & Markets Code Migration Report 2025'] },
+            som: { value_usd: 1200000000, methodology: '10% SAM capture over 5 years, based on current pipeline velocity and win rate', timeline_years: 5 },
+            competitors: [
+              { name: 'IBM watsonx Code Assistant', stage: 'Enterprise', funding: 'IBM subsidiary', strengths: 'Brand trust, enterprise relationships', weaknesses: '~55% accuracy, slow iteration', threat_level: 'moderate' },
+              { name: 'AWS Mainframe Modernization', stage: 'Enterprise', funding: 'AWS subsidiary', strengths: 'AWS ecosystem lock-in, infrastructure', weaknesses: 'Limited language support, manual-heavy', threat_level: 'moderate' },
+              { name: 'CodeMorph', stage: 'Series B', funding: '$45M', strengths: 'Strong marketing, broad language support', weaknesses: 'Lower accuracy (62%), higher error rates in production', threat_level: 'high' },
+              { name: 'Modernizing.io', stage: 'Seed', funding: '$3M', strengths: 'Niche COBOL focus, government contracts', weaknesses: 'Small team, single-language, limited traction', threat_level: 'low' },
+            ],
+            growth_trends: 'Enterprise AI adoption for code modernization is accelerating — IDC projects 28% CAGR through 2028. Regulatory pressure (EU Digital Operational Resilience Act) is forcing legacy system migration. Key tailwind: 70% of Fortune 500 still run critical COBOL systems.',
+            moat_assessment: {
+              data_moat: 'Strong — proprietary training data from 14 enterprise deployments, covering COBOL/Fortran codebases totaling 45M+ lines',
+              network_effects: 'Moderate — each deployment improves accuracy for similar codebases, but not a traditional platform network effect',
+              switching_costs: 'High — 6-month enterprise integration cycle, custom rule libraries built per client',
+              ip_protection: '14 provisional patents filed, 2 granted — covers novel AST transformation and multi-pass verification approaches',
+            },
+          }, null, 2),
+          'competitor_matrix.csv': [
+            'Company,Stage,Funding,Accuracy,Languages Supported,Enterprise Customers,Pricing Model,Key Differentiator,Threat Level',
+            'NovaBridge AI,Series A,$4.7M,89%,"COBOL,Fortran → Python,Go,Rust",14,Per-migration + SaaS,Highest accuracy + verification pipeline,—',
+            'IBM watsonx Code Assistant,Enterprise,IBM subsidiary,55%,"COBOL → Java",200+,Enterprise license,Brand trust + existing relationships,Moderate',
+            'AWS Mainframe Modernization,Enterprise,AWS subsidiary,48%,"COBOL → Java,C#",150+,Pay-per-use + consulting,AWS ecosystem integration,Moderate',
+            'CodeMorph,Series B,$45M,62%,"COBOL,FORTRAN,RPG → Python,Java,C#",38,SaaS subscription,Broad language support + marketing,High',
+            'Modernizing.io,Seed,$3M,71%,"COBOL → Python",6,Per-project,Government contract focus,Low',
+            'Manual Consulting (Accenture/Deloitte),N/A,N/A,95%+ (manual),Any,1000+,Time & materials ($200-400/hr),Human review + compliance expertise,Low (different segment)',
+          ].join('\n'),
+          'market_map.svg': [
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 500" font-family="system-ui, -apple-system, sans-serif">',
+            '  <defs>',
+            '    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">',
+            '      <stop offset="0%" style="stop-color:#f8fafc;stop-opacity:1" />',
+            '      <stop offset="100%" style="stop-color:#f1f5f9;stop-opacity:1" />',
+            '    </linearGradient>',
+            '  </defs>',
+            '  <rect width="600" height="500" fill="url(#bg)" rx="8" />',
+            '  <text x="300" y="30" text-anchor="middle" font-size="14" font-weight="700" fill="#1e293b">Competitive Positioning — AI Code Migration</text>',
+            '',
+            '  <!-- Axes -->',
+            '  <line x1="60" y1="450" x2="580" y2="450" stroke="#cbd5e1" stroke-width="1.5" />',
+            '  <line x1="60" y1="50" x2="60" y2="450" stroke="#cbd5e1" stroke-width="1.5" />',
+            '  <text x="320" y="485" text-anchor="middle" font-size="11" fill="#64748b">Migration Accuracy →</text>',
+            '  <text x="20" y="250" text-anchor="middle" font-size="11" fill="#64748b" transform="rotate(-90 20 250)">Enterprise Scale →</text>',
+            '',
+            '  <!-- Grid lines -->',
+            '  <line x1="60" y1="250" x2="580" y2="250" stroke="#e2e8f0" stroke-dasharray="4" />',
+            '  <line x1="320" y1="50" x2="320" y2="450" stroke="#e2e8f0" stroke-dasharray="4" />',
+            '',
+            '  <!-- Quadrant labels -->',
+            '  <text x="190" y="70" text-anchor="middle" font-size="9" fill="#94a3b8" font-style="italic">Broad but Inaccurate</text>',
+            '  <text x="450" y="70" text-anchor="middle" font-size="9" fill="#94a3b8" font-style="italic">Market Leaders</text>',
+            '  <text x="190" y="440" text-anchor="middle" font-size="9" fill="#94a3b8" font-style="italic">Early Niche Players</text>',
+            '  <text x="450" y="440" text-anchor="middle" font-size="9" fill="#94a3b8" font-style="italic">Accurate but Small</text>',
+            '',
+            '  <!-- NovaBridge AI (high accuracy, mid-scale) — HIGHLIGHTED -->',
+            '  <circle cx="470" cy="230" r="28" fill="#3b82f6" fill-opacity="0.15" stroke="#3b82f6" stroke-width="2.5" />',
+            '  <circle cx="470" cy="230" r="4" fill="#3b82f6" />',
+            '  <text x="470" y="270" text-anchor="middle" font-size="10" font-weight="700" fill="#1d4ed8">NovaBridge AI</text>',
+            '  <text x="470" y="282" text-anchor="middle" font-size="8" fill="#3b82f6">89% accuracy · 14 customers</text>',
+            '',
+            '  <!-- IBM watsonx (low accuracy, high scale) -->',
+            '  <circle cx="180" cy="110" r="22" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b" stroke-width="1.5" />',
+            '  <circle cx="180" cy="110" r="3.5" fill="#f59e0b" />',
+            '  <text x="180" y="145" text-anchor="middle" font-size="9" font-weight="600" fill="#92400e">IBM watsonx</text>',
+            '  <text x="180" y="156" text-anchor="middle" font-size="7.5" fill="#b45309">55% · 200+ customers</text>',
+            '',
+            '  <!-- AWS Mainframe (lowest accuracy, high scale) -->',
+            '  <circle cx="130" cy="130" r="20" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b" stroke-width="1.5" />',
+            '  <circle cx="130" cy="130" r="3.5" fill="#f59e0b" />',
+            '  <text x="130" y="162" text-anchor="middle" font-size="9" font-weight="600" fill="#92400e">AWS Modernize</text>',
+            '  <text x="130" y="173" text-anchor="middle" font-size="7.5" fill="#b45309">48% · 150+ customers</text>',
+            '',
+            '  <!-- CodeMorph (mid accuracy, mid scale) — KEY COMPETITOR -->',
+            '  <circle cx="280" cy="200" r="20" fill="#ef4444" fill-opacity="0.12" stroke="#ef4444" stroke-width="1.8" />',
+            '  <circle cx="280" cy="200" r="3.5" fill="#ef4444" />',
+            '  <text x="280" y="232" text-anchor="middle" font-size="9" font-weight="600" fill="#b91c1c">CodeMorph</text>',
+            '  <text x="280" y="243" text-anchor="middle" font-size="7.5" fill="#dc2626">62% · 38 customers</text>',
+            '',
+            '  <!-- Modernizing.io (decent accuracy, low scale) -->',
+            '  <circle cx="380" cy="370" r="14" fill="#8b5cf6" fill-opacity="0.12" stroke="#8b5cf6" stroke-width="1.5" />',
+            '  <circle cx="380" cy="370" r="3" fill="#8b5cf6" />',
+            '  <text x="380" y="395" text-anchor="middle" font-size="9" font-weight="600" fill="#6d28d9">Modernizing.io</text>',
+            '  <text x="380" y="406" text-anchor="middle" font-size="7.5" fill="#7c3aed">71% · 6 customers</text>',
+            '',
+            '  <!-- Manual Consulting (highest accuracy, highest scale) -->',
+            '  <circle cx="530" cy="90" r="18" fill="#6b7280" fill-opacity="0.1" stroke="#9ca3af" stroke-width="1" stroke-dasharray="3" />',
+            '  <circle cx="530" cy="90" r="3" fill="#9ca3af" />',
+            '  <text x="530" y="118" text-anchor="middle" font-size="8.5" font-weight="600" fill="#6b7280">Manual Consulting</text>',
+            '  <text x="530" y="129" text-anchor="middle" font-size="7.5" fill="#9ca3af">95%+ · $200-400/hr</text>',
+            '',
+            '  <!-- Legend -->',
+            '  <rect x="380" y="440" width="200" height="50" fill="white" fill-opacity="0.8" rx="4" stroke="#e2e8f0" />',
+            '  <circle cx="395" cy="454" r="4" fill="#3b82f6" /><text x="405" y="457" font-size="7.5" fill="#475569">Target company</text>',
+            '  <circle cx="395" cy="470" r="4" fill="#ef4444" /><text x="405" y="473" font-size="7.5" fill="#475569">Key competitor</text>',
+            '  <circle cx="480" cy="454" r="4" fill="#f59e0b" /><text x="490" y="457" font-size="7.5" fill="#475569">Incumbents</text>',
+            '  <circle cx="480" cy="470" r="4" fill="#8b5cf6" /><text x="490" y="473" font-size="7.5" fill="#475569">Niche player</text>',
+            '</svg>',
+          ].join('\n'),
+        },
+        cost: { turns: 18, usd: 1.40 },
+        verbose: {
+          textBlocks: [
+            'Analyzing market sizing using bottom-up methodology...',
+            'Mapping competitive landscape — identified 5 direct competitors...',
+            'Generating competitive positioning SVG visualization...',
+            'Building competitor comparison matrix with key metrics...',
+            'Market research complete — $87B TAM, $12B SAM, strong moat indicators.',
+          ],
+          delayMs: 40,
+        },
+      }],
+      ['analyze_financials', {
+        outputFiles: {
+          'financial_findings.json': JSON.stringify({
+            arr: 2400000,
+            mrr: 200000,
+            burn_rate: 380000,
+            runway_months: 14,
+            ltv_cac_ratio: 4.8,
+            burn_multiple: 1.58,
+            unit_economics: {
+              cac: 35400,
+              ltv: 170000,
+              payback_months: 8.4,
+              gross_margin: 0.82,
+              avg_contract_length_years: 2.8,
+            },
+            assessment: 'NovaBridge exhibits strong unit economics with a 4.8x LTV:CAC ratio (well above the 3x SaaS threshold) and a healthy 1.58x burn multiple. The 82% gross margin reflects an efficient AI-first delivery model. Primary concern: 14-month runway at current burn rate requires Series A within 6 months to maintain growth trajectory. Revenue concentration risk — top 3 clients represent 47% of ARR.',
+          }, null, 2),
+          'financial_projections.csv': [
+            'Year,Revenue ($),ARR ($),ARR Growth (%),Burn Rate ($/mo),Runway (months),Headcount,Gross Margin (%),LTV:CAC,Net Revenue Retention (%)',
+            '2024 (Actual),2400000,2400000,600,380000,14,18,82,4.8,145',
+            '2025 (Projected),7200000,7200000,200,520000,18,32,80,4.5,140',
+            '2026 (Projected),18000000,18000000,150,780000,24,55,81,5.0,142',
+            '2027 (Projected),36000000,36000000,100,950000,36,78,83,5.2,138',
+            '2028 (Projected),58000000,58000000,61,1100000,48,105,85,5.5,135',
+          ].join('\n'),
+        },
+        cost: { turns: 15, usd: 1.10 },
+        verbose: {
+          textBlocks: [
+            'Evaluating unit economics — calculating CAC, LTV, and payback period...',
+            'Modeling 5-year financial projections based on current growth trajectory...',
+            'Building CSV projection model with revenue, burn rate, and headcount forecasts...',
+            'Financial analysis complete — strong unit economics, runway concern flagged.',
+          ],
+          delayMs: 30,
+        },
+      }],
+      ['analyze_legal', {
+        outputFiles: {
+          'legal_findings.json': JSON.stringify({
+            cap_table_flags: [
+              'Clean cap table structure — no concerning red flags',
+              'Standard 4-year vesting with 1-year cliff for all founders',
+              'Unallocated option pool (7%) is slightly below recommended 10% pre-Series A — may need expansion',
+              'YC SAFE converted at standard terms — no unusual preferences',
+            ],
+            ip_status: {
+              ciia_coverage: '100% — all 18 employees and 3 contractors have signed CIIAs',
+              patents: { provisional: 14, granted: 2, pending: 12 },
+              prior_art_risk: 'Low — core technology developed post-incorporation, no university IP entanglement',
+              open_source_exposure: 'Moderate — training pipeline uses Apache 2.0 licensed models, compliant for commercial use',
+            },
+            regulatory_risks: [
+              { area: 'AI/ML', risk: 'EU AI Act classification — code migration tools likely low-risk, but monitoring required', severity: 'low' },
+              { area: 'Data Privacy', risk: 'Client codebases may contain PII — SOC 2 Type II in progress, expected completion Q3 2025', severity: 'moderate' },
+              { area: 'Export Control', risk: 'Some defense contractor clients may trigger ITAR considerations for COBOL systems', severity: 'moderate' },
+            ],
+            corporate_structure: 'Delaware C-corp, standard incorporation — clean for institutional investment. No multi-entity complexity.',
+            overall_risk_level: 'low',
+          }, null, 2),
+        },
+        cost: { turns: 14, usd: 1.00 },
+        verbose: {
+          textBlocks: [
+            'Reviewing cap table structure and shareholder agreements...',
+            'Checking IP assignment coverage across all team members...',
+            'Assessing sector-specific regulatory exposure (AI/ML, data privacy)...',
+            'Legal analysis complete — overall risk level: low.',
+          ],
+          delayMs: 30,
+        },
+      }],
+      ['analyze_team', {
+        outputFiles: {
+          'team_assessment.json': JSON.stringify({
+            founder_market_fit: 5,
+            technical_strength: 5,
+            key_person_risk: 'Moderate — Dr. Aisha Patel holds critical knowledge of the novel AST transformation approach. If she departed, 2-3 month setback on core algorithm development. Mitigation: knowledge is partially codified in patent applications, and 3 senior engineers have been cross-trained.',
+            team_gaps: [
+              { role: 'VP Sales', urgency: 'high', rationale: 'Only 2 sales reps for enterprise motion — need experienced leader to build out GTM team' },
+              { role: 'Head of Customer Success', urgency: 'high', rationale: '100% logo retention is at risk as customer count grows without dedicated CS function' },
+              { role: 'DevRel / Developer Advocacy', urgency: 'medium', rationale: 'Open-source community building would strengthen moat and pipeline' },
+            ],
+            culture_signals: 'Strong engineering-first culture with high psychological safety indicators. Weekly tech talks, open RFC process for architectural decisions. Low attrition (0 voluntary departures in 12 months). Founders actively engage in pair programming with team. Potential concern: rapid headcount growth (18→32 projected) may dilute culture without deliberate effort.',
+          }, null, 2),
+        },
+        cost: { turns: 13, usd: 0.95 },
+        verbose: {
+          textBlocks: [
+            'Evaluating founder-market fit and domain expertise...',
+            'Assessing key person risk and knowledge concentration...',
+            'Identifying team gaps and hiring priorities...',
+            'Team assessment complete — exceptional founders, VP Sales hire is critical.',
+          ],
+          delayMs: 30,
+        },
+      }],
+      ['risk_assessment', {
+        outputFiles: {
+          'risk_matrix.json': JSON.stringify({
+            financial_risk: 4,
+            legal_risk: 4,
+            team_risk: 4,
+            market_risk: 3,
+            overall_risk: 4,
+            summary: 'NovaBridge AI presents a favorable risk profile for Series A investment. Financial fundamentals are strong (4.8x LTV:CAC, 1.58x burn multiple) with the primary concern being 14-month runway requiring timely fundraise. Legal structure is clean with comprehensive IP coverage. Team is exceptional but has critical hiring gaps (VP Sales, Head of CS). Market risk is the primary concern — the AI code migration space is attracting well-funded competitors (CodeMorph $45M Series B) and incumbent interest (IBM, AWS).',
+            recommendations: [
+              'Negotiate Series A terms that extend runway to 24+ months to de-risk the fundraising timeline',
+              'Make VP Sales hire a condition — the enterprise motion cannot scale with 2 sales reps',
+              'Request quarterly competitive intelligence updates — CodeMorph is the primary threat',
+              'SOC 2 Type II completion should be a milestone requirement given enterprise client base',
+              'Consider board observer seat to maintain visibility into execution',
+            ],
+          }, null, 2),
+        },
+        cost: { turns: 22, usd: 1.80 },
+        verbose: {
+          textBlocks: [
+            'Aggregating findings from financial, legal, and team sub-analyses...',
+            'Computing risk scores across all dimensions...',
+            'Assembling risk mitigation recommendations...',
+            'Risk matrix complete — overall score: 4/5 (Low Risk). Market competition is the primary concern.',
+          ],
+          delayMs: 35,
+        },
+      }],
+      ['final_report', {
+        outputFiles: {
+          'investment_memo.md': [
+            '# Investment Memo: NovaBridge AI — Series A',
+            '',
+            '**Date:** March 2026  ',
+            '**Analyst:** ForgeFlow Due Diligence Pipeline  ',
+            '**Recommendation:** **Invest** (Conditional)  ',
+            '',
+            '---',
+            '',
+            '## Executive Summary',
+            '',
+            'NovaBridge AI is building an AI-powered code migration platform that converts legacy COBOL and Fortran codebases to modern languages (Python, Go, Rust) with **89% accuracy** — significantly outperforming IBM watsonx (55%) and CodeMorph (62%). The company has achieved **$2.4M ARR** with 14 enterprise customers, **6x YoY growth**, and **100% logo retention** in a $12B serviceable market.',
+            '',
+            'We recommend a **$15M Series A investment at a $75M pre-money valuation** (31x ARR), conditional on key hiring milestones and SOC 2 certification completion.',
+            '',
+            '## Investment Thesis',
+            '',
+            '### Why Now',
+            '',
+            '1. **Regulatory tailwind** — EU Digital Operational Resilience Act and US federal modernization mandates are creating urgency for legacy system migration',
+            '2. **AI capability inflection** — Transformer architectures have reached the quality threshold for production code generation, validated by NovaBridge\'s 89% accuracy',
+            '3. **Massive TAM** — 70% of Fortune 500 still run critical COBOL systems; the modernization wave is accelerating',
+            '',
+            '### Why This Team',
+            '',
+            '- **Sarah Chen (CEO)** — Built and led Stripe\'s developer tools platform ($0→$2B in payments volume)',
+            '- **Marcus Rivera (CTO)** — Led IBM\'s initial COBOL modernization efforts, published research on AST transformation',
+            '- **Dr. Aisha Patel (Chief Scientist)** — DeepMind alumna, 12 published papers on code generation',
+            '',
+            '### Competitive Moat',
+            '',
+            '| Dimension | Strength | Evidence |',
+            '|-----------|----------|----------|',
+            '| Data moat | **Strong** | 45M+ lines of proprietary training data from 14 enterprise deployments |',
+            '| Switching costs | **High** | 6-month integration cycle, custom rule libraries per client |',
+            '| IP protection | **Strong** | 14 patents filed (2 granted), novel AST transformation approach |',
+            '| Network effects | Moderate | Each deployment improves accuracy for similar codebases |',
+            '',
+            '## Risk Assessment',
+            '',
+            '| Dimension | Score | Key Factors |',
+            '|-----------|-------|-------------|',
+            '| Financial | 4/5 | Strong unit economics (4.8x LTV:CAC), 14-month runway concern |',
+            '| Legal | 4/5 | Clean cap table, full IP coverage, SOC 2 in progress |',
+            '| Team | 4/5 | Exceptional founders, VP Sales and Head of CS hires needed |',
+            '| Market | 3/5 | Large TAM but CodeMorph ($45M Series B) is aggressive |',
+            '| **Overall** | **4/5** | **Low Risk — conditional on key milestones** |',
+            '',
+            '## Key Risks & Mitigations',
+            '',
+            '1. **Runway pressure** — 14 months at current burn. *Mitigation: Series A extends to 24+ months*',
+            '2. **Revenue concentration** — Top 3 clients = 47% ARR. *Mitigation: VP Sales hire to diversify pipeline*',
+            '3. **Competitive threat** — CodeMorph raising aggressively. *Mitigation: accuracy advantage is durable, enterprise switching costs are high*',
+            '4. **Key person risk** — Dr. Patel holds critical IP knowledge. *Mitigation: patent codification + cross-training already underway*',
+            '',
+            '## Proposed Terms',
+            '',
+            '- **Investment:** $15M Series A',
+            '- **Pre-money valuation:** $75M (31x ARR)',
+            '- **Ownership:** ~17% post-money',
+            '- **Board seat:** 1 board seat + 1 observer',
+            '- **Key milestones:**',
+            '  - VP Sales hired within 90 days',
+            '  - SOC 2 Type II certified by Q3 2025',
+            '  - $5M ARR by month 12',
+            '',
+            '---',
+            '',
+            '*This memo was generated by the ForgeFlow Due Diligence pipeline, incorporating automated market research, financial modeling, legal review, and team assessment.*',
+          ].join('\n'),
+          'term_sheet_draft.md': [
+            '# Term Sheet — Series A Investment',
+            '',
+            '**Company:** NovaBridge AI, Inc. (Delaware C-Corp)  ',
+            '**Investor(s):** [Fund Name]  ',
+            '**Date:** March 2026  ',
+            '',
+            '> **Note:** This is a non-binding summary of proposed terms, subject to due diligence completion and legal review.',
+            '',
+            '---',
+            '',
+            '## Economics',
+            '',
+            '| Term | Details |',
+            '|------|---------|',
+            '| **Round Size** | $15,000,000 |',
+            '| **Pre-Money Valuation** | $75,000,000 |',
+            '| **Post-Money Valuation** | $90,000,000 |',
+            '| **Price Per Share** | $12.50 (Series A Preferred) |',
+            '| **Shares Issued** | 1,200,000 |',
+            '| **Lead Investor Allocation** | $10,000,000 (66.7%) |',
+            '| **Option Pool Expansion** | Increase to 12% pre-money (from 7% unallocated) |',
+            '',
+            '## Governance',
+            '',
+            '| Term | Details |',
+            '|------|---------|',
+            '| **Board Composition** | 5 seats: 2 Founders, 1 Lead Investor, 1 Independent, 1 Common |',
+            '| **Observer Rights** | 1 observer seat for co-investors with >$2M participation |',
+            '| **Protective Provisions** | Standard — sale of company, new equity issuance, debt >$500K |',
+            '| **Information Rights** | Monthly financials, quarterly board updates, annual audit |',
+            '',
+            '## Investor Protections',
+            '',
+            '| Term | Details |',
+            '|------|---------|',
+            '| **Liquidation Preference** | 1x non-participating preferred |',
+            '| **Anti-Dilution** | Broad-based weighted average |',
+            '| **Pro-Rata Rights** | Yes, for investors with >$2M participation |',
+            '| **Drag-Along** | Standard (majority preferred + majority common) |',
+            '| **Right of First Refusal** | Company, then investors, on secondary transfers |',
+            '',
+            '## Conditions Precedent',
+            '',
+            '1. Completion of confirmatory legal due diligence',
+            '2. VP Sales hire offer extended within 90 days of close',
+            '3. SOC 2 Type II audit engagement letter signed prior to close',
+            '4. Key employee retention agreements for 3 founders (24-month cliff on acceleration)',
+            '5. Satisfactory reference checks with 3 largest customers',
+            '',
+            '## Milestone-Based Provisions',
+            '',
+            '| Milestone | Deadline | Consequence |',
+            '|-----------|----------|-------------|',
+            '| VP Sales hired | Close + 90 days | Triggers $2M tranche release |',
+            '| SOC 2 Type II certified | Close + 6 months | Required for enterprise pipeline |',
+            '| $5M ARR achieved | Close + 12 months | Triggers valuation ratchet protection |',
+            '',
+            '---',
+            '',
+            '*This term sheet is non-binding and subject to negotiation, definitive documentation, and approval by all parties.*',
+          ].join('\n'),
+        },
+        cost: { turns: 28, usd: 2.20 },
+        verbose: {
+          textBlocks: [
+            'Drafting investment memo — assembling executive summary, thesis, and risk analysis...',
+            'Writing competitive moat assessment and proposed terms section...',
+            'Generating term sheet with economics, governance, and milestone provisions...',
+            'Final deliverables complete — investment memo and term sheet draft ready for review.',
+          ],
+          delayMs: 50,
+        },
+      }],
+    ]);
+  }
+
+  private buildInterruptTestKitchenMocks(): Map<string, MockBehavior> {
+    return new Map<string, MockBehavior>([
+      ['draft_content', {
+        outputFiles: {
+          'blog_draft.md': '# The Future of AI in Code Migration\n\nAI-powered code migration is transforming how enterprises modernize legacy systems...\n\n## Key Trends\n\n1. Accuracy rates have improved from 40% to 89% in two years\n2. Enterprise adoption is accelerating due to regulatory pressure\n3. The total addressable market exceeds $87B globally\n\n## Conclusion\n\nOrganizations that delay modernization face increasing operational risk and talent shortages in legacy languages.',
+        },
+        cost: { turns: 10, usd: 0.75 },
+        verbose: true,
+      }],
+      ['research_facts', {
+        outputFiles: {
+          'research_notes.json': JSON.stringify({ facts: ['70% of Fortune 500 still run COBOL', 'Average COBOL programmer age is 55+', 'EU DORA mandates modernization by 2027'] }, null, 2),
+        },
+        cost: { turns: 6, usd: 0.40 },
+        verbose: true,
+      }],
+      ['write_outline', {
+        outputFiles: {
+          'outline.json': JSON.stringify({ sections: [{ title: 'Introduction', points: ['Hook', 'Context'] }, { title: 'Body', points: ['Key trends', 'Case studies'] }, { title: 'Conclusion', points: ['Call to action'] }] }, null, 2),
+        },
+        cost: { turns: 5, usd: 0.35 },
+        verbose: true,
+      }],
+    ]);
   }
 }
 
