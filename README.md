@@ -1,5 +1,10 @@
 # ForgeFlow
 
+
+Demo: https://x.com/MatthewLones/status/2039537582095151209?s=20
+
+
+
 A programming language and IDE for building AI agents. Crystallize any repeatable professional process — contract review, insurance claims, permit analysis — into a structured, executable workflow that Claude runs with human oversight at every step.
 
 ## Why ForgeFlow?
